@@ -1,0 +1,94 @@
+import type { Post } from "@/types/post";
+import { PostCard } from "./PostCard";
+
+// Mock data for now — swap for a real fetch once the API's ready.
+// Sorted chronologically, newest first. No ranking logic on purpose.
+const mockPosts: Post[] = [
+  {
+    id: "1",
+    author: {
+      username: "glowbyash",
+      avatarSrc: "/mock/avatar-1.webp",
+      toneTag: "Combination skin",
+    },
+    media: {
+      id: "m1",
+      type: "image",
+      src: "/mock/post-1.webp",
+      alt: "Finished soft glam look",
+    },
+    products: [
+      { id: "p1", label: "Foundation: Fenty Pro Filt'r 240" },
+      { id: "p2", label: "Concealer: NARS Radiant Creamy" },
+      { id: "p3", label: "Lip: Rare Beauty Lip Soufflé" },
+    ],
+    caption:
+      "Soft glam for date night, took me 20 minutes tonight and I'm obsessed with how the base sat all evening.",
+    likeCount: 214,
+    commentCount: 18,
+    createdAt: "2026-07-15T20:00:00Z",
+  },
+  {
+    id: "2",
+    author: { username: "skinbytemi", avatarSrc: "/mock/avatar-2.webp" },
+    media: {
+      id: "m2",
+      type: "before_after",
+      before: { src: "/mock/before-2.webp", alt: "Skin before routine" },
+      after: { src: "/mock/after-2.webp", alt: "Skin after 6 weeks" },
+    },
+    products: [{ id: "p4", label: "Serum: The Ordinary Niacinamide 10%" }],
+    caption:
+      "6 weeks of consistent niacinamide + spf. Texture is finally calming down.",
+    likeCount: 892,
+    commentCount: 64,
+    createdAt: "2026-07-15T14:30:00Z",
+  },
+  {
+    id: "3",
+    author: { username: "northofnorml", avatarSrc: "/mock/avatar-3.webp" },
+    media: {
+      id: "m3",
+      type: "carousel",
+      items: [
+        { src: "/mock/carousel-3a.webp", alt: "Step 1" },
+        { src: "/mock/carousel-3b.webp", alt: "Step 2" },
+        { src: "/mock/carousel-3c.webp", alt: "Final look" },
+      ],
+    },
+    caption:
+      "Three products, no primer, still lasted through Lagos heat all day.",
+    likeCount: 133,
+    commentCount: 9,
+    createdAt: "2026-07-14T18:00:00Z",
+  },
+  {
+    id: "4",
+    author: { username: "grwmwithnaomi", avatarSrc: "/mock/avatar-4.webp" },
+    media: {
+      id: "m4",
+      type: "video",
+      src: "/mock/grwm-4.mp4",
+      poster: "/mock/grwm-4-poster.webp",
+    },
+    products: [
+      { id: "p5", label: "Brow: Anastasia Brow Freeze" },
+      { id: "p6", label: "Blush: Milk Cooling Water" },
+    ],
+    caption:
+      "GRWM for a rooftop birthday dinner, full routine start to finish.",
+    likeCount: 1420,
+    commentCount: 203,
+    createdAt: "2026-07-14T09:00:00Z",
+  },
+];
+
+export function HomeFeed() {
+  return (
+    <div className="flex flex-col">
+      {mockPosts.map((post) => (
+        <PostCard key={post.id} post={post} />
+      ))}
+    </div>
+  );
+}
