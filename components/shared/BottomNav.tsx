@@ -25,7 +25,7 @@ export function BottomNav() {
 
   return (
     <nav
-      className="fixed bottom-0 left-0 right-0 z-50 flex h-12 pb-[env(safe-area-inset-bottom)] items-stretch border-t border-t-gray-200 bg-white"
+      className="fixed bottom-0 left-0 right-0 z-50 flex h-14 pb-[env(safe-area-inset-bottom)] items-stretch border-t border-t-gray-200 bg-white"
       aria-label="Primary"
     >
       {tabs.map(({ id, label, href, icon: Icon }) => {
