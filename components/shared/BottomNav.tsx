@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  BellIcon,
   BookmarkSimpleIcon,
   HouseIcon,
   MagnifyingGlassIcon,
@@ -19,6 +20,12 @@ const tabs = [
     icon: MagnifyingGlassIcon,
   },
   { id: "saved", label: "Saved", href: PATHS.SAVED, icon: BookmarkSimpleIcon },
+  {
+    id: "notifications",
+    label: "Notifications",
+    href: PATHS.NOTIFICATIONS,
+    icon: BellIcon,
+  },
   {
     id: "profile",
     label: "Profile",
