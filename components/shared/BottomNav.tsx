@@ -6,6 +6,7 @@ import {
   BookmarkSimpleIcon,
   HouseIcon,
   MagnifyingGlassIcon,
+  UserIcon,
 } from "@phosphor-icons/react";
 import { PATHS } from "@/utils/paths";
 
@@ -18,6 +19,12 @@ const tabs = [
     icon: MagnifyingGlassIcon,
   },
   { id: "saved", label: "Saved", href: PATHS.SAVED, icon: BookmarkSimpleIcon },
+  {
+    id: "profile",
+    label: "Profile",
+    href: PATHS.PROFILE,
+    icon: UserIcon,
+  },
 ] as const;
 
 export function BottomNav() {
@@ -25,7 +32,7 @@ export function BottomNav() {
 
   return (
     <nav
-      className="fixed bottom-0 left-0 right-0 z-50 flex h-14 pb-[env(safe-area-inset-bottom)] items-stretch border-t border-t-gray-200 bg-white"
+      className="fixed bottom-0 left-0 right-0 z-50 flex h-14 pb-[env(safe-area-inset-bottom)] items-stretch border-t border-gray-200 bg-white"
       aria-label="Primary"
     >
       {tabs.map(({ id, label, href, icon: Icon }) => {
@@ -39,7 +46,7 @@ export function BottomNav() {
             className="flex flex-1 items-center justify-center transition-transform duration-100 active:scale-90"
           >
             <Icon
-              size={24}
+              className="size-6 sm:size-6.5"
               weight={
                 isActive ? (id != "explore" ? "fill" : "bold") : "regular"
               }
