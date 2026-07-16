@@ -1,24 +1,40 @@
 @import "tailwindcss";
 
-/* :root {
-  --background: #ffffff;
-  --foreground: #171717;
-} */
+@custom-variant dark (&:where(.dark, .dark *));
 
-@theme inline {
-  /* --color-background: var(--background);
-  --color-foreground: var(--foreground); */
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+:root {
+  --background: #ffffff;
+  --foreground: #000000;
 }
 
-/* @media (prefers-color-scheme: dark) {
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  --font-inter: var(--font-inter);
+}
+
+@media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #000000;
+    --foreground: #ffffff;
   }
-} */
+}
+
+.dark {
+  --background: #000000;
+  --foreground: #ffffff;
+}
+
+.light {
+  --background: #ffffff;
+  --foreground: #000000;
+}
 
 body {
-  @apply text-black bg-white;
+  @apply text-foreground bg-background font-inter;
+}
+
+button {
+  @apply cursor-pointer;
 }
