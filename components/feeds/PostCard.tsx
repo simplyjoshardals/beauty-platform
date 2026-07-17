@@ -48,11 +48,9 @@ export function PostCard({ post }: { post: Post }) {
   }
 
   function toggleLike() {
-    setLiked((prev) => {
-      const next = !prev;
-      setLikeCount((c) => c + (next ? 1 : -1));
-      return next;
-    });
+    const nextLiked = !liked;
+    setLiked(nextLiked);
+    setLikeCount((c) => c + (nextLiked ? 1 : -1));
   }
 
   // Double tap always likes — it never unlikes, matching the IG primitive.

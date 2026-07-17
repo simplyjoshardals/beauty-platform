@@ -2,17 +2,21 @@
 
 import { useEffect, useRef, useState } from "react";
 import { SpeakerHighIcon, SpeakerSlashIcon } from "@phosphor-icons/react";
-import { FullscreenVideoModal } from "./FullscreenVideoModal";
+
+// iOS Safari doesn't support the standard Fullscreen API on <video> — it
+// has its own native fullscreen player entry point instead.
+type VideoWithSafariFullscreen = HTMLVideoElement & {
+  webkitEnterFullscreen?: () => void;
+};
 
 export function VideoPost({ src, poster }: { src: string; poster: string }) {
   const [muted, setMuted] = useState(true);
-  const [fullscreenOpen, setFullscreenOpen] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Only play once the video is actually visible — otherwise it starts the
-  // instant it mounts, blows past the poster before anyone scrolls to it,
-  // and every video in the feed ends up playing off-screen at once.
+  // Autoplay only while actually visible in the feed — pauses once
+  // scrolled off-screen, instead of every video in the feed playing at once.
   useEffect(() => {
     const videoEl = videoRef.current;
     const containerEl = containerRef.current;
@@ -22,7 +26,7 @@ export function VideoPost({ src, poster }: { src: string; poster: string }) {
       ([entry]) => {
         if (entry.isIntersecting) {
           videoEl.play().catch(() => {});
-        } else {
+        } else if (document.fullscreenElement !== videoEl) {
           videoEl.pause();
         }
       },
@@ -33,36 +37,47 @@ export function VideoPost({ src, poster }: { src: string; poster: string }) {
     return () => observer.disconnect();
   }, []);
 
-  function openFullscreen() {
-    videoRef.current?.pause();
-    setFullscreenOpen(true);
-  }
+  // Track fullscreen state from the browser itself rather than guessing —
+  // this covers exiting via swipe-down, Escape, back gesture, etc. for free.
+  useEffect(() => {
+    function handleFullscreenChange() {
+      const inFullscreen = document.fullscreenElement === videoRef.current;
+      setIsFullscreen(inFullscreen);
+      setMuted(!inFullscreen); // silent in-feed, audible once actually watching
+    }
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () =>
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
 
-  function handleFullscreenClose(finalTime: number) {
-    setFullscreenOpen(false);
-    const el = videoRef.current;
-    if (el) {
-      el.currentTime = finalTime;
-      el.play().catch(() => {});
+  function openFullscreen() {
+    const el = videoRef.current as VideoWithSafariFullscreen | null;
+    if (!el) return;
+
+    if (el.requestFullscreen) {
+      el.requestFullscreen();
+    } else if (el.webkitEnterFullscreen) {
+      el.webkitEnterFullscreen();
+      setIsFullscreen(true);
+      setMuted(false);
     }
   }
 
   return (
-    <>
-      <div
-        ref={containerRef}
-        className="relative aspect-9/16 w-full bg-black"
-      >
-        <video
-          ref={videoRef}
-          src={src}
-          poster={poster}
-          className="h-full w-full object-cover"
-          muted={muted}
-          loop
-          playsInline
-          onClick={openFullscreen}
-        />
+    <div ref={containerRef} className="relative aspect-9/16 w-full bg-black">
+      <video
+        ref={videoRef}
+        src={src}
+        poster={poster}
+        className="h-full w-full object-cover"
+        muted={muted}
+        loop
+        playsInline
+        controls={isFullscreen}
+        onClick={!isFullscreen ? openFullscreen : undefined}
+      />
+
+      {!isFullscreen && (
         <button
           type="button"
           onClick={(e) => {
@@ -70,7 +85,7 @@ export function VideoPost({ src, poster }: { src: string; poster: string }) {
             setMuted((m) => !m);
           }}
           aria-label={muted ? "Unmute video" : "Mute video"}
-          className="absolute bottom-3 right-3 flex size-8 items-center justify-center rounded-full bg-black/50 text-white active:scale-90 transition-transform"
+          className="absolute bottom-3 right-3 flex size-8 items-center justify-center rounded-full bg-black/50 text-white transition-transform active:scale-90"
         >
           {muted ? (
             <SpeakerSlashIcon size={16} />
@@ -78,16 +93,7 @@ export function VideoPost({ src, poster }: { src: string; poster: string }) {
             <SpeakerHighIcon size={16} />
           )}
         </button>
-      </div>
-
-      {fullscreenOpen && (
-        <FullscreenVideoModal
-          src={src}
-          poster={poster}
-          startTime={videoRef.current?.currentTime ?? 0}
-          onClose={handleFullscreenClose}
-        />
       )}
-    </>
+    </div>
   );
 }

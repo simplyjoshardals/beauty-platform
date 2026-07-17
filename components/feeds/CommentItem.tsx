@@ -42,11 +42,9 @@ export function CommentItem({
   );
 
   function toggleLike() {
-    setLiked((prev) => {
-      const next = !prev;
-      setCount((c) => c + (next ? 1 : -1));
-      return next;
-    });
+    const nextLiked = !liked;
+    setLiked(nextLiked);
+    setCount((c) => c + (nextLiked ? 1 : -1));
   }
 
   return (
