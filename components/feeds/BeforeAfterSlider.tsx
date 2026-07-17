@@ -58,7 +58,7 @@ export function BeforeAfterSlider({
         className="absolute inset-y-0 w-0.5 bg-white"
         style={{ left: `${position}%` }}
       >
-        <div className="absolute left-1/2 top-1/2 flex size-8 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-white text-xs shadow">
+        <div className="absolute text-black left-1/2 top-1/2 flex size-8 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-white text-xs shadow">
           ↔
         </div>
       </div>

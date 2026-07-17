@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import { XIcon, PaperPlaneRightIcon } from "@phosphor-icons/react";
 import type { Comment } from "@/types/comment";
 import { CURRENT_USER } from "@/constants/currentUser";
+import { sortByAuthorEngagement } from "@/utils/sortComments";
 import { CommentItem } from "./CommentItem";
 
 type Props = {
@@ -28,17 +29,12 @@ export function CommentSheet({
   } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Author's own comments always lead — filter preserves relative order
-  // within each group, so it's a stable sort, not a full re-shuffle.
-  const sortedComments = useMemo(() => {
-    const authorComments = comments.filter(
-      (c) => c.author.username === postAuthorUsername,
-    );
-    const otherComments = comments.filter(
-      (c) => c.author.username !== postAuthorUsername,
-    );
-    return [...authorComments, ...otherComments];
-  }, [comments, postAuthorUsername]);
+  // Author's own comments lead, then threads they've replied to, then
+  // untouched comments — see sortByAuthorEngagement for the tier logic.
+  const sortedComments = useMemo(
+    () => sortByAuthorEngagement(comments, postAuthorUsername),
+    [comments, postAuthorUsername],
+  );
 
   if (!open) return null;
 

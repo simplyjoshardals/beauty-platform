@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Image from "next/image";
 import { HeartIcon } from "@phosphor-icons/react";
 import type { Comment } from "@/types/comment";
 import { getRelativeTime } from "@/utils/time";
+import { sortAuthorFirst } from "@/utils/sortComments";
 
 type Props = {
   comment: Comment;
@@ -31,6 +32,14 @@ export function CommentItem({
   const isAuthor = comment.author.username === postAuthorUsername;
   const isReply = topLevelId !== undefined;
   const replyTargetId = topLevelId ?? comment.id;
+
+  const sortedReplies = useMemo(
+    () =>
+      comment.replies
+        ? sortAuthorFirst(comment.replies, postAuthorUsername)
+        : [],
+    [comment.replies, postAuthorUsername],
+  );
 
   function toggleLike() {
     setLiked((prev) => {
@@ -97,7 +106,7 @@ export function CommentItem({
           {repliesExpanded ? (
             <>
               <div className="flex flex-col gap-2 border-l border-foreground/10 pl-3">
-                {comment.replies.map((reply) => (
+                {sortedReplies.map((reply) => (
                   <CommentItem
                     key={reply.id}
                     comment={reply}
