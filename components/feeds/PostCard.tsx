@@ -100,9 +100,9 @@ export function PostCard({ post }: { post: Post }) {
         {post.media.type === "carousel" && (
           <Carousel items={post.media.items} />
         )}
-        {/* {post.media.type === "video" && (
+        {post.media.type === "video" && (
           <VideoPost src={post.media.src} poster={post.media.poster} />
-        )} */}
+        )}
         {post.media.type === "before_after" && (
           <BeforeAfterSlider
             before={post.media.before}
