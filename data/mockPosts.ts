@@ -1,9 +1,10 @@
 import type { Post } from "@/types/post";
-import { PostCard } from "./PostCard";
 
 // Mock data for now — swap for a real fetch once the API's ready.
 // Sorted chronologically, newest first. No ranking logic on purpose.
-const mockPosts: Post[] = [
+// Lives here (not inside HomeFeed) so the single-post route can look up
+// an individual post by id without duplicating this list.
+export const mockPosts: Post[] = [
   {
     id: "1",
     author: {
@@ -130,13 +131,3 @@ const mockPosts: Post[] = [
     createdAt: "2026-07-14T09:00:00Z",
   },
 ];
-
-export function HomeFeed() {
-  return (
-    <div className="flex flex-col">
-      {mockPosts.map((post) => (
-        <PostCard key={post.id} post={post} />
-      ))}
-    </div>
-  );
-}

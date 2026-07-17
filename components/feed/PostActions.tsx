@@ -13,6 +13,7 @@ type Props = {
   onToggleLike: () => void;
   onToggleSave: () => void;
   onCommentPress: () => void;
+  onSharePress: () => void;
 };
 
 // Controlled by the parent PostCard so the double-tap-to-like gesture on the
@@ -25,6 +26,7 @@ export function PostActions({
   onToggleLike,
   onToggleSave,
   onCommentPress,
+  onSharePress,
 }: Props) {
   return (
     <div className="flex items-center gap-4 px-3 py-2">
@@ -54,6 +56,7 @@ export function PostActions({
 
       <button
         type="button"
+        onClick={onSharePress}
         aria-label="Share"
         className="transition-transform active:scale-90"
       >

@@ -2,7 +2,7 @@
 //   return <div className="h-dvh">Home page</div>;
 // }
 
-import { HomeFeed } from "@/components/feeds/HomeFeed";
+import { HomeFeed } from "@/components/feed/HomeFeed";
 
 export default function HomeFeedPage() {
   return (

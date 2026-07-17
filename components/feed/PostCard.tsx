@@ -14,6 +14,7 @@ import { ProductChips } from "./ProductChips";
 import { PostActions } from "./PostActions";
 import { PostCaption } from "./PostCaption";
 import { CommentSheet } from "./CommentSheet";
+import { ShareMenu } from "./ShareMenu";
 
 export function PostCard({ post }: { post: Post }) {
   const [liked, setLiked] = useState(false);
@@ -23,6 +24,34 @@ export function PostCard({ post }: { post: Post }) {
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [comments, setComments] = useState<Comment[]>(post.comments ?? []);
   const [commentCount, setCommentCount] = useState(post.commentCount);
+  const [shareMenuOpen, setShareMenuOpen] = useState(false);
+
+  const shareUrl =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/p/${post.id}`
+      : `/p/${post.id}`;
+
+  async function handleSharePress() {
+    // Feature-detect first: if the browser/OS supports the native share
+    // sheet, use it — that's the better experience (real share targets,
+    // not just a link). Only fall back to our own menu if it's unavailable.
+    if (typeof navigator.share === "function") {
+      try {
+        await navigator.share({
+          title: `${post.author.username} on Vanity`,
+          url: shareUrl,
+        });
+      } catch (err) {
+        // AbortError just means the person closed the native sheet
+        // themselves — not a real failure, nothing to handle.
+        if ((err as Error)?.name !== "AbortError") {
+          console.error("Share failed", err);
+        }
+      }
+    } else {
+      setShareMenuOpen(true);
+    }
+  }
 
   function handleAddComment(text: string, parentId?: string) {
     const newComment: Comment = {
@@ -130,6 +159,7 @@ export function PostCard({ post }: { post: Post }) {
         onToggleLike={toggleLike}
         onToggleSave={() => setSaved((s) => !s)}
         onCommentPress={() => setCommentsOpen(true)}
+        onSharePress={handleSharePress}
       />
 
       <PostCaption username={post.author.username} text={post.caption} />
@@ -147,6 +177,12 @@ export function PostCard({ post }: { post: Post }) {
         comments={comments}
         onAddComment={handleAddComment}
         postAuthorUsername={post.author.username}
+      />
+
+      <ShareMenu
+        open={shareMenuOpen}
+        onClose={() => setShareMenuOpen(false)}
+        url={shareUrl}
       />
     </article>
   );
