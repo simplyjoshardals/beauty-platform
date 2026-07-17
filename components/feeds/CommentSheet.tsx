@@ -1,0 +1,161 @@
+"use client";
+
+import { useMemo, useRef, useState } from "react";
+import { XIcon, PaperPlaneRightIcon } from "@phosphor-icons/react";
+import type { Comment } from "@/types/comment";
+import { CURRENT_USER } from "@/constants/currentUser";
+import { CommentItem } from "./CommentItem";
+
+type Props = {
+  open: boolean;
+  onClose: () => void;
+  comments: Comment[];
+  onAddComment: (text: string, parentId?: string) => void;
+  postAuthorUsername: string;
+};
+
+export function CommentSheet({
+  open,
+  onClose,
+  comments,
+  onAddComment,
+  postAuthorUsername,
+}: Props) {
+  const [draft, setDraft] = useState("");
+  const [replyingTo, setReplyingTo] = useState<{
+    topLevelId: string;
+    username: string;
+  } | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Author's own comments always lead — filter preserves relative order
+  // within each group, so it's a stable sort, not a full re-shuffle.
+  const sortedComments = useMemo(() => {
+    const authorComments = comments.filter(
+      (c) => c.author.username === postAuthorUsername,
+    );
+    const otherComments = comments.filter(
+      (c) => c.author.username !== postAuthorUsername,
+    );
+    return [...authorComments, ...otherComments];
+  }, [comments, postAuthorUsername]);
+
+  if (!open) return null;
+
+  function handleReplyPress(topLevelId: string, username: string) {
+    setReplyingTo({ topLevelId, username });
+    setDraft("");
+    inputRef.current?.focus();
+  }
+
+  function cancelReply() {
+    setReplyingTo(null);
+    setDraft("");
+  }
+
+  function handleSubmit() {
+    const trimmed = draft.trim();
+    if (!trimmed) return;
+    // The @mention is stitched on here, never in the editable field itself —
+    // that's what makes it impossible for the user to backspace out.
+    // Skipped entirely when replying to your own comment — mentioning
+    // yourself is just noise.
+    const isReplyingToSelf = replyingTo?.username === CURRENT_USER.username;
+    const finalText =
+      replyingTo && !isReplyingToSelf
+        ? `@${replyingTo.username} ${trimmed}`
+        : trimmed;
+    onAddComment(finalText, replyingTo?.topLevelId);
+    setDraft("");
+    setReplyingTo(null);
+  }
+
+  return (
+    <div className="fixed inset-0 z-60 flex items-end">
+      <div
+        className="absolute inset-0 bg-black/40"
+        onClick={onClose}
+        aria-hidden
+      />
+
+      <div className="relative flex h-[80dvh] w-full flex-col rounded-t-2xl bg-background">
+        <div className="relative flex items-center justify-center border-b border-foreground/10 py-3">
+          <span className="text-sm font-medium">Comments</span>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close comments"
+            className="absolute right-3 top-1/2 -translate-y-1/2"
+          >
+            <XIcon size={20} className="text-foreground" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto py-1">
+          {sortedComments.length === 0 ? (
+            <p className="px-3 py-8 text-center text-sm text-foreground/50">
+              No comments yet. Say something nice.
+            </p>
+          ) : (
+            sortedComments.map((c) => (
+              <CommentItem
+                key={c.id}
+                comment={c}
+                postAuthorUsername={postAuthorUsername}
+                onReplyPress={handleReplyPress}
+              />
+            ))
+          )}
+        </div>
+
+        {replyingTo && (
+          <div className="flex items-center justify-between border-t border-foreground/10 px-3 py-1.5 text-xs text-foreground/50">
+            <span>
+              {replyingTo.username === CURRENT_USER.username ? (
+                "Replying to your comment"
+              ) : (
+                <>
+                  Replying to{" "}
+                  <span className="font-medium">@{replyingTo.username}</span>
+                </>
+              )}
+            </span>
+            <button
+              type="button"
+              onClick={cancelReply}
+              aria-label="Cancel reply"
+            >
+              <XIcon size={14} />
+            </button>
+          </div>
+        )}
+
+        <div className="flex items-center gap-2 border-t border-foreground/10 px-3 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
+          <input
+            ref={inputRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+            placeholder={
+              replyingTo
+                ? replyingTo.username === CURRENT_USER.username
+                  ? "Add to your comment…"
+                  : `Reply to @${replyingTo.username}…`
+                : "Add a comment…"
+            }
+            className="flex-1 rounded-full border border-foreground/15 bg-transparent px-3 py-2 text-sm outline-none"
+          />
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={!draft.trim()}
+            aria-label="Post comment"
+            className="flex size-9 items-center justify-center text-foreground disabled:opacity-30"
+          >
+            <PaperPlaneRightIcon size={20} weight="fill" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

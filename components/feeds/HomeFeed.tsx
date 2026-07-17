@@ -26,6 +26,31 @@ const mockPosts: Post[] = [
       "Soft glam for date night, took me 20 minutes tonight and I'm obsessed with how the base sat all evening.",
     likeCount: 214,
     commentCount: 18,
+    comments: [
+      {
+        id: "c1",
+        author: { username: "tobiwears", avatarSrc: "/mock/avatar-5.webp" },
+        text: "the blend on your cheek is unreal, what brush?",
+        likeCount: 4,
+        createdAt: "2026-07-15T20:45:00Z",
+        replies: [
+          {
+            id: "c1r1",
+            author: { username: "glowbyash", avatarSrc: "/mock/avatar-1.webp" },
+            text: "a cheap synthetic one honestly, technique matters more",
+            likeCount: 9,
+            createdAt: "2026-07-15T20:52:00Z",
+          },
+        ],
+      },
+      {
+        id: "c2",
+        author: { username: "glowbyash", avatarSrc: "/mock/avatar-1.webp" },
+        text: "thank youuu 🥹",
+        likeCount: 12,
+        createdAt: "2026-07-15T21:02:00Z",
+      },
+    ],
     createdAt: "2026-07-15T20:00:00Z",
   },
   {

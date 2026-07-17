@@ -4,18 +4,48 @@ import { useState } from "react";
 import Image from "next/image";
 import { DotsThreeIcon, HeartIcon } from "@phosphor-icons/react";
 import type { Post } from "@/types/post";
+import type { Comment } from "@/types/comment";
+import { getRelativeTime } from "@/utils/time";
+import { CURRENT_USER } from "@/constants/currentUser";
 import { Carousel } from "./Carousel";
 import { VideoPost } from "./VideoPost";
 import { BeforeAfterSlider } from "./BeforeAfterSlider";
 import { ProductChips } from "./ProductChips";
 import { PostActions } from "./PostActions";
 import { PostCaption } from "./PostCaption";
+import { CommentSheet } from "./CommentSheet";
 
 export function PostCard({ post }: { post: Post }) {
   const [liked, setLiked] = useState(false);
   const [saved, setSaved] = useState(false);
   const [likeCount, setLikeCount] = useState(post.likeCount);
   const [showHeartPop, setShowHeartPop] = useState(false);
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [comments, setComments] = useState<Comment[]>(post.comments ?? []);
+  const [commentCount, setCommentCount] = useState(post.commentCount);
+
+  function handleAddComment(text: string, parentId?: string) {
+    const newComment: Comment = {
+      id: crypto.randomUUID(),
+      author: CURRENT_USER,
+      text,
+      likeCount: 0,
+      createdAt: new Date().toISOString(),
+    };
+
+    if (!parentId) {
+      setComments((prev) => [...prev, newComment]);
+    } else {
+      setComments((prev) =>
+        prev.map((c) =>
+          c.id === parentId
+            ? { ...c, replies: [...(c.replies ?? []), newComment] }
+            : c,
+        ),
+      );
+    }
+    setCommentCount((c) => c + 1);
+  }
 
   function toggleLike() {
     setLiked((prev) => {
@@ -98,12 +128,28 @@ export function PostCard({ post }: { post: Post }) {
         liked={liked}
         saved={saved}
         likeCount={likeCount}
-        commentCount={post.commentCount}
+        commentCount={commentCount}
         onToggleLike={toggleLike}
         onToggleSave={() => setSaved((s) => !s)}
+        onCommentPress={() => setCommentsOpen(true)}
       />
 
       <PostCaption username={post.author.username} text={post.caption} />
+
+      <time
+        dateTime={post.createdAt}
+        className="block px-3 pb-3 text-[11px] uppercase tracking-wide text-foreground/40"
+      >
+        {getRelativeTime(post.createdAt)}
+      </time>
+
+      <CommentSheet
+        open={commentsOpen}
+        onClose={() => setCommentsOpen(false)}
+        comments={comments}
+        onAddComment={handleAddComment}
+        postAuthorUsername={post.author.username}
+      />
     </article>
   );
 }

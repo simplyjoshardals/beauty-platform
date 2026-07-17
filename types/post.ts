@@ -1,3 +1,5 @@
+import type { Comment } from "./comment";
+
 export type ProductTag = {
   id: string;
   label: string; // e.g. "Foundation: Fenty Pro Filt'r 240" — kept as plain text for v1, no linking/e-commerce yet
@@ -23,5 +25,6 @@ export type Post = {
   caption: string;
   likeCount: number;
   commentCount: number;
+  comments?: Comment[]; // seed/existing comments, if any
   createdAt: string; // ISO — used for chronological sort
 };
