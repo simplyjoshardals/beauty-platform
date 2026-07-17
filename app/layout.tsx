@@ -45,7 +45,7 @@ export default function RootLayout({
       </head>
       <body className="min-h-full flex flex-col">
         <TopNav />
-        <main className="flex-1 pt-[calc(3.5rem+env(safe-area-inset-top))] pb-[calc(3.5rem+env(safe-area-inset-bottom))] max-w-lg mx-auto">
+        <main className="flex-1 pt-[calc(3.5rem+env(safe-area-inset-top))] pb-[calc(3.5rem+env(safe-area-inset-bottom))]">
           {children}
         </main>
         <BottomNav />
