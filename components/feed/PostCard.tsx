@@ -28,8 +28,17 @@ export function PostCard({ post }: { post: Post }) {
   const [commentCount, setCommentCount] = useState(post.commentCount);
   const [shareMenuOpen, setShareMenuOpen] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
+  const [showCopiedToast, setShowCopiedToast] = useState(false);
   const { isFollowing, toggleFollow } = useFollow();
   const isOwnPost = post.author.username === CURRENT_USER.username;
+
+  // Copies immediately, unlike the Share button's flow — this is a direct
+  // "Copy link" menu action, not the native-share-or-fallback path.
+  async function handleCopyLinkFromOptions() {
+    await navigator.clipboard.writeText(shareUrl);
+    setShowCopiedToast(true);
+    window.setTimeout(() => setShowCopiedToast(false), 1500);
+  }
 
   const shareUrl =
     typeof window !== "undefined"
@@ -201,8 +210,16 @@ export function PostCard({ post }: { post: Post }) {
         isOwnPost={isOwnPost}
         isFollowing={isFollowing(post.author.username)}
         onToggleFollow={() => toggleFollow(post.author.username)}
-        onCopyLinkPress={() => setShareMenuOpen(true)}
+        onCopyLinkPress={handleCopyLinkFromOptions}
       />
+
+      {showCopiedToast && (
+        <div className="pointer-events-none fixed inset-x-0 bottom-24 z-90 mx-auto flex w-full max-w-lg justify-center px-4">
+          <div className="rounded-full bg-foreground px-4 py-2 text-sm text-background shadow-lg">
+            Link copied
+          </div>
+        </div>
+      )}
     </article>
   );
 }
