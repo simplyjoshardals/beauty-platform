@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
+import { useRef, useState, type ChangeEvent } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import {
@@ -12,6 +12,7 @@ import {
 } from "@phosphor-icons/react";
 import { usePosts } from "@/context/PostsProvider";
 import { CURRENT_USER } from "@/constants/currentUser";
+import { ProductTagEditor } from "@/components/shared/ProductTagEditor";
 import type { Post, PostMedia, ProductTag } from "@/types/post";
 
 type PostType = "photo" | "video" | "before_after";
@@ -28,7 +29,6 @@ export function CreatePostForm() {
   const [beforeUrl, setBeforeUrl] = useState<string | null>(null);
   const [afterUrl, setAfterUrl] = useState<string | null>(null);
   const [caption, setCaption] = useState("");
-  const [productDraft, setProductDraft] = useState("");
   const [products, setProducts] = useState<ProductTag[]>([]);
 
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -60,24 +60,6 @@ export function CreatePostForm() {
   function handleAfterSelected(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (file) setAfterUrl(URL.createObjectURL(file));
-  }
-
-  function addProduct() {
-    const label = productDraft.trim();
-    if (!label) return;
-    setProducts((prev) => [...prev, { id: crypto.randomUUID(), label }]);
-    setProductDraft("");
-  }
-
-  function removeProduct(id: string) {
-    setProducts((prev) => prev.filter((p) => p.id !== id));
-  }
-
-  function handleProductKeyDown(e: KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      addProduct();
-    }
   }
 
   function buildMedia(): PostMedia | null {
@@ -384,47 +366,12 @@ export function CreatePostForm() {
           className="mb-5 w-full resize-none rounded-lg border border-foreground/15 bg-transparent p-3 text-sm outline-none"
         />
 
-        <div>
-          <p className="mb-2 text-sm font-medium">Tag products</p>
-          <div className="flex gap-2">
-            <input
-              value={productDraft}
-              onChange={(e) => setProductDraft(e.target.value)}
-              onKeyDown={handleProductKeyDown}
-              placeholder="e.g. Foundation: Fenty Pro Filt'r 240"
-              className="flex-1 rounded-full border border-foreground/15 bg-transparent px-3 py-2 text-sm outline-none"
-            />
-            <button
-              type="button"
-              onClick={addProduct}
-              disabled={!productDraft.trim()}
-              aria-label="Add product tag"
-              className="flex size-9 shrink-0 items-center justify-center rounded-full border border-foreground/15 disabled:opacity-30"
-            >
-              <PlusIcon size={16} />
-            </button>
-          </div>
-
-          {products.length > 0 && (
-            <div className="mt-2.5 flex flex-wrap gap-2">
-              {products.map((p) => (
-                <span
-                  key={p.id}
-                  className="flex items-center gap-1.5 rounded-full border border-foreground/15 px-3 py-1 text-xs"
-                >
-                  {p.label}
-                  <button
-                    type="button"
-                    onClick={() => removeProduct(p.id)}
-                    aria-label={`Remove ${p.label}`}
-                  >
-                    <XIcon size={12} />
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
+        <ProductTagEditor
+          label="Tag products"
+          placeholder="e.g. Foundation: Fenty Pro Filt'r 240"
+          products={products}
+          onChange={setProducts}
+        />
       </div>
     </div>
   );

@@ -5,6 +5,7 @@ import { BottomNav } from "@/components/shared/BottomNav";
 import TopNav from "@/components/shared/TopNav";
 import { PostsProvider } from "@/context/PostsProvider";
 import { FollowProvider } from "@/context/FollowProvider";
+import { ProfileProvider } from "@/context/ProfileProvider";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -61,11 +62,13 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <PostsProvider>
           <FollowProvider>
-            <TopNav />
-            <main className="mx-auto w-full max-w-lg flex-1 pt-[calc(3.5rem+env(safe-area-inset-top))] pb-[calc(3.5rem+env(safe-area-inset-bottom))]">
-              {children}
-            </main>
-            <BottomNav />
+            <ProfileProvider>
+              <TopNav />
+              <main className="mx-auto w-full max-w-lg flex-1 pt-[calc(3.5rem+env(safe-area-inset-top))] pb-[calc(3.5rem+env(safe-area-inset-bottom))]">
+                {children}
+              </main>
+              <BottomNav />
+            </ProfileProvider>
           </FollowProvider>
         </PostsProvider>
       </body>

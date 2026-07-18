@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { XIcon, PaperPlaneRightIcon } from "@phosphor-icons/react";
 import type { Comment } from "@/types/comment";
 import { CURRENT_USER } from "@/constants/currentUser";
 import { sortByAuthorEngagement } from "@/utils/sortComments";
 import { CommentItem } from "./CommentItem";
+import { CommentSheetSkeleton } from "./CommentSheetSkeleton";
 
 type Props = {
   open: boolean;
@@ -28,6 +29,18 @@ export function CommentSheet({
     username: string;
   } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Simulated so the skeleton is actually visible — swap this whole effect
+  // for a real "comments are being fetched" flag once there's a real API.
+  // Resets each time the sheet opens since the component doesn't unmount
+  // between opens (it just returns null), so state would otherwise persist.
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    const timer = window.setTimeout(() => setLoading(false), 800);
+    return () => window.clearTimeout(timer);
+  }, [open]);
 
   // Author's own comments lead, then threads they've replied to, then
   // untouched comments — see sortByAuthorEngagement for the tier logic.
@@ -88,7 +101,9 @@ export function CommentSheet({
         </div>
 
         <div className="flex-1 overflow-y-auto py-1">
-          {sortedComments.length === 0 ? (
+          {loading ? (
+            <CommentSheetSkeleton />
+          ) : sortedComments.length === 0 ? (
             <p className="px-3 py-8 text-center text-sm text-foreground/50">
               No comments yet. Say something nice.
             </p>
