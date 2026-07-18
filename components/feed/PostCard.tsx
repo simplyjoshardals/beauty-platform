@@ -15,6 +15,8 @@ import { PostActions } from "./PostActions";
 import { PostCaption } from "./PostCaption";
 import { CommentSheet } from "./CommentSheet";
 import { ShareMenu } from "./ShareMenu";
+import { PostOptionsSheet } from "./PostOptionsSheet";
+import { useFollow } from "@/context/FollowProvider";
 
 export function PostCard({ post }: { post: Post }) {
   const [liked, setLiked] = useState(false);
@@ -25,6 +27,9 @@ export function PostCard({ post }: { post: Post }) {
   const [comments, setComments] = useState<Comment[]>(post.comments ?? []);
   const [commentCount, setCommentCount] = useState(post.commentCount);
   const [shareMenuOpen, setShareMenuOpen] = useState(false);
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  const { isFollowing, toggleFollow } = useFollow();
+  const isOwnPost = post.author.username === CURRENT_USER.username;
 
   const shareUrl =
     typeof window !== "undefined"
@@ -110,7 +115,12 @@ export function PostCard({ post }: { post: Post }) {
             </span>
           )}
         </div>
-        <button type="button" aria-label="More options" className="ml-auto p-2">
+        <button
+          type="button"
+          onClick={() => setOptionsOpen(true)}
+          aria-label="Post options"
+          className="ml-auto p-2"
+        >
           <DotsThreeIcon size={20} className="text-foreground" />
         </button>
       </header>
@@ -183,6 +193,15 @@ export function PostCard({ post }: { post: Post }) {
         open={shareMenuOpen}
         onClose={() => setShareMenuOpen(false)}
         url={shareUrl}
+      />
+
+      <PostOptionsSheet
+        open={optionsOpen}
+        onClose={() => setOptionsOpen(false)}
+        isOwnPost={isOwnPost}
+        isFollowing={isFollowing(post.author.username)}
+        onToggleFollow={() => toggleFollow(post.author.username)}
+        onCopyLinkPress={() => setShareMenuOpen(true)}
       />
     </article>
   );
