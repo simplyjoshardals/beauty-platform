@@ -57,6 +57,11 @@ export default function TopNav() {
     setIsDark(dark);
     document.documentElement.classList.remove("dark", "light");
     document.documentElement.classList.add(dark ? "dark" : "light");
+
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) {
+      meta.setAttribute("content", dark ? "#000000" : "#ffffff");
+    }
   }
 
   function toggleTheme() {

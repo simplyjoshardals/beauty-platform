@@ -22,11 +22,10 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
-
-  themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "white" },
-    { media: "(prefers-color-scheme: dark)", color: "black" },
-  ],
+  // Static fallback for first paint — the actual light/dark value is set
+  // dynamically below and in TopNav's applyTheme, since prefers-color-scheme
+  // media queries can't react to the manually-toggled .dark/.light class.
+  themeColor: "#ffffff",
 };
 
 const themeInitScript = `
@@ -36,6 +35,11 @@ const themeInitScript = `
     var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
     var dark = stored ? stored === "dark" : prefersDark;
     document.documentElement.classList.add(dark ? "dark" : "light");
+
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) {
+      meta.setAttribute("content", dark ? "#000000" : "#ffffff");
+    }
   } catch (e) {}
 })();
 `;
