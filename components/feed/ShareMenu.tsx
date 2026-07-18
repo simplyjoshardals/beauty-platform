@@ -33,7 +33,7 @@ export function ShareMenu({ open, onClose, url }: Props) {
         aria-hidden
       />
 
-      <div className="relative w-full rounded-t-2xl bg-background pb-[calc(1rem+env(safe-area-inset-bottom))]">
+      <div className="relative mx-auto w-full max-w-lg rounded-t-2xl bg-background pb-[calc(1rem+env(safe-area-inset-bottom))]">
         <div className="relative flex items-center justify-center border-b border-foreground/10 py-3">
           <span className="text-sm font-medium">Share</span>
           <button

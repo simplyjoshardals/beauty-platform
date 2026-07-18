@@ -74,7 +74,7 @@ export function CommentSheet({
         aria-hidden
       />
 
-      <div className="relative flex h-[80dvh] w-full flex-col rounded-t-2xl bg-background">
+      <div className="relative mx-auto flex h-[80dvh] w-full max-w-lg flex-col rounded-t-2xl bg-background">
         <div className="relative flex items-center justify-center border-b border-foreground/10 py-3">
           <span className="text-sm font-medium">Comments</span>
           <button

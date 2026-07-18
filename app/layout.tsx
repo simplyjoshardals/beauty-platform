@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { BottomNav } from "@/components/shared/BottomNav";
 import TopNav from "@/components/shared/TopNav";
+import { PostsProvider } from "@/context/PostsProvider";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -44,11 +45,13 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body className="min-h-full flex flex-col">
-        <TopNav />
-        <main className="mx-auto w-full max-w-lg flex-1 pt-[calc(3.5rem+env(safe-area-inset-top))] pb-[calc(3.5rem+env(safe-area-inset-bottom))]">
-          {children}
-        </main>
-        <BottomNav />
+        <PostsProvider>
+          <TopNav />
+          <main className="mx-auto w-full max-w-lg flex-1 pt-[calc(3.5rem+env(safe-area-inset-top))] pb-[calc(3.5rem+env(safe-area-inset-bottom))]">
+            {children}
+          </main>
+          <BottomNav />
+        </PostsProvider>
       </body>
     </html>
   );
