@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
+import { PATHS } from "@/utils/paths";
 
 type Props = {
   username: string;
@@ -36,14 +37,14 @@ export function ProfileHeader({
             <span className="text-base font-semibold">{postCount}</span>
             <span className="text-xs text-foreground/50">Posts</span>
           </div>
-          <div className="flex flex-col">
+          <Link href={PATHS.FOLLOWERS} className="flex flex-col">
             <span className="text-base font-semibold">{followerCount}</span>
             <span className="text-xs text-foreground/50">Followers</span>
-          </div>
-          <div className="flex flex-col">
+          </Link>
+          <Link href={PATHS.FOLLOWING} className="flex flex-col">
             <span className="text-base font-semibold">{followingCount}</span>
             <span className="text-xs text-foreground/50">Following</span>
-          </div>
+          </Link>
         </div>
       </div>
 
@@ -60,7 +61,7 @@ export function ProfileHeader({
       </div>
 
       <Link
-        href="/profile/edit"
+        href={PATHS.PROFILE_EDIT}
         className="w-full rounded-lg border border-foreground/15 py-2 text-center text-sm font-medium"
       >
         Edit profile

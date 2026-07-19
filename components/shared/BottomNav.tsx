@@ -34,6 +34,17 @@ const tabs = [
   },
 ] as const;
 
+// Exact match for Home only — "/" is technically a prefix of every route,
+// so without this special case Home would light up on every page. Every
+// other tab treats its own subroutes (e.g. /profile/followers) as still
+// "under" it, so the tab stays active while navigating deeper.
+function isTabActive(pathname: string, href: string) {
+  if (href === PATHS.HOME) {
+    return pathname === href;
+  }
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
 export function BottomNav() {
   const pathname = usePathname();
 
@@ -43,7 +54,7 @@ export function BottomNav() {
       aria-label="Primary"
     >
       {tabs.map(({ id, label, href, icon: Icon }) => {
-        const isActive = pathname === href;
+        const isActive = isTabActive(pathname, href);
         return (
           <Link
             key={id}

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { PlusIcon, SunIcon, MoonIcon } from "@phosphor-icons/react";
+import { PATHS } from "@/utils/paths";
 
 export default function TopNav() {
   const [isDark, setIsDark] = useState(false);
@@ -79,7 +80,7 @@ export default function TopNav() {
     >
       <div className="flex justify-start">
         <Link
-          href="/create"
+          href={PATHS.CREATE_POST}
           aria-label="Create post"
           className="flex size-9 items-center justify-center text-foreground transition-transform duration-100 active:scale-90"
         >

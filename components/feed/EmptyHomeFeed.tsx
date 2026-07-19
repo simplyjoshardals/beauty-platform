@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { UsersThreeIcon } from "@phosphor-icons/react";
+import { PATHS } from "@/utils/paths";
 
 export function EmptyHomeFeed() {
   return (
@@ -14,7 +15,7 @@ export function EmptyHomeFeed() {
         </p>
       </div>
       <Link
-        href="/explore"
+        href={PATHS.EXPLORE}
         className="mt-2 rounded-full border border-foreground/15 px-4 py-2 text-sm font-medium"
       >
         Find people to follow

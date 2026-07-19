@@ -13,6 +13,7 @@ import {
 import { usePosts } from "@/context/PostsProvider";
 import { CURRENT_USER } from "@/constants/currentUser";
 import { ProductTagEditor } from "@/components/shared/ProductTagEditor";
+import { PATHS } from "@/utils/paths";
 import type { Post, PostMedia, ProductTag } from "@/types/post";
 
 type PostType = "photo" | "video" | "before_after";
@@ -124,7 +125,7 @@ export function CreatePostForm() {
     };
 
     addPost(newPost);
-    router.push("/");
+    router.push(PATHS.HOME);
   }
 
   return (

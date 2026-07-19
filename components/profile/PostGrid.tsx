@@ -7,6 +7,7 @@ import {
 } from "@phosphor-icons/react";
 import type { Post } from "@/types/post";
 import { getPostThumbnail } from "@/utils/postThumbnail";
+import { PATHS } from "@/utils/paths";
 
 function MediaTypeBadge({ type }: { type: Post["media"]["type"] }) {
   if (type === "video") {
@@ -54,7 +55,7 @@ export function PostGrid({ posts }: { posts: Post[] }) {
         return (
           <Link
             key={post.id}
-            href={`/p/${post.id}`}
+            href={PATHS.POST(post.id)}
             className="relative aspect-square bg-foreground/5"
           >
             {thumbnail && (

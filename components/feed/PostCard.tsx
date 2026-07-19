@@ -17,6 +17,7 @@ import { CommentSheet } from "./CommentSheet";
 import { ShareMenu } from "./ShareMenu";
 import { PostOptionsSheet } from "./PostOptionsSheet";
 import { useFollow } from "@/context/FollowProvider";
+import { PATHS } from "@/utils/paths";
 
 export function PostCard({ post }: { post: Post }) {
   const [liked, setLiked] = useState(false);
@@ -42,8 +43,8 @@ export function PostCard({ post }: { post: Post }) {
 
   const shareUrl =
     typeof window !== "undefined"
-      ? `${window.location.origin}/p/${post.id}`
-      : `/p/${post.id}`;
+      ? `${window.location.origin}${PATHS.POST(post.id)}`
+      : PATHS.POST(post.id);
 
   async function handleSharePress() {
     // Feature-detect first: if the browser/OS supports the native share
