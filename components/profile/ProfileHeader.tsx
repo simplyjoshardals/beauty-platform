@@ -2,25 +2,42 @@ import Image from "next/image";
 import Link from "next/link";
 import { PATHS } from "@/utils/paths";
 
-type Props = {
+type BaseProps = {
   username: string;
   avatarSrc: string;
-  bio: string;
+  bio?: string;
   toneTag?: string;
   postCount: number;
   followerCount: number;
   followingCount: number;
 };
 
-export function ProfileHeader({
-  username,
-  avatarSrc,
-  bio,
-  toneTag,
-  postCount,
-  followerCount,
-  followingCount,
-}: Props) {
+// Own profile shows Edit Profile and links its stats to your own
+// followers/following lists (/profile/followers, /profile/following).
+// Someone else's profile shows a Follow toggle instead, and its stats
+// link to their own per-user lists (/u/[username]/followers, etc.) —
+// two different route families, since "your" lists and "their" lists
+// aren't the same data.
+type Props =
+  | (BaseProps & { isOwnProfile: true })
+  | (BaseProps & {
+      isOwnProfile: false;
+      isFollowing: boolean;
+      onToggleFollow: () => void;
+    });
+
+export function ProfileHeader(props: Props) {
+  const {
+    username,
+    avatarSrc,
+    bio,
+    toneTag,
+    postCount,
+    followerCount,
+    followingCount,
+    isOwnProfile,
+  } = props;
+
   return (
     <div className="flex flex-col gap-4 px-4 py-5">
       <div className="flex items-center gap-5">
@@ -37,14 +54,40 @@ export function ProfileHeader({
             <span className="text-base font-semibold">{postCount}</span>
             <span className="text-xs text-foreground/50">Posts</span>
           </div>
-          <Link href={PATHS.FOLLOWERS} className="flex flex-col">
-            <span className="text-base font-semibold">{followerCount}</span>
-            <span className="text-xs text-foreground/50">Followers</span>
-          </Link>
-          <Link href={PATHS.FOLLOWING} className="flex flex-col">
-            <span className="text-base font-semibold">{followingCount}</span>
-            <span className="text-xs text-foreground/50">Following</span>
-          </Link>
+
+          {isOwnProfile ? (
+            <>
+              <Link href={PATHS.FOLLOWERS} className="flex flex-col">
+                <span className="text-base font-semibold">{followerCount}</span>
+                <span className="text-xs text-foreground/50">Followers</span>
+              </Link>
+              <Link href={PATHS.FOLLOWING} className="flex flex-col">
+                <span className="text-base font-semibold">
+                  {followingCount}
+                </span>
+                <span className="text-xs text-foreground/50">Following</span>
+              </Link>
+            </>
+          ) : (
+            <>
+              <Link
+                href={PATHS.USER_FOLLOWERS(username)}
+                className="flex flex-col"
+              >
+                <span className="text-base font-semibold">{followerCount}</span>
+                <span className="text-xs text-foreground/50">Followers</span>
+              </Link>
+              <Link
+                href={PATHS.USER_FOLLOWING(username)}
+                className="flex flex-col"
+              >
+                <span className="text-base font-semibold">
+                  {followingCount}
+                </span>
+                <span className="text-xs text-foreground/50">Following</span>
+              </Link>
+            </>
+          )}
         </div>
       </div>
 
@@ -57,15 +100,29 @@ export function ProfileHeader({
             </span>
           )}
         </div>
-        <p className="text-sm text-foreground/70">{bio}</p>
+        {bio && <p className="text-sm text-foreground/70">{bio}</p>}
       </div>
 
-      <Link
-        href={PATHS.PROFILE_EDIT}
-        className="w-full rounded-lg border border-foreground/15 py-2 text-center text-sm font-medium"
-      >
-        Edit profile
-      </Link>
+      {isOwnProfile ? (
+        <Link
+          href={PATHS.PROFILE_EDIT}
+          className="w-full rounded-lg border border-foreground/15 py-2 text-center text-sm font-medium"
+        >
+          Edit profile
+        </Link>
+      ) : (
+        <button
+          type="button"
+          onClick={props.onToggleFollow}
+          className={`w-full rounded-lg py-2 text-sm font-medium ${
+            props.isFollowing
+              ? "border border-foreground/15 text-foreground"
+              : "bg-foreground text-background"
+          }`}
+        >
+          {props.isFollowing ? "Following" : "Follow"}
+        </button>
+      )}
     </div>
   );
 }

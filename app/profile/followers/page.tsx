@@ -1,9 +1,14 @@
 import { mockFollowerUsernames } from "@/data/mockFollowers";
-import { getMockUser } from "@/data/mockUsers";
+import { getMockUser, type MockUser } from "@/data/mockUsers";
 import { UserListWithSearch } from "@/components/profile/UserListWithSearch";
 
 export default function FollowersPage() {
-  const followers = mockFollowerUsernames.map(getMockUser);
+  // mockFollowerUsernames is derived directly from MOCK_USERS, so every
+  // lookup here is guaranteed to resolve — the filter is defensive, not
+  // expected to ever actually drop anything.
+  const followers = mockFollowerUsernames
+    .map(getMockUser)
+    .filter((u): u is MockUser => u !== undefined);
 
   return (
     <div className="flex flex-col">

@@ -9,4 +9,7 @@ export const PATHS = {
   FOLLOWING: "/profile/following",
   CREATE_POST: "/create",
   POST: (postId: string) => `/p/${postId}`,
+  USER_PROFILE: (username: string) => `/u/${username}`,
+  USER_FOLLOWERS: (username: string) => `/u/${username}/followers`,
+  USER_FOLLOWING: (username: string) => `/u/${username}/following`,
 };

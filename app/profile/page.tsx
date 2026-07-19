@@ -52,6 +52,7 @@ export default function ProfilePage() {
   return (
     <div className="flex flex-col">
       <ProfileHeader
+        isOwnProfile
         username={CURRENT_USER.username}
         avatarSrc={profile.avatarSrc}
         bio={profile.bio}

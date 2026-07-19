@@ -1,12 +1,18 @@
 "use client";
 
 import { useFollow } from "@/context/FollowProvider";
-import { getMockUser } from "@/data/mockUsers";
+import { getMockUser, type MockUser } from "@/data/mockUsers";
 import { UserListWithSearch } from "@/components/profile/UserListWithSearch";
 
 export default function FollowingPage() {
   const { followingUsernames } = useFollow();
-  const following = followingUsernames.map(getMockUser);
+  // Guards against a username in followingUsernames that has no matching
+  // entry in MOCK_USERS — shouldn't happen given how usernames get added
+  // to that set today, but this keeps the list honest either way rather
+  // than crashing or fabricating a placeholder row.
+  const following = followingUsernames
+    .map(getMockUser)
+    .filter((u): u is MockUser => u !== undefined);
 
   return (
     <div className="flex flex-col">

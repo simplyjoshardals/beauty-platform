@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { DotsThreeIcon, HeartIcon } from "@phosphor-icons/react";
 import type { Post } from "@/types/post";
 import type { Comment } from "@/types/comment";
@@ -110,21 +111,26 @@ export function PostCard({ post }: { post: Post }) {
   return (
     <article className="border-b border-foreground/10">
       <header className="flex items-center gap-2 px-3 py-2">
-        <Image
-          src={post.author.avatarSrc}
-          alt={post.author.username}
-          width={36}
-          height={36}
-          className="size-9 rounded-full object-cover"
-        />
-        <div className="flex flex-col leading-tight">
-          <span className="text-sm font-medium">{post.author.username}</span>
-          {post.author.toneTag && (
-            <span className="text-xs text-foreground/50">
-              {post.author.toneTag}
-            </span>
-          )}
-        </div>
+        <Link
+          href={PATHS.USER_PROFILE(post.author.username)}
+          className="flex items-center gap-2"
+        >
+          <Image
+            src={post.author.avatarSrc}
+            alt={post.author.username}
+            width={36}
+            height={36}
+            className="size-9 rounded-full object-cover"
+          />
+          <div className="flex flex-col leading-tight">
+            <span className="text-sm font-medium">{post.author.username}</span>
+            {post.author.toneTag && (
+              <span className="text-xs text-foreground/50">
+                {post.author.toneTag}
+              </span>
+            )}
+          </div>
+        </Link>
         <button
           type="button"
           onClick={() => setOptionsOpen(true)}
