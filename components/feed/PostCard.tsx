@@ -112,6 +112,46 @@ export function PostCard({ post }: { post: Post }) {
     setCommentCount((c) => c + 1);
   }
 
+  // Reading `comments` from component scope (not nested inside a setState
+  // updater) rather than computing hasReplies inside the updater itself —
+  // same reasoning as the earlier like-count bug: don't nest one setState
+  // call's logic inside another's functional updater.
+  function handleDeleteComment(commentId: string, topLevelId?: string) {
+    if (topLevelId) {
+      // Deleting a reply — always a full silent removal. Replies never
+      // have their own sub-replies to preserve, so there's nothing to
+      // keep a placeholder for.
+      setComments((prev) =>
+        prev.map((c) =>
+          c.id === topLevelId
+            ? {
+                ...c,
+                replies: (c.replies ?? []).filter((r) => r.id !== commentId),
+              }
+            : c,
+        ),
+      );
+      setCommentCount((count) => Math.max(0, count - 1));
+      return;
+    }
+
+    const target = comments.find((c) => c.id === commentId);
+    const hasReplies = (target?.replies?.length ?? 0) > 0;
+
+    if (hasReplies) {
+      // Structural placeholder — replies stay fully intact underneath.
+      // Not decremented: the placeholder still occupies a real slot in
+      // the thread, unlike a fully-removed leaf comment.
+      setComments((prev) =>
+        prev.map((c) => (c.id === commentId ? { ...c, deleted: true } : c)),
+      );
+    } else {
+      // No replies — true silent removal, no trace left behind.
+      setComments((prev) => prev.filter((c) => c.id !== commentId));
+      setCommentCount((count) => Math.max(0, count - 1));
+    }
+  }
+
   function toggleLike() {
     const nextLiked = !liked;
     setLiked(nextLiked);
@@ -222,6 +262,7 @@ export function PostCard({ post }: { post: Post }) {
         onClose={() => setCommentsOpen(false)}
         comments={comments}
         onAddComment={handleAddComment}
+        onDeleteComment={handleDeleteComment}
         postAuthorUsername={post.author.username}
       />
 

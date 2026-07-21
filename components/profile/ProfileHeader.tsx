@@ -1,5 +1,9 @@
+"use client";
+
+import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { XIcon } from "@phosphor-icons/react";
 import { PATHS } from "@/utils/paths";
 
 type BaseProps = {
@@ -28,6 +32,7 @@ type Props =
     });
 
 export function ProfileHeader(props: Props) {
+  const [avatarOpen, setAvatarOpen] = useState(false);
   const {
     username,
     avatarSrc,
@@ -42,13 +47,20 @@ export function ProfileHeader(props: Props) {
   return (
     <div className="flex flex-col gap-4 px-4 py-5">
       <div className="flex items-center gap-5">
-        <Image
-          src={avatarSrc}
-          alt={username}
-          width={80}
-          height={80}
-          className="size-20 shrink-0 rounded-full object-cover"
-        />
+        <button
+          type="button"
+          onClick={() => setAvatarOpen(true)}
+          aria-label={`View ${username}'s profile photo`}
+          className="shrink-0 transition-transform active:scale-95"
+        >
+          <Image
+            src={avatarSrc}
+            alt={username}
+            width={80}
+            height={80}
+            className="size-20 rounded-full object-cover"
+          />
+        </button>
 
         <div className="flex flex-1 justify-around text-center">
           <div className="flex flex-col">
@@ -127,6 +139,35 @@ export function ProfileHeader(props: Props) {
               ? "Follow back"
               : "Follow"}
         </button>
+      )}
+
+      {avatarOpen && (
+        <div
+          className="fixed inset-0 z-90 flex items-center justify-center bg-black/90"
+          onClick={() => setAvatarOpen(false)}
+        >
+          <button
+            type="button"
+            onClick={() => setAvatarOpen(false)}
+            aria-label="Close"
+            className="absolute right-4 top-[calc(1rem+env(safe-area-inset-top))] flex size-9 items-center justify-center rounded-full bg-black/40 text-white"
+          >
+            <XIcon size={20} />
+          </button>
+
+          <div
+            className="relative aspect-square w-[min(80vw,22rem)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Image
+              src={avatarSrc}
+              alt={username}
+              fill
+              unoptimized
+              className="rounded-full object-cover"
+            />
+          </div>
+        </div>
       )}
     </div>
   );

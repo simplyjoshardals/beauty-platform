@@ -13,6 +13,7 @@ type Props = {
   onClose: () => void;
   comments: Comment[];
   onAddComment: (text: string, parentId?: string) => void;
+  onDeleteComment: (commentId: string, topLevelId?: string) => void;
   postAuthorUsername: string;
 };
 
@@ -21,6 +22,7 @@ export function CommentSheet({
   onClose,
   comments,
   onAddComment,
+  onDeleteComment,
   postAuthorUsername,
 }: Props) {
   const [draft, setDraft] = useState("");
@@ -114,6 +116,7 @@ export function CommentSheet({
                 comment={c}
                 postAuthorUsername={postAuthorUsername}
                 onReplyPress={handleReplyPress}
+                onDeleteComment={onDeleteComment}
               />
             ))
           )}
