@@ -7,6 +7,7 @@ import { mockPosts as initialPosts } from "@/data/mockPosts";
 type PostsContextValue = {
   posts: Post[];
   addPost: (post: Post) => void;
+  deletePost: (postId: string) => void;
 };
 
 const PostsContext = createContext<PostsContextValue | null>(null);
@@ -22,8 +23,12 @@ export function PostsProvider({ children }: { children: ReactNode }) {
     setPosts((prev) => [post, ...prev]);
   }
 
+  function deletePost(postId: string) {
+    setPosts((prev) => prev.filter((p) => p.id !== postId));
+  }
+
   return (
-    <PostsContext.Provider value={{ posts, addPost }}>
+    <PostsContext.Provider value={{ posts, addPost, deletePost }}>
       {children}
     </PostsContext.Provider>
   );

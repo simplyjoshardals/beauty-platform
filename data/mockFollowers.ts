@@ -24,3 +24,10 @@ export const mockFollowerUsernames = MOCK_USERS.map((u) => u.username).slice(
   0,
   MAX_FOLLOWERS_SHOWN,
 );
+
+// Used to decide whether a Follow button should say "Follow back" — if
+// this person is already in your (mock) followers list and you don't
+// follow them yet, that's a follow-back, not a cold follow.
+export function isMockFollowerOfCurrentUser(username: string): boolean {
+  return mockFollowerUsernames.includes(username);
+}

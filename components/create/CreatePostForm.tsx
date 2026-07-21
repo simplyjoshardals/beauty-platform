@@ -13,6 +13,7 @@ import {
 import { usePosts } from "@/context/PostsProvider";
 import { CURRENT_USER } from "@/constants/currentUser";
 import { ProductTagEditor } from "@/components/shared/ProductTagEditor";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { PATHS } from "@/utils/paths";
 import type { Post, PostMedia, ProductTag } from "@/types/post";
 
@@ -31,6 +32,7 @@ export function CreatePostForm() {
   const [afterUrl, setAfterUrl] = useState<string | null>(null);
   const [caption, setCaption] = useState("");
   const [products, setProducts] = useState<ProductTag[]>([]);
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false);
 
   const imageInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
@@ -110,6 +112,27 @@ export function CreatePostForm() {
   const media = buildMedia();
   const canSubmit = media !== null;
 
+  // Only warn about discarding if there's actually something to lose —
+  // canceling an untouched, empty form shouldn't nag anyone.
+  function hasDraftContent() {
+    return (
+      caption.trim().length > 0 ||
+      images.length > 0 ||
+      videoUrl !== null ||
+      beforeUrl !== null ||
+      afterUrl !== null ||
+      products.length > 0
+    );
+  }
+
+  function handleCancelPress() {
+    if (hasDraftContent()) {
+      setConfirmingDiscard(true);
+    } else {
+      router.back();
+    }
+  }
+
   function handleSubmit() {
     if (!media) return;
 
@@ -131,7 +154,7 @@ export function CreatePostForm() {
   return (
     <div className="fixed left-1/2 top-0 bottom-0 z-80 w-full max-w-lg -translate-x-1/2 flex flex-col bg-background">
       <header className="flex items-center justify-between border-b border-foreground/10 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))]">
-        <button type="button" onClick={() => router.back()} aria-label="Cancel">
+        <button type="button" onClick={handleCancelPress} aria-label="Cancel">
           <XIcon size={22} className="text-foreground" />
         </button>
         <span className="text-sm font-medium">New post</span>
@@ -374,6 +397,16 @@ export function CreatePostForm() {
           onChange={setProducts}
         />
       </div>
+
+      <ConfirmDialog
+        open={confirmingDiscard}
+        title="Discard this post?"
+        description="You'll lose what you've added so far."
+        confirmLabel="Discard"
+        destructive
+        onConfirm={() => router.back()}
+        onCancel={() => setConfirmingDiscard(false)}
+      />
     </div>
   );
 }

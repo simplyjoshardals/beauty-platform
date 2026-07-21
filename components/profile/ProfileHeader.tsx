@@ -23,6 +23,7 @@ type Props =
   | (BaseProps & {
       isOwnProfile: false;
       isFollowing: boolean;
+      followsMe: boolean;
       onToggleFollow: () => void;
     });
 
@@ -120,7 +121,11 @@ export function ProfileHeader(props: Props) {
               : "bg-foreground text-background"
           }`}
         >
-          {props.isFollowing ? "Following" : "Follow"}
+          {props.isFollowing
+            ? "Following"
+            : props.followsMe
+              ? "Follow back"
+              : "Follow"}
         </button>
       )}
     </div>

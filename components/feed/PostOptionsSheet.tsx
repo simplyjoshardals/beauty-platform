@@ -1,19 +1,26 @@
 "use client";
 
+import { useState } from "react";
 import {
   XIcon,
   UserMinusIcon,
   UserPlusIcon,
   LinkIcon,
+  BookmarkSimpleIcon,
+  TrashIcon,
 } from "@phosphor-icons/react";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 
 type Props = {
   open: boolean;
   onClose: () => void;
   isOwnPost: boolean;
   isFollowing: boolean;
+  followsMe: boolean;
   onToggleFollow: () => void;
   onCopyLinkPress: () => void;
+  onSaveToCollectionPress: () => void;
+  onDeletePress: () => void;
 };
 
 export function PostOptionsSheet({
@@ -21,10 +28,29 @@ export function PostOptionsSheet({
   onClose,
   isOwnPost,
   isFollowing,
+  followsMe,
   onToggleFollow,
   onCopyLinkPress,
+  onSaveToCollectionPress,
+  onDeletePress,
 }: Props) {
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
   if (!open) return null;
+
+  // Unfollowing is a one-tap, trivially-reversible action — no
+  // confirmation needed, unlike deleting a post.
+  const followLabel = isFollowing
+    ? "Unfollow"
+    : followsMe
+      ? "Follow back"
+      : "Follow";
+
+  function handleDeleteConfirmed() {
+    setConfirmingDelete(false);
+    onClose();
+    onDeletePress();
+  }
 
   return (
     <div className="fixed inset-0 z-60 flex items-end">
@@ -66,9 +92,23 @@ export function PostOptionsSheet({
                 <UserPlusIcon size={18} />
               )}
             </span>
-            {isFollowing ? "Unfollow" : "Follow"}
+            {followLabel}
           </button>
         )}
+
+        <button
+          type="button"
+          onClick={() => {
+            onClose();
+            onSaveToCollectionPress();
+          }}
+          className="flex w-full items-center gap-3 px-4 py-4 text-sm text-foreground"
+        >
+          <span className="flex size-9 items-center justify-center rounded-full bg-foreground/10">
+            <BookmarkSimpleIcon size={18} />
+          </span>
+          Save to collection
+        </button>
 
         <button
           type="button"
@@ -83,7 +123,31 @@ export function PostOptionsSheet({
           </span>
           Copy link
         </button>
+
+        {/* Delete is only ever shown on your own post */}
+        {isOwnPost && (
+          <button
+            type="button"
+            onClick={() => setConfirmingDelete(true)}
+            className="flex w-full items-center gap-3 px-4 py-4 text-sm text-red-500"
+          >
+            <span className="flex size-9 items-center justify-center rounded-full bg-foreground/10">
+              <TrashIcon size={18} />
+            </span>
+            Delete post
+          </button>
+        )}
       </div>
+
+      <ConfirmDialog
+        open={confirmingDelete}
+        title="Delete this post?"
+        description="This can't be undone — the post and its comments will be gone for good."
+        confirmLabel="Delete"
+        destructive
+        onConfirm={handleDeleteConfirmed}
+        onCancel={() => setConfirmingDelete(false)}
+      />
     </div>
   );
 }

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter, usePathname } from "next/navigation";
 import { DotsThreeIcon, HeartIcon } from "@phosphor-icons/react";
 import type { Post } from "@/types/post";
 import type { Comment } from "@/types/comment";
@@ -17,12 +18,21 @@ import { PostCaption } from "./PostCaption";
 import { CommentSheet } from "./CommentSheet";
 import { ShareMenu } from "./ShareMenu";
 import { PostOptionsSheet } from "./PostOptionsSheet";
+import { SaveToCollectionSheet } from "@/components/saved/SaveToCollectionSheet";
 import { useFollow } from "@/context/FollowProvider";
+import { useSavedPosts } from "@/context/SavedPostsProvider";
+import { usePosts } from "@/context/PostsProvider";
+import { isMockFollowerOfCurrentUser } from "@/data/mockFollowers";
 import { PATHS } from "@/utils/paths";
 
 export function PostCard({ post }: { post: Post }) {
   const [liked, setLiked] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const { isFollowing, toggleFollow } = useFollow();
+  const { deletePost } = usePosts();
+  const router = useRouter();
+  const pathname = usePathname();
+  const followsMe = isMockFollowerOfCurrentUser(post.author.username);
+  const { isSaved, toggleSave } = useSavedPosts();
   const [likeCount, setLikeCount] = useState(post.likeCount);
   const [showHeartPop, setShowHeartPop] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
@@ -31,8 +41,18 @@ export function PostCard({ post }: { post: Post }) {
   const [shareMenuOpen, setShareMenuOpen] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [showCopiedToast, setShowCopiedToast] = useState(false);
-  const { isFollowing, toggleFollow } = useFollow();
+  const [saveToCollectionOpen, setSaveToCollectionOpen] = useState(false);
   const isOwnPost = post.author.username === CURRENT_USER.username;
+
+  function handleDeletePress() {
+    deletePost(post.id);
+    // If we're on this post's own permalink page, there's nothing left to
+    // show here — bounce back to the feed. Elsewhere (feed, grid), the
+    // post just disappears from the list reactively, no navigation needed.
+    if (pathname === PATHS.POST(post.id)) {
+      router.replace(PATHS.HOME);
+    }
+  }
 
   // Copies immediately, unlike the Share button's flow — this is a direct
   // "Copy link" menu action, not the native-share-or-fallback path.
@@ -179,11 +199,11 @@ export function PostCard({ post }: { post: Post }) {
 
       <PostActions
         liked={liked}
-        saved={saved}
+        saved={isSaved(post.id)}
         likeCount={likeCount}
         commentCount={commentCount}
         onToggleLike={toggleLike}
-        onToggleSave={() => setSaved((s) => !s)}
+        onToggleSave={() => toggleSave(post.id)}
         onCommentPress={() => setCommentsOpen(true)}
         onSharePress={handleSharePress}
       />
@@ -216,8 +236,17 @@ export function PostCard({ post }: { post: Post }) {
         onClose={() => setOptionsOpen(false)}
         isOwnPost={isOwnPost}
         isFollowing={isFollowing(post.author.username)}
+        followsMe={followsMe}
         onToggleFollow={() => toggleFollow(post.author.username)}
         onCopyLinkPress={handleCopyLinkFromOptions}
+        onSaveToCollectionPress={() => setSaveToCollectionOpen(true)}
+        onDeletePress={handleDeletePress}
+      />
+
+      <SaveToCollectionSheet
+        open={saveToCollectionOpen}
+        onClose={() => setSaveToCollectionOpen(false)}
+        postId={post.id}
       />
 
       {showCopiedToast && (

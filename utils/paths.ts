@@ -12,4 +12,5 @@ export const PATHS = {
   USER_PROFILE: (username: string) => `/u/${username}`,
   USER_FOLLOWERS: (username: string) => `/u/${username}/followers`,
   USER_FOLLOWING: (username: string) => `/u/${username}/following`,
+  SAVED_COLLECTION: (collectionId: string) => `/saved/${collectionId}`,
 };

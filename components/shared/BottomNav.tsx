@@ -10,6 +10,7 @@ import {
   UserIcon,
 } from "@phosphor-icons/react";
 import { PATHS } from "@/utils/paths";
+import { useNotifications } from "@/context/NotificationsProvider";
 
 const tabs = [
   { id: "home", label: "Home", href: PATHS.HOME, icon: HouseIcon },
@@ -47,6 +48,7 @@ function isTabActive(pathname: string, href: string) {
 
 export function BottomNav() {
   const pathname = usePathname();
+  const { unreadCount } = useNotifications();
 
   return (
     <nav
@@ -63,12 +65,20 @@ export function BottomNav() {
             aria-current={isActive ? "page" : undefined}
             className="flex flex-1 items-center justify-center transition-transform duration-100 active:scale-90"
           >
-            <Icon
-              className="size-6 sm:size-6.5"
-              weight={
-                isActive ? (id != "explore" ? "fill" : "bold") : "regular"
-              }
-            />
+            <span className="relative inline-flex">
+              <Icon
+                className="size-6 sm:size-6.5"
+                weight={
+                  isActive ? (id != "explore" ? "fill" : "bold") : "regular"
+                }
+              />
+              {id === "notifications" && unreadCount > 0 && (
+                <span
+                  className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-red-500 ring-2 ring-background"
+                  aria-hidden
+                />
+              )}
+            </span>
           </Link>
         );
       })}

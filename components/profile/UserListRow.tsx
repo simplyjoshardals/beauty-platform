@@ -4,13 +4,17 @@ import Image from "next/image";
 import Link from "next/link";
 import { useFollow } from "@/context/FollowProvider";
 import { CURRENT_USER } from "@/constants/currentUser";
+import { isMockFollowerOfCurrentUser } from "@/data/mockFollowers";
 import { PATHS } from "@/utils/paths";
 import type { MockUser } from "@/data/mockUsers";
 
 export function UserListRow({ user }: { user: MockUser }) {
   const { isFollowing, toggleFollow } = useFollow();
   const following = isFollowing(user.username);
+  const followsMe = isMockFollowerOfCurrentUser(user.username);
   const isSelf = user.username === CURRENT_USER.username;
+
+  const label = following ? "Following" : followsMe ? "Follow back" : "Follow";
 
   return (
     <div className="flex items-center gap-3 px-4 py-2.5">
@@ -44,7 +48,7 @@ export function UserListRow({ user }: { user: MockUser }) {
               : "bg-foreground text-background"
           }`}
         >
-          {following ? "Following" : "Follow"}
+          {label}
         </button>
       )}
     </div>

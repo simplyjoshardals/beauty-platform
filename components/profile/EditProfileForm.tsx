@@ -6,6 +6,7 @@ import Image from "next/image";
 import { XIcon } from "@phosphor-icons/react";
 import { useProfile } from "@/context/ProfileProvider";
 import { ProductTagEditor } from "@/components/shared/ProductTagEditor";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import type { ProductTag } from "@/types/post";
 
 export function EditProfileForm() {
@@ -18,6 +19,7 @@ export function EditProfileForm() {
   const [pinnedRoutine, setPinnedRoutine] = useState<ProductTag[]>(
     profile.pinnedRoutine,
   );
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false);
 
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
@@ -31,10 +33,29 @@ export function EditProfileForm() {
     router.back();
   }
 
+  // Only warn if something actually changed from what's already saved —
+  // canceling without touching anything shouldn't need confirmation.
+  function hasUnsavedChanges() {
+    return (
+      avatarSrc !== profile.avatarSrc ||
+      bio !== profile.bio ||
+      toneTag !== profile.toneTag ||
+      JSON.stringify(pinnedRoutine) !== JSON.stringify(profile.pinnedRoutine)
+    );
+  }
+
+  function handleCancelPress() {
+    if (hasUnsavedChanges()) {
+      setConfirmingDiscard(true);
+    } else {
+      router.back();
+    }
+  }
+
   return (
     <div className="fixed left-1/2 top-0 bottom-0 z-80 w-full max-w-lg -translate-x-1/2 flex flex-col bg-background">
       <header className="flex items-center justify-between border-b border-foreground/10 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))]">
-        <button type="button" onClick={() => router.back()} aria-label="Cancel">
+        <button type="button" onClick={handleCancelPress} aria-label="Cancel">
           <XIcon size={22} className="text-foreground" />
         </button>
         <span className="text-sm font-medium">Edit profile</span>
@@ -109,6 +130,16 @@ export function EditProfileForm() {
           onChange={setPinnedRoutine}
         />
       </div>
+
+      <ConfirmDialog
+        open={confirmingDiscard}
+        title="Discard changes?"
+        description="Your edits won't be saved."
+        confirmLabel="Discard"
+        destructive
+        onConfirm={() => router.back()}
+        onCancel={() => setConfirmingDiscard(false)}
+      />
     </div>
   );
 }

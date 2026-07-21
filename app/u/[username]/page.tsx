@@ -7,6 +7,7 @@ import { usePosts } from "@/context/PostsProvider";
 import { useFollow } from "@/context/FollowProvider";
 import { CURRENT_USER } from "@/constants/currentUser";
 import { getMockUser } from "@/data/mockUsers";
+import { isMockFollowerOfCurrentUser } from "@/data/mockFollowers";
 import { PATHS } from "@/utils/paths";
 import { ProfileHeader } from "@/components/profile/ProfileHeader";
 import { ProfileHeaderSkeleton } from "@/components/profile/ProfileHeaderSkeleton";
@@ -80,6 +81,7 @@ export default function UserProfilePage({ params }: Props) {
         followerCount={user.followerCount ?? 0}
         followingCount={user.followingCount ?? 0}
         isFollowing={isFollowing(user.username)}
+        followsMe={isMockFollowerOfCurrentUser(user.username)}
         onToggleFollow={() => toggleFollow(user.username)}
       />
 
