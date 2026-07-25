@@ -16,6 +16,10 @@ type Props = {
   // topLevelId param: present when deleting a reply (points at its parent),
   // omitted when deleting a top-level comment directly.
   onDeleteComment: (commentId: string, topLevelId?: string) => void;
+  // Same guard function CommentSheet uses for posting a comment — reused
+  // here so liking a comment/reply shares the same auth-gate modal instead
+  // of each CommentItem needing its own.
+  guard: (fn: () => void, message?: string) => () => void;
   // Present only when this CommentItem is being rendered as a reply —
   // points back at the root comment replies attach to. Omitted for
   // top-level comments, where the comment IS the top-level one.
@@ -27,6 +31,7 @@ export function CommentItem({
   postAuthorUsername,
   onReplyPress,
   onDeleteComment,
+  guard,
   topLevelId,
 }: Props) {
   const [liked, setLiked] = useState(false);
@@ -84,6 +89,7 @@ export function CommentItem({
                   postAuthorUsername={postAuthorUsername}
                   onReplyPress={onReplyPress}
                   onDeleteComment={onDeleteComment}
+                  guard={guard}
                   topLevelId={comment.id}
                 />
               ))}
@@ -171,7 +177,7 @@ export function CommentItem({
         </div>
         <button
           type="button"
-          onClick={toggleLike}
+          onClick={guard(toggleLike, "Sign in to like this comment.")}
           aria-label={liked ? "Unlike comment" : "Like comment"}
           className="flex flex-col items-center gap-0.5 pt-0.5"
         >

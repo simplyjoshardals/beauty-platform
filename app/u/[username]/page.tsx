@@ -14,6 +14,8 @@ import { ProfileHeaderSkeleton } from "@/components/profile/ProfileHeaderSkeleto
 import { PostGrid } from "@/components/profile/PostGrid";
 import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
 import { ProductChips } from "@/components/feed/ProductChips";
+import { useAuthGatedAction } from "@/hooks/useAuthGatedAction";
+import { AuthGateModal } from "@/components/auth/AuthGateModal";
 
 type Props = {
   params: Promise<{ username: string }>;
@@ -27,6 +29,7 @@ export default function UserProfilePage({ params }: Props) {
   const { posts } = usePosts();
   const { isFollowing, toggleFollow } = useFollow();
   const [loading, setLoading] = useState(true);
+  const { gateOpen, closeGate, guard } = useAuthGatedAction();
 
   // This route is for viewing OTHER people. Your own profile — with Edit
   // Profile instead of a Follow button — lives at /profile. Redirect
@@ -82,7 +85,7 @@ export default function UserProfilePage({ params }: Props) {
         followingCount={user.followingCount ?? 0}
         isFollowing={isFollowing(user.username)}
         followsMe={isMockFollowerOfCurrentUser(user.username)}
-        onToggleFollow={() => toggleFollow(user.username)}
+        onToggleFollow={guard(() => toggleFollow(user.username))}
       />
 
       {user.pinnedRoutine && user.pinnedRoutine.length > 0 && (
@@ -95,6 +98,12 @@ export default function UserProfilePage({ params }: Props) {
       <div className="border-t border-foreground/10">
         <PostGrid posts={userPosts} />
       </div>
+
+      <AuthGateModal
+        open={gateOpen}
+        onClose={closeGate}
+        message="Sign in to follow accounts."
+      />
     </div>
   );
 }

@@ -7,6 +7,8 @@ import { CURRENT_USER } from "@/constants/currentUser";
 import { sortByAuthorEngagement } from "@/utils/sortComments";
 import { CommentItem } from "./CommentItem";
 import { CommentSheetSkeleton } from "./CommentSheetSkeleton";
+import { useAuthGatedAction } from "@/hooks/useAuthGatedAction";
+import { AuthGateModal } from "@/components/auth/AuthGateModal";
 
 type Props = {
   open: boolean;
@@ -31,6 +33,7 @@ export function CommentSheet({
     username: string;
   } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const { gateOpen, gateMessage, closeGate, guard } = useAuthGatedAction();
 
   // Simulated so the skeleton is actually visible — swap this whole effect
   // for a real "comments are being fetched" flag once there's a real API.
@@ -117,6 +120,7 @@ export function CommentSheet({
                 postAuthorUsername={postAuthorUsername}
                 onReplyPress={handleReplyPress}
                 onDeleteComment={onDeleteComment}
+                guard={guard}
               />
             ))
           )}
@@ -149,7 +153,10 @@ export function CommentSheet({
             ref={inputRef}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+            onKeyDown={(e) =>
+              e.key === "Enter" &&
+              guard(handleSubmit, "Sign in to leave a comment.")()
+            }
             placeholder={
               replyingTo
                 ? replyingTo.username === CURRENT_USER.username
@@ -161,7 +168,7 @@ export function CommentSheet({
           />
           <button
             type="button"
-            onClick={handleSubmit}
+            onClick={guard(handleSubmit, "Sign in to leave a comment.")}
             disabled={!draft.trim()}
             aria-label="Post comment"
             className="flex size-9 items-center justify-center text-foreground disabled:opacity-30"
@@ -170,6 +177,12 @@ export function CommentSheet({
           </button>
         </div>
       </div>
+
+      <AuthGateModal
+        open={gateOpen}
+        onClose={closeGate}
+        message={gateMessage}
+      />
     </div>
   );
 }

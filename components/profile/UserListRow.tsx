@@ -6,10 +6,18 @@ import { useFollow } from "@/context/FollowProvider";
 import { CURRENT_USER } from "@/constants/currentUser";
 import { isMockFollowerOfCurrentUser } from "@/data/mockFollowers";
 import { PATHS } from "@/utils/paths";
+import { useAuthGatedAction } from "@/hooks/useAuthGatedAction";
+import { AuthGateModal } from "@/components/auth/AuthGateModal";
 import type { MockUser } from "@/data/mockUsers";
 
+// Self-contained gate rather than a prop threaded down from every parent —
+// this row renders on both fully-gated pages (own Followers/Following,
+// Explore search) AND genuinely public ones (/u/[username]/followers,
+// /u/[username]/following), so it can't assume auth was already checked
+// by whatever page happens to be rendering it.
 export function UserListRow({ user }: { user: MockUser }) {
   const { isFollowing, toggleFollow } = useFollow();
+  const { gateOpen, gateMessage, closeGate, guard } = useAuthGatedAction();
   const following = isFollowing(user.username);
   const followsMe = isMockFollowerOfCurrentUser(user.username);
   const isSelf = user.username === CURRENT_USER.username;
@@ -41,7 +49,10 @@ export function UserListRow({ user }: { user: MockUser }) {
       {!isSelf && (
         <button
           type="button"
-          onClick={() => toggleFollow(user.username)}
+          onClick={guard(
+            () => toggleFollow(user.username),
+            `Sign in to follow @${user.username}.`,
+          )}
           className={`shrink-0 rounded-lg px-4 py-1.5 text-sm font-medium transition-colors ${
             following
               ? "border border-foreground/15 text-foreground"
@@ -51,6 +62,12 @@ export function UserListRow({ user }: { user: MockUser }) {
           {label}
         </button>
       )}
+
+      <AuthGateModal
+        open={gateOpen}
+        onClose={closeGate}
+        message={gateMessage}
+      />
     </div>
   );
 }

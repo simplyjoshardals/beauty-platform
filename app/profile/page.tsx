@@ -11,6 +11,7 @@ import { ProfileHeaderSkeleton } from "@/components/profile/ProfileHeaderSkeleto
 import { PostGrid } from "@/components/profile/PostGrid";
 import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
 import { ProductChips } from "@/components/feed/ProductChips";
+import { RequireAuth } from "@/components/auth/RequireAuth";
 
 // Simulated so the skeleton is actually visible — swap for a real pending
 // flag once profile data comes from a fetch instead of context.
@@ -31,25 +32,23 @@ export default function ProfilePage() {
     (post) => post.author.username === CURRENT_USER.username,
   );
 
-  if (loading) {
-    return (
-      <div className="flex flex-col">
-        <ProfileHeaderSkeleton />
-        <div className="animate-pulse border-t border-foreground/10 px-4 py-4">
-          <div className="mb-2 h-3.5 w-16 rounded bg-foreground/10" />
-          <div className="flex gap-2">
-            <div className="h-7 w-28 shrink-0 rounded-full bg-foreground/10" />
-            <div className="h-7 w-24 shrink-0 rounded-full bg-foreground/10" />
-          </div>
-        </div>
-        <div className="border-t border-foreground/10">
-          <PostGridSkeleton />
+  // Computed once, wrapped once — RequireAuth only needs to appear a
+  // single time regardless of which branch below actually renders.
+  const content = loading ? (
+    <div className="flex flex-col">
+      <ProfileHeaderSkeleton />
+      <div className="animate-pulse border-t border-foreground/10 px-4 py-4">
+        <div className="mb-2 h-3.5 w-16 rounded bg-foreground/10" />
+        <div className="flex gap-2">
+          <div className="h-7 w-28 shrink-0 rounded-full bg-foreground/10" />
+          <div className="h-7 w-24 shrink-0 rounded-full bg-foreground/10" />
         </div>
       </div>
-    );
-  }
-
-  return (
+      <div className="border-t border-foreground/10">
+        <PostGridSkeleton />
+      </div>
+    </div>
+  ) : (
     <div className="flex flex-col">
       <ProfileHeader
         isOwnProfile
@@ -74,4 +73,6 @@ export default function ProfilePage() {
       </div>
     </div>
   );
+
+  return <RequireAuth>{content}</RequireAuth>;
 }

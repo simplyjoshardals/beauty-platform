@@ -24,6 +24,9 @@ import { useSavedPosts } from "@/context/SavedPostsProvider";
 import { usePosts } from "@/context/PostsProvider";
 import { isMockFollowerOfCurrentUser } from "@/data/mockFollowers";
 import { PATHS } from "@/utils/paths";
+import { useAuthGatedAction } from "@/hooks/useAuthGatedAction";
+import { useAuth } from "@/context/AuthProvider";
+import { AuthGateModal } from "@/components/auth/AuthGateModal";
 
 export function PostCard({ post }: { post: Post }) {
   const [liked, setLiked] = useState(false);
@@ -32,6 +35,8 @@ export function PostCard({ post }: { post: Post }) {
   const router = useRouter();
   const pathname = usePathname();
   const followsMe = isMockFollowerOfCurrentUser(post.author.username);
+  const { gateOpen, gateMessage, closeGate, guard } = useAuthGatedAction();
+  const { isAuthenticated } = useAuth();
   const { isSaved, toggleSave } = useSavedPosts();
   const [likeCount, setLikeCount] = useState(post.likeCount);
   const [showHeartPop, setShowHeartPop] = useState(false);
@@ -173,7 +178,7 @@ export function PostCard({ post }: { post: Post }) {
       <header className="flex items-center gap-2 px-3 py-2">
         <Link
           href={PATHS.USER_PROFILE(post.author.username)}
-          className="flex items-center gap-2"
+          className="shrink-0"
         >
           <Image
             src={post.author.avatarSrc}
@@ -182,26 +187,62 @@ export function PostCard({ post }: { post: Post }) {
             height={36}
             className="size-9 rounded-full object-cover"
           />
-          <div className="flex flex-col leading-tight">
-            <span className="text-sm font-medium">{post.author.username}</span>
-            {post.author.toneTag && (
-              <span className="text-xs text-foreground/50">
-                {post.author.toneTag}
-              </span>
+        </Link>
+
+        <div className="flex flex-1 flex-col leading-tight">
+          <div className="flex items-center gap-1.5">
+            <Link
+              href={PATHS.USER_PROFILE(post.author.username)}
+              className="text-sm font-medium"
+            >
+              {post.author.username}
+            </Link>
+            {/* Sibling of the username Link, not nested inside it — a
+                button inside an anchor is invalid HTML and would also
+                fire the profile-navigation on every follow tap. */}
+            {!isOwnPost && (
+              <>
+                <span className="text-foreground/30">·</span>
+                <button
+                  type="button"
+                  onClick={guard(
+                    () => toggleFollow(post.author.username),
+                    `Sign in to follow @${post.author.username}.`,
+                  )}
+                  className="text-xs font-medium text-foreground/60"
+                >
+                  {isFollowing(post.author.username)
+                    ? "Following"
+                    : followsMe
+                      ? "Follow back"
+                      : "Follow"}
+                </button>
+              </>
             )}
           </div>
-        </Link>
-        <button
-          type="button"
-          onClick={() => setOptionsOpen(true)}
-          aria-label="Post options"
-          className="ml-auto p-2"
-        >
-          <DotsThreeIcon size={20} className="text-foreground" />
-        </button>
+          {post.author.toneTag && (
+            <span className="text-xs text-foreground/50">
+              {post.author.toneTag}
+            </span>
+          )}
+        </div>
+
+        {isAuthenticated && (
+          <button
+            type="button"
+            onClick={() => setOptionsOpen(true)}
+            aria-label="Post options"
+            className="p-2"
+          >
+            <DotsThreeIcon size={20} className="text-foreground" />
+          </button>
+        )}
       </header>
 
-      <div className="relative" onDoubleClick={handleDoubleTap}>
+      <div
+        className="relative"
+        onDoubleClick={guard(handleDoubleTap, "Sign in to like this post.")}
+      >
         {post.media.type === "image" && (
           <div className="relative aspect-square w-full">
             <Image
@@ -242,8 +283,11 @@ export function PostCard({ post }: { post: Post }) {
         saved={isSaved(post.id)}
         likeCount={likeCount}
         commentCount={commentCount}
-        onToggleLike={toggleLike}
-        onToggleSave={() => toggleSave(post.id)}
+        onToggleLike={guard(toggleLike, "Sign in to like this post.")}
+        onToggleSave={guard(
+          () => toggleSave(post.id),
+          "Sign in to save this post.",
+        )}
         onCommentPress={() => setCommentsOpen(true)}
         onSharePress={handleSharePress}
       />
@@ -276,11 +320,11 @@ export function PostCard({ post }: { post: Post }) {
         open={optionsOpen}
         onClose={() => setOptionsOpen(false)}
         isOwnPost={isOwnPost}
-        isFollowing={isFollowing(post.author.username)}
-        followsMe={followsMe}
-        onToggleFollow={() => toggleFollow(post.author.username)}
         onCopyLinkPress={handleCopyLinkFromOptions}
-        onSaveToCollectionPress={() => setSaveToCollectionOpen(true)}
+        onSaveToCollectionPress={guard(
+          () => setSaveToCollectionOpen(true),
+          "Sign in to save this post.",
+        )}
         onDeletePress={handleDeletePress}
       />
 
@@ -297,6 +341,12 @@ export function PostCard({ post }: { post: Post }) {
           </div>
         </div>
       )}
+
+      <AuthGateModal
+        open={gateOpen}
+        onClose={closeGate}
+        message={gateMessage}
+      />
     </article>
   );
 }

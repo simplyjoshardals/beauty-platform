@@ -3,8 +3,6 @@
 import { useState } from "react";
 import {
   XIcon,
-  UserMinusIcon,
-  UserPlusIcon,
   LinkIcon,
   BookmarkSimpleIcon,
   TrashIcon,
@@ -15,21 +13,19 @@ type Props = {
   open: boolean;
   onClose: () => void;
   isOwnPost: boolean;
-  isFollowing: boolean;
-  followsMe: boolean;
-  onToggleFollow: () => void;
   onCopyLinkPress: () => void;
   onSaveToCollectionPress: () => void;
   onDeletePress: () => void;
 };
 
+// Follow/Unfollow used to live here as a menu row, but now that PostCard
+// shows it directly in the header (one tap, no menu needed), keeping a
+// second copy here would just be a redundant, out-of-sync control doing
+// the exact same thing.
 export function PostOptionsSheet({
   open,
   onClose,
   isOwnPost,
-  isFollowing,
-  followsMe,
-  onToggleFollow,
   onCopyLinkPress,
   onSaveToCollectionPress,
   onDeletePress,
@@ -37,14 +33,6 @@ export function PostOptionsSheet({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   if (!open) return null;
-
-  // Unfollowing is a one-tap, trivially-reversible action — no
-  // confirmation needed, unlike deleting a post.
-  const followLabel = isFollowing
-    ? "Unfollow"
-    : followsMe
-      ? "Follow back"
-      : "Follow";
 
   function handleDeleteConfirmed() {
     setConfirmingDelete(false);
@@ -72,29 +60,6 @@ export function PostOptionsSheet({
             <XIcon size={20} className="text-foreground" />
           </button>
         </div>
-
-        {/* Can't unfollow yourself — this row only shows on other people's posts */}
-        {!isOwnPost && (
-          <button
-            type="button"
-            onClick={() => {
-              onToggleFollow();
-              onClose();
-            }}
-            className={`flex w-full items-center gap-3 px-4 py-4 text-sm ${
-              isFollowing ? "text-red-500" : "text-foreground"
-            }`}
-          >
-            <span className="flex size-9 items-center justify-center rounded-full bg-foreground/10">
-              {isFollowing ? (
-                <UserMinusIcon size={18} />
-              ) : (
-                <UserPlusIcon size={18} />
-              )}
-            </span>
-            {followLabel}
-          </button>
-        )}
 
         <button
           type="button"

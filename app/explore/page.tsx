@@ -9,6 +9,7 @@ import { PostGrid } from "@/components/profile/PostGrid";
 import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
 import { UserListSkeleton } from "@/components/profile/UserListSkeleton";
 import { UserListRow } from "@/components/profile/UserListRow";
+import { RequireAuth } from "@/components/auth/RequireAuth";
 
 // Simulated so the skeleton is actually visible — swap for a real pending
 // flag once this comes from a real fetch.
@@ -52,44 +53,46 @@ export default function ExplorePage() {
   // else — your own posts already show on your profile and in Home, so
   // they're excluded here rather than cluttering the discovery grid.
   const discoverPosts = posts.filter(
-    (post) => post.author.username !== CURRENT_USER.username
+    (post) => post.author.username !== CURRENT_USER.username,
   );
 
   return (
-    <div className="flex flex-col">
-      <div className="border-b border-foreground/10 px-4 py-2.5">
-        <div className="flex items-center gap-2 rounded-full bg-foreground/5 px-3 py-2">
-          <MagnifyingGlassIcon size={16} className="text-foreground/40" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search people"
-            className="w-full bg-transparent text-sm outline-none placeholder:text-foreground/40"
-          />
+    <RequireAuth>
+      <div className="flex flex-col">
+        <div className="border-b border-foreground/10 px-4 py-2.5">
+          <div className="flex items-center gap-2 rounded-full bg-foreground/5 px-3 py-2">
+            <MagnifyingGlassIcon size={16} className="text-foreground/40" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search people"
+              className="w-full bg-transparent text-sm outline-none placeholder:text-foreground/40"
+            />
+          </div>
         </div>
-      </div>
 
-      {loading ? (
-        <PostGridSkeleton />
-      ) : isSearching ? (
-        searching ? (
-          <UserListSkeleton />
-        ) : matchedUsers.length === 0 ? (
-          <p className="px-4 py-10 text-center text-sm text-foreground/50">
-            No results for &ldquo;{query}&rdquo;
-          </p>
+        {loading ? (
+          <PostGridSkeleton />
+        ) : isSearching ? (
+          searching ? (
+            <UserListSkeleton />
+          ) : matchedUsers.length === 0 ? (
+            <p className="px-4 py-10 text-center text-sm text-foreground/50">
+              No results for &ldquo;{query}&rdquo;
+            </p>
+          ) : (
+            matchedUsers.map((user) => (
+              <UserListRow key={user.username} user={user} />
+            ))
+          )
         ) : (
-          matchedUsers.map((user) => (
-            <UserListRow key={user.username} user={user} />
-          ))
-        )
-      ) : (
-        <PostGrid
-          posts={discoverPosts}
-          emptyTitle="Nothing to explore yet"
-          emptyDescription="New posts from the community will show up here."
-        />
-      )}
-    </div>
+          <PostGrid
+            posts={discoverPosts}
+            emptyTitle="Nothing to explore yet"
+            emptyDescription="New posts from the community will show up here."
+          />
+        )}
+      </div>
+    </RequireAuth>
   );
 }

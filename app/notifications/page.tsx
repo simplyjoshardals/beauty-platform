@@ -5,6 +5,7 @@ import { useNotifications } from "@/context/NotificationsProvider";
 import { NotificationRow } from "@/components/notifications/NotificationRow";
 import { NotificationsListSkeleton } from "@/components/notifications/NotificationsListSkeleton";
 import { EmptyNotifications } from "@/components/notifications/EmptyNotifications";
+import { RequireAuth } from "@/components/auth/RequireAuth";
 
 // Simulated so the skeleton is actually visible — swap for a real pending
 // flag once notifications come from a real fetch.
@@ -20,29 +21,31 @@ export default function NotificationsPage() {
   }, []);
 
   return (
-    <div className="flex flex-col">
-      <div className="flex items-center justify-between border-b border-foreground/10 px-4 py-3">
-        <p className="text-sm font-medium">Notifications</p>
-        {unreadCount > 0 && (
-          <button
-            type="button"
-            onClick={markAllAsRead}
-            className="text-xs font-medium text-foreground/60"
-          >
-            Mark all read
-          </button>
+    <RequireAuth>
+      <div className="flex flex-col">
+        <div className="flex items-center justify-between border-b border-foreground/10 px-4 py-3">
+          <p className="text-sm font-medium">Notifications</p>
+          {unreadCount > 0 && (
+            <button
+              type="button"
+              onClick={markAllAsRead}
+              className="text-xs font-medium text-foreground/60"
+            >
+              Mark all read
+            </button>
+          )}
+        </div>
+
+        {loading ? (
+          <NotificationsListSkeleton />
+        ) : notifications.length === 0 ? (
+          <EmptyNotifications />
+        ) : (
+          notifications.map((n) => (
+            <NotificationRow key={n.id} notification={n} />
+          ))
         )}
       </div>
-
-      {loading ? (
-        <NotificationsListSkeleton />
-      ) : notifications.length === 0 ? (
-        <EmptyNotifications />
-      ) : (
-        notifications.map((n) => (
-          <NotificationRow key={n.id} notification={n} />
-        ))
-      )}
-    </div>
+    </RequireAuth>
   );
 }
