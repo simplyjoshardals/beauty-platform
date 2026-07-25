@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import {
   BellIcon,
@@ -11,6 +12,8 @@ import {
 } from "@phosphor-icons/react";
 import { PATHS } from "@/utils/paths";
 import { useNotifications } from "@/context/NotificationsProvider";
+import { useAuth } from "@/context/AuthProvider";
+import { useProfile } from "@/context/ProfileProvider";
 
 const tabs = [
   { id: "home", label: "Home", href: PATHS.HOME, icon: HouseIcon },
@@ -49,6 +52,8 @@ function isTabActive(pathname: string, href: string) {
 export function BottomNav() {
   const pathname = usePathname();
   const { unreadCount } = useNotifications();
+  const { isAuthenticated } = useAuth();
+  const { profile } = useProfile();
 
   return (
     <nav
@@ -57,6 +62,11 @@ export function BottomNav() {
     >
       {tabs.map(({ id, label, href, icon: Icon }) => {
         const isActive = isTabActive(pathname, href);
+        // Real session, real avatar to show — falls back to the generic
+        // icon when nobody's actually signed in (AuthProvider's
+        // isAuthenticated is still false until a magic link is verified).
+        const showAvatar = id === "profile" && isAuthenticated;
+
         return (
           <Link
             key={id}
@@ -66,12 +76,29 @@ export function BottomNav() {
             className="flex flex-1 items-center justify-center transition-transform duration-100 active:scale-90"
           >
             <span className="relative inline-flex">
-              <Icon
-                className="size-6 sm:size-6.5"
-                weight={
-                  isActive ? (id != "explore" ? "fill" : "bold") : "regular"
-                }
-              />
+              {showAvatar ? (
+                <span
+                  className={`block size-6 overflow-hidden rounded-full ring-1 ring-foreground/15 sm:size-6.5 ${
+                    isActive ? "ring-2 ring-foreground" : ""
+                  }`}
+                >
+                  <Image
+                    src={profile.avatarSrc}
+                    alt=""
+                    width={26}
+                    height={26}
+                    unoptimized
+                    className="size-full object-cover"
+                  />
+                </span>
+              ) : (
+                <Icon
+                  className="size-6 sm:size-6.5"
+                  weight={
+                    isActive ? (id != "explore" ? "fill" : "bold") : "regular"
+                  }
+                />
+              )}
               {id === "notifications" && unreadCount > 0 && (
                 <span
                   className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-red-500 ring-2 ring-background"

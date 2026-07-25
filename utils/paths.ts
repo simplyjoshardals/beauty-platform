@@ -13,4 +13,7 @@ export const PATHS = {
   USER_FOLLOWERS: (username: string) => `/u/${username}/followers`,
   USER_FOLLOWING: (username: string) => `/u/${username}/following`,
   SAVED_COLLECTION: (collectionId: string) => `/saved/${collectionId}`,
+  AUTH: "/auth",
+  AUTH_VERIFY: (token: string) => `/auth/verify/${token}`,
+  ONBOARDING: "/onboarding",
 };
