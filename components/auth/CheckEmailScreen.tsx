@@ -11,13 +11,21 @@ const RESEND_COOLDOWN_SECONDS = 30;
 export function CheckEmailScreen({
   email,
   onUseDifferentEmail,
+  redirectTo,
 }: {
   email: string;
   onUseDifferentEmail: () => void;
+  redirectTo?: string;
 }) {
   const router = useRouter();
   const { requestMagicLink } = useAuth();
   const [cooldown, setCooldown] = useState(RESEND_COOLDOWN_SECONDS);
+
+  // Carries the "where to return to" info through the one path that
+  // actually mimics clicking the real email link in this simulation.
+  const redirectQuery = redirectTo
+    ? `?redirect=${encodeURIComponent(redirectTo)}`
+    : "";
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -75,14 +83,20 @@ export function CheckEmailScreen({
         <div className="flex flex-col gap-1.5">
           <button
             type="button"
-            onClick={() => router.push(PATHS.AUTH_VERIFY("demo-valid-token"))}
+            onClick={() =>
+              router.push(
+                `${PATHS.AUTH_VERIFY("demo-valid-token")}${redirectQuery}`,
+              )
+            }
             className="text-xs font-medium text-foreground/50 underline"
           >
             Simulate clicking the email link
           </button>
           <button
             type="button"
-            onClick={() => router.push(PATHS.AUTH_VERIFY("expired"))}
+            onClick={() =>
+              router.push(`${PATHS.AUTH_VERIFY("expired")}${redirectQuery}`)
+            }
             className="text-xs font-medium text-foreground/50 underline"
           >
             Simulate an expired link

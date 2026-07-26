@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { XIcon } from "@phosphor-icons/react";
 import { PATHS } from "@/utils/paths";
 
@@ -22,8 +22,18 @@ export function AuthGateModal({
   onClose,
 }: Props) {
   const router = useRouter();
+  // Reads its OWN current page — this modal is always rendered on
+  // whatever page triggered it, so there's nothing to thread through as
+  // a prop. After a successful sign-in, /auth/verify redirects back here
+  // instead of the default onboarding flow.
+  const pathname = usePathname();
 
   if (!open) return null;
+
+  function handleSignIn() {
+    const signInUrl = `${PATHS.AUTH}?redirect=${encodeURIComponent(pathname)}`;
+    router.push(signInUrl);
+  }
 
   return (
     <div className="fixed inset-0 z-95 flex items-center justify-center px-6">
@@ -50,7 +60,7 @@ export function AuthGateModal({
 
         <button
           type="button"
-          onClick={() => router.push(PATHS.AUTH)}
+          onClick={handleSignIn}
           className="mt-5 w-full rounded-lg bg-foreground py-2.5 text-sm font-medium text-background"
         >
           Sign in

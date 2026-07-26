@@ -18,10 +18,22 @@ type Status = "verifying" | "success" | "expired" | "invalid";
 const VERIFY_DELAY_MS = 1200;
 const REDIRECT_DELAY_MS = 900;
 
-export function VerifyContent({ token }: { token: string }) {
+export function VerifyContent({
+  token,
+  redirectTo,
+}: {
+  token: string;
+  redirectTo?: string;
+}) {
   const router = useRouter();
   const { verifyToken } = useAuth();
   const [status, setStatus] = useState<Status>("verifying");
+
+  // Only ever treat this as a same-app relative path — a query param is
+  // just a string an attacker could set to anything, so this guards
+  // against it ever being used to redirect somewhere off-site.
+  const safeRedirect =
+    redirectTo && redirectTo.startsWith("/") ? redirectTo : undefined;
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -38,11 +50,17 @@ export function VerifyContent({ token }: { token: string }) {
 
   useEffect(() => {
     if (status !== "success") return;
+    // Someone who got sent here from a specific gated page/action goes
+    // straight back to it — onboarding is only for a "fresh" sign-in with
+    // no particular origin, not for someone just trying to finish what
+    // they were already doing.
+    const destination = safeRedirect ?? PATHS.ONBOARDING;
     const timer = window.setTimeout(
-      () => router.replace(PATHS.ONBOARDING),
+      () => router.replace(destination),
       REDIRECT_DELAY_MS,
     );
     return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, router]);
 
   return (

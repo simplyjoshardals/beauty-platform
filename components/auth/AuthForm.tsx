@@ -13,7 +13,7 @@ function isValidEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
-export function AuthForm() {
+export function AuthForm({ redirectTo }: { redirectTo?: string }) {
   const { requestMagicLink } = useAuth();
   const [email, setEmail] = useState("");
   const [submittedEmail, setSubmittedEmail] = useState<string | null>(null);
@@ -37,6 +37,7 @@ export function AuthForm() {
         <CheckEmailScreen
           email={submittedEmail}
           onUseDifferentEmail={() => setSubmittedEmail(null)}
+          redirectTo={redirectTo}
         />
       ) : (
         <div className="w-full max-w-xs">
