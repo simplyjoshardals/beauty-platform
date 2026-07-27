@@ -3,7 +3,7 @@ import { RequireAuth } from "@/components/auth/RequireAuth";
 
 export default function CreatePostPage() {
   return (
-    <RequireAuth message="Sign in to share a post.">
+    <RequireAuth>
       <CreatePostForm />
     </RequireAuth>
   );

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { MagnifyingGlassIcon } from "@phosphor-icons/react";
 import { usePosts } from "@/context/PostsProvider";
-import { CURRENT_USER } from "@/constants/currentUser";
+import { CURRENT_USER_ID } from "@/constants/currentUser";
 import { MOCK_USERS } from "@/data/mockUsers";
 import { PostGrid } from "@/components/profile/PostGrid";
 import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
@@ -53,7 +53,7 @@ export default function ExplorePage() {
   // else — your own posts already show on your profile and in Home, so
   // they're excluded here rather than cluttering the discovery grid.
   const discoverPosts = posts.filter(
-    (post) => post.author.username !== CURRENT_USER.username,
+    (post) => post.author.id !== CURRENT_USER_ID,
   );
 
   return (

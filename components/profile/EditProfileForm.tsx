@@ -7,12 +7,15 @@ import { XIcon } from "@phosphor-icons/react";
 import { useProfile } from "@/context/ProfileProvider";
 import { ProductTagEditor } from "@/components/shared/ProductTagEditor";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { validateUsername } from "@/utils/username";
 import type { ProductTag } from "@/types/post";
 
 export function EditProfileForm() {
   const router = useRouter();
   const { profile, updateProfile } = useProfile();
 
+  const [username, setUsername] = useState(profile.username);
+  const [usernameError, setUsernameError] = useState<string | null>(null);
   const [avatarSrc, setAvatarSrc] = useState(profile.avatarSrc);
   const [bio, setBio] = useState(profile.bio);
   const [toneTag, setToneTag] = useState(profile.toneTag);
@@ -29,7 +32,18 @@ export function EditProfileForm() {
   }
 
   function handleSave() {
-    updateProfile({ avatarSrc, bio, toneTag, pinnedRoutine });
+    const error = validateUsername(username, profile.username);
+    if (error) {
+      setUsernameError(error);
+      return;
+    }
+    updateProfile({
+      username: username.trim().toLowerCase(),
+      avatarSrc,
+      bio,
+      toneTag,
+      pinnedRoutine,
+    });
     router.back();
   }
 
@@ -37,6 +51,7 @@ export function EditProfileForm() {
   // canceling without touching anything shouldn't need confirmation.
   function hasUnsavedChanges() {
     return (
+      username !== profile.username ||
       avatarSrc !== profile.avatarSrc ||
       bio !== profile.bio ||
       toneTag !== profile.toneTag ||
@@ -98,6 +113,28 @@ export function EditProfileForm() {
             onChange={handleAvatarSelected}
             className="hidden"
           />
+        </div>
+
+        <div className="mb-5">
+          <label className="mb-1.5 block text-xs text-foreground/50">
+            Username
+          </label>
+          <div className="flex items-center rounded-lg border border-foreground/15 px-3 py-2">
+            <span className="text-sm text-foreground/40">@</span>
+            <input
+              value={username}
+              onChange={(e) => {
+                setUsername(e.target.value);
+                setUsernameError(null);
+              }}
+              autoCapitalize="none"
+              autoCorrect="off"
+              className="flex-1 bg-transparent pl-1 text-sm outline-none"
+            />
+          </div>
+          {usernameError && (
+            <p className="mt-1.5 text-xs text-red-500">{usernameError}</p>
+          )}
         </div>
 
         <div className="mb-5">

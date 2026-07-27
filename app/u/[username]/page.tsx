@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { notFound } from "next/navigation";
 import { usePosts } from "@/context/PostsProvider";
 import { useFollow } from "@/context/FollowProvider";
-import { CURRENT_USER } from "@/constants/currentUser";
+import { useProfile } from "@/context/ProfileProvider";
 import { getMockUser } from "@/data/mockUsers";
 import { isMockFollowerOfCurrentUser } from "@/data/mockFollowers";
 import { PATHS } from "@/utils/paths";
@@ -28,13 +28,17 @@ export default function UserProfilePage({ params }: Props) {
   const router = useRouter();
   const { posts } = usePosts();
   const { isFollowing, toggleFollow } = useFollow();
+  const { profile } = useProfile();
   const [loading, setLoading] = useState(true);
   const { gateOpen, closeGate, guard } = useAuthGatedAction();
 
   // This route is for viewing OTHER people. Your own profile — with Edit
   // Profile instead of a Follow button — lives at /profile. Redirect
   // rather than rendering a nonsensical "follow yourself" state.
-  const isSelf = username === CURRENT_USER.username;
+  // Compared against your LIVE username (not a frozen constant) — since
+  // username is now editable, visiting /u/your-new-handle needs to still
+  // correctly recognize it's you, right after a rename.
+  const isSelf = username === profile.username;
 
   useEffect(() => {
     if (isSelf) {
@@ -99,11 +103,7 @@ export default function UserProfilePage({ params }: Props) {
         <PostGrid posts={userPosts} />
       </div>
 
-      <AuthGateModal
-        open={gateOpen}
-        onClose={closeGate}
-        message="Sign in to follow accounts."
-      />
+      <AuthGateModal open={gateOpen} onClose={closeGate} />
     </div>
   );
 }

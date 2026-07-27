@@ -11,7 +11,7 @@ import {
   PlusIcon,
 } from "@phosphor-icons/react";
 import { usePosts } from "@/context/PostsProvider";
-import { CURRENT_USER } from "@/constants/currentUser";
+import { useProfile } from "@/context/ProfileProvider";
 import { ProductTagEditor } from "@/components/shared/ProductTagEditor";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { PATHS } from "@/utils/paths";
@@ -24,6 +24,7 @@ const MAX_CAROUSEL_IMAGES = 10;
 export function CreatePostForm() {
   const router = useRouter();
   const { addPost } = usePosts();
+  const { profile } = useProfile();
 
   const [postType, setPostType] = useState<PostType>("photo");
   const [images, setImages] = useState<string[]>([]);
@@ -138,7 +139,12 @@ export function CreatePostForm() {
 
     const newPost: Post = {
       id: crypto.randomUUID(),
-      author: CURRENT_USER,
+      author: {
+        id: profile.id,
+        username: profile.username,
+        avatarSrc: profile.avatarSrc,
+        toneTag: profile.toneTag || undefined,
+      },
       media,
       products: products.length > 0 ? products : undefined,
       caption,

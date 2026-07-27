@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { XIcon, PaperPlaneRightIcon } from "@phosphor-icons/react";
 import type { Comment } from "@/types/comment";
-import { CURRENT_USER } from "@/constants/currentUser";
+import { CURRENT_USER_ID } from "@/constants/currentUser";
 import { sortByAuthorEngagement } from "@/utils/sortComments";
 import { CommentItem } from "./CommentItem";
 import { CommentSheetSkeleton } from "./CommentSheetSkeleton";
@@ -16,20 +16,29 @@ type Props = {
   comments: Comment[];
   onAddComment: (text: string, parentId?: string) => void;
   onDeleteComment: (commentId: string, topLevelId?: string) => void;
-  postAuthorUsername: string;
+  postAuthorId: string;
 };
 
+// Plain controlled open/onClose — no history logic in here. That lives
+// in PostCard now, since PostCard is what actually owns `commentsOpen`
+// and knows the post's id, and it needs to handle a case this component
+// can't: reopening the sheet after a REAL navigation away and back (e.g.
+// tapping a commenter's avatar to view their profile, then hitting back).
 export function CommentSheet({
   open,
   onClose,
   comments,
   onAddComment,
   onDeleteComment,
-  postAuthorUsername,
+  postAuthorId,
 }: Props) {
   const [draft, setDraft] = useState("");
+  // authorId drives the "is this a self-reply" check (stays correct even
+  // if either person renames later); username is kept only for what's
+  // actually displayed — the reply-target bar and the @mention prefix.
   const [replyingTo, setReplyingTo] = useState<{
     topLevelId: string;
+    authorId: string;
     username: string;
   } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -50,14 +59,18 @@ export function CommentSheet({
   // Author's own comments lead, then threads they've replied to, then
   // untouched comments — see sortByAuthorEngagement for the tier logic.
   const sortedComments = useMemo(
-    () => sortByAuthorEngagement(comments, postAuthorUsername),
-    [comments, postAuthorUsername],
+    () => sortByAuthorEngagement(comments, postAuthorId),
+    [comments, postAuthorId],
   );
 
   if (!open) return null;
 
-  function handleReplyPress(topLevelId: string, username: string) {
-    setReplyingTo({ topLevelId, username });
+  function handleReplyPress(
+    topLevelId: string,
+    authorId: string,
+    username: string,
+  ) {
+    setReplyingTo({ topLevelId, authorId, username });
     setDraft("");
     inputRef.current?.focus();
   }
@@ -74,7 +87,7 @@ export function CommentSheet({
     // that's what makes it impossible for the user to backspace out.
     // Skipped entirely when replying to your own comment — mentioning
     // yourself is just noise.
-    const isReplyingToSelf = replyingTo?.username === CURRENT_USER.username;
+    const isReplyingToSelf = replyingTo?.authorId === CURRENT_USER_ID;
     const finalText =
       replyingTo && !isReplyingToSelf
         ? `@${replyingTo.username} ${trimmed}`
@@ -117,7 +130,7 @@ export function CommentSheet({
               <CommentItem
                 key={c.id}
                 comment={c}
-                postAuthorUsername={postAuthorUsername}
+                postAuthorId={postAuthorId}
                 onReplyPress={handleReplyPress}
                 onDeleteComment={onDeleteComment}
                 guard={guard}
@@ -129,7 +142,7 @@ export function CommentSheet({
         {replyingTo && (
           <div className="flex items-center justify-between border-t border-foreground/10 px-3 py-1.5 text-xs text-foreground/50">
             <span>
-              {replyingTo.username === CURRENT_USER.username ? (
+              {replyingTo.authorId === CURRENT_USER_ID ? (
                 "Replying to your comment"
               ) : (
                 <>
@@ -153,13 +166,10 @@ export function CommentSheet({
             ref={inputRef}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) =>
-              e.key === "Enter" &&
-              guard(handleSubmit, "Sign in to leave a comment.")()
-            }
+            onKeyDown={(e) => e.key === "Enter" && guard(handleSubmit)()}
             placeholder={
               replyingTo
-                ? replyingTo.username === CURRENT_USER.username
+                ? replyingTo.authorId === CURRENT_USER_ID
                   ? "Add to your comment…"
                   : `Reply to @${replyingTo.username}…`
                 : "Add a comment…"
@@ -168,7 +178,7 @@ export function CommentSheet({
           />
           <button
             type="button"
-            onClick={guard(handleSubmit, "Sign in to leave a comment.")}
+            onClick={guard(handleSubmit)}
             disabled={!draft.trim()}
             aria-label="Post comment"
             className="flex size-9 items-center justify-center text-foreground disabled:opacity-30"

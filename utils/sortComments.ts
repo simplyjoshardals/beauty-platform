@@ -1,15 +1,16 @@
 import type { Comment } from "@/types/comment";
 
+// Compares by id, not username — this "is the post's author the same
+// person as this comment's author" check needs to stay correct even if
+// either of them renamed themselves since the comment was posted.
+
 // Tier 0: the author's own comment
 // Tier 1: someone else's comment that the author has already replied to
 // Tier 2: someone else's comment the author hasn't engaged with yet
-function getEngagementTier(
-  comment: Comment,
-  authorUsername: string,
-): 0 | 1 | 2 {
-  if (comment.author.username === authorUsername) return 0;
+function getEngagementTier(comment: Comment, authorId: string): 0 | 1 | 2 {
+  if (comment.author.id === authorId) return 0;
   const hasAuthorReply = comment.replies?.some(
-    (reply) => reply.author.username === authorUsername,
+    (reply) => reply.author.id === authorId,
   );
   return hasAuthorReply ? 1 : 2;
 }
@@ -20,12 +21,10 @@ function getEngagementTier(
 // relative order within each tier is otherwise preserved.
 export function sortByAuthorEngagement(
   comments: Comment[],
-  authorUsername: string,
+  authorId: string,
 ): Comment[] {
   return [...comments].sort(
-    (a, b) =>
-      getEngagementTier(a, authorUsername) -
-      getEngagementTier(b, authorUsername),
+    (a, b) => getEngagementTier(a, authorId) - getEngagementTier(b, authorId),
   );
 }
 
@@ -34,13 +33,9 @@ export function sortByAuthorEngagement(
 // author's own reply first, if present.
 export function sortAuthorFirst(
   comments: Comment[],
-  authorUsername: string,
+  authorId: string,
 ): Comment[] {
-  const authorItems = comments.filter(
-    (c) => c.author.username === authorUsername,
-  );
-  const otherItems = comments.filter(
-    (c) => c.author.username !== authorUsername,
-  );
+  const authorItems = comments.filter((c) => c.author.id === authorId);
+  const otherItems = comments.filter((c) => c.author.id !== authorId);
   return [...authorItems, ...otherItems];
 }

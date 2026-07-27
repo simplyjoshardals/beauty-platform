@@ -2,17 +2,23 @@
 
 import { useMemo, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { HeartIcon } from "@phosphor-icons/react";
 import type { Comment } from "@/types/comment";
 import { getRelativeTime } from "@/utils/time";
 import { sortAuthorFirst } from "@/utils/sortComments";
-import { CURRENT_USER } from "@/constants/currentUser";
+import { CURRENT_USER_ID } from "@/constants/currentUser";
+import { PATHS } from "@/utils/paths";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 
 type Props = {
   comment: Comment;
-  postAuthorUsername: string;
-  onReplyPress: (topLevelId: string, username: string) => void;
+  postAuthorId: string;
+  onReplyPress: (
+    topLevelId: string,
+    authorId: string,
+    username: string,
+  ) => void;
   // topLevelId param: present when deleting a reply (points at its parent),
   // omitted when deleting a top-level comment directly.
   onDeleteComment: (commentId: string, topLevelId?: string) => void;
@@ -28,7 +34,7 @@ type Props = {
 
 export function CommentItem({
   comment,
-  postAuthorUsername,
+  postAuthorId,
   onReplyPress,
   onDeleteComment,
   guard,
@@ -41,7 +47,9 @@ export function CommentItem({
   );
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
-  const isAuthor = comment.author.username === postAuthorUsername;
+  // Compares by id, not username — stays correct even if the commenter or
+  // the post's author renamed themselves after the fact.
+  const isAuthor = comment.author.id === postAuthorId;
   const isReply = topLevelId !== undefined;
   const replyTargetId = topLevelId ?? comment.id;
   const hasReplies = (comment.replies?.length ?? 0) > 0;
@@ -50,15 +58,12 @@ export function CommentItem({
   // can delete. Nothing to delete twice on an already-deleted comment.
   const canDelete =
     !comment.deleted &&
-    (comment.author.username === CURRENT_USER.username ||
-      postAuthorUsername === CURRENT_USER.username);
+    (comment.author.id === CURRENT_USER_ID || postAuthorId === CURRENT_USER_ID);
 
   const sortedReplies = useMemo(
     () =>
-      comment.replies
-        ? sortAuthorFirst(comment.replies, postAuthorUsername)
-        : [],
-    [comment.replies, postAuthorUsername],
+      comment.replies ? sortAuthorFirst(comment.replies, postAuthorId) : [],
+    [comment.replies, postAuthorId],
   );
 
   function toggleLike() {
@@ -86,7 +91,7 @@ export function CommentItem({
                 <CommentItem
                   key={reply.id}
                   comment={reply}
-                  postAuthorUsername={postAuthorUsername}
+                  postAuthorId={postAuthorId}
                   onReplyPress={onReplyPress}
                   onDeleteComment={onDeleteComment}
                   guard={guard}
@@ -134,16 +139,26 @@ export function CommentItem({
   return (
     <div className={isReply ? "" : "px-3 py-2"}>
       <div className="flex gap-2">
-        <Image
-          src={comment.author.avatarSrc}
-          alt={comment.author.username}
-          width={isReply ? 26 : 32}
-          height={isReply ? 26 : 32}
-          className={`shrink-0 rounded-full object-cover ${isReply ? "size-6.5" : "size-8"}`}
-        />
+        <Link
+          href={PATHS.USER_PROFILE(comment.author.username)}
+          className="shrink-0"
+        >
+          <Image
+            src={comment.author.avatarSrc}
+            alt={comment.author.username}
+            width={isReply ? 26 : 32}
+            height={isReply ? 26 : 32}
+            className={`rounded-full object-cover ${isReply ? "size-6.5" : "size-8"}`}
+          />
+        </Link>
         <div className="flex-1">
           <p className="text-sm leading-snug">
-            <span className="font-medium">{comment.author.username}</span>
+            <Link
+              href={PATHS.USER_PROFILE(comment.author.username)}
+              className="font-medium"
+            >
+              {comment.author.username}
+            </Link>
             {isAuthor && (
               <span className="ml-1.5 align-middle text-[10px] font-medium uppercase tracking-wide text-foreground/40">
                 Author
@@ -158,7 +173,11 @@ export function CommentItem({
             <button
               type="button"
               onClick={() =>
-                onReplyPress(replyTargetId, comment.author.username)
+                onReplyPress(
+                  replyTargetId,
+                  comment.author.id,
+                  comment.author.username,
+                )
               }
               className="font-medium"
             >
@@ -177,7 +196,7 @@ export function CommentItem({
         </div>
         <button
           type="button"
-          onClick={guard(toggleLike, "Sign in to like this comment.")}
+          onClick={guard(toggleLike)}
           aria-label={liked ? "Unlike comment" : "Like comment"}
           className="flex flex-col items-center gap-0.5 pt-0.5"
         >

@@ -16,6 +16,7 @@ export type PostMedia =
 export type Post = {
   id: string;
   author: {
+    id: string; // stable identity key — compare ownership by this, never by username
     username: string;
     avatarSrc: string;
     toneTag?: string; // e.g. "Combination skin" — optional, subtle, self-reported

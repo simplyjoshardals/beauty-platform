@@ -1,0 +1,301 @@
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+
+// =======================================================================
+// USER
+// Every relation keys off `id`, never `username`. Username is a mutable,
+// unique display handle (3–20 chars, lowercase letters/numbers/underscore/
+// period — enforced app-side, matching utils/username.ts; Prisma has no
+// native CHECK constraint support, so add one via a raw SQL migration if
+// you want it enforced at the DB level too, not just in the app).
+// =======================================================================
+model User {
+  id        String   @id @default(cuid())
+  username  String   @unique @db.VarChar(20)
+  email     String   @unique
+  avatarSrc String
+  bio       String   @default("") @db.Text
+  toneTag   String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  posts        Post[]
+  comments     Comment[]
+  likes        Like[]
+  commentLikes CommentLike[]
+  savedPosts   SavedPost[]
+  collections  Collection[]
+  routineItems RoutineItem[] // profile's "pinned routine" chips
+
+  following Follow[] @relation("UserFollowing")
+  followers Follow[] @relation("UserFollowers")
+
+  notificationsReceived Notification[] @relation("NotificationsReceived")
+  notificationsSent     Notification[] @relation("NotificationsSent")
+}
+
+// =======================================================================
+// FOLLOW
+// =======================================================================
+model Follow {
+  id          String   @id @default(cuid())
+  followerId  String
+  follower    User     @relation("UserFollowing", fields: [followerId], references: [id], onDelete: Cascade)
+  followingId String
+  following   User     @relation("UserFollowers", fields: [followingId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+
+  @@unique([followerId, followingId])
+  @@index([followingId]) // fast "who follows this user" lookups
+}
+
+// =======================================================================
+// POST
+// Media modeled relationally — nullable columns per variant, discriminated
+// by mediaType — rather than as JSON, matching the four post types the
+// app already has. likeCount/commentCount are NOT denormalized columns;
+// they're derived via Prisma's `_count` at query time so nothing can ever
+// drift out of sync. Revisit as a denormalization once traffic actually
+// demands it.
+// =======================================================================
+enum MediaType {
+  IMAGE
+  CAROUSEL
+  VIDEO
+  BEFORE_AFTER
+}
+
+model Post {
+  id       String @id @default(cuid())
+  authorId String
+  author   User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  mediaType MediaType
+
+  // IMAGE
+  imageSrc String?
+  imageAlt String?
+
+  // CAROUSEL — slides live in CarouselItem, ordered
+  carouselItems CarouselItem[]
+
+  // VIDEO
+  videoSrc    String?
+  videoPoster String?
+
+  // BEFORE_AFTER
+  beforeSrc String?
+  beforeAlt String?
+  afterSrc  String?
+  afterAlt  String?
+
+  caption  String       @db.Text
+  products ProductTag[] // tagged products row on the card
+
+  likes      Like[]
+  comments   Comment[]
+  savedPosts SavedPost[]
+  notifications Notification[] // e.g. "so-and-so liked/commented on this post"
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([authorId, createdAt]) // profile grid + author's posts, newest first
+}
+
+model CarouselItem {
+  id     String @id @default(cuid())
+  postId String
+  post   Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  src    String
+  alt    String
+  order  Int
+
+  @@index([postId, order])
+}
+
+// Tagged products on a post — "Foundation: Fenty Pro Filt'r 240" chips.
+// Kept separate from RoutineItem below, even though both are just
+// {label} — different owners (Post vs User), different lifecycles.
+model ProductTag {
+  id     String @id @default(cuid())
+  postId String
+  post   Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  label  String
+
+  @@index([postId])
+}
+
+// Profile's pinned routine — same {label} shape as ProductTag, kept as
+// its own model for the reason above.
+model RoutineItem {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label  String
+  order  Int    @default(0)
+
+  @@index([userId, order])
+}
+
+// =======================================================================
+// LIKE (posts) — a join table, not a boolean, so "have I liked this" is
+// a real per-user fact.
+// =======================================================================
+model Like {
+  id        String   @id @default(cuid())
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([postId, userId])
+  @@index([userId])
+}
+
+// =======================================================================
+// COMMENT
+// One level of nesting via self-relation (parentId) — replies never have
+// their own sub-replies. `deleted` implements the Reddit-style
+// placeholder: the row stays in place so replies underneath stay
+// readable, but its content is hidden once true. Whether the UI shows a
+// placeholder or fully hides it depends on whether replies exist — that
+// logic lives in the app, not the schema.
+// =======================================================================
+model Comment {
+  id       String  @id @default(cuid())
+  postId   String
+  post     Post    @relation(fields: [postId], references: [id], onDelete: Cascade)
+  authorId String
+  author   User    @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  text     String  @db.Text
+  deleted  Boolean @default(false)
+
+  parentId String?
+  parent   Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies  Comment[] @relation("CommentReplies")
+
+  likes CommentLike[]
+
+  createdAt DateTime @default(now())
+
+  @@index([postId])
+  @@index([parentId])
+}
+
+model CommentLike {
+  id        String   @id @default(cuid())
+  commentId String
+  comment   Comment  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([commentId, userId])
+}
+
+// =======================================================================
+// SAVED POSTS + COLLECTIONS
+// SavedPost is the base fact ("All Saved"). Collection is a named folder.
+// CollectionPost joins them — a saved post can belong to zero, one, or
+// many collections at once. Deleting a Collection cascades only to
+// CollectionPost rows, never to SavedPost — removing a folder never
+// unsaves anything.
+// =======================================================================
+model SavedPost {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  collections CollectionPost[]
+
+  @@unique([userId, postId])
+  @@index([userId])
+}
+
+model Collection {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  createdAt DateTime @default(now())
+
+  posts CollectionPost[]
+
+  @@index([userId])
+}
+
+model CollectionPost {
+  id           String     @id @default(cuid())
+  collectionId String
+  collection   Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  savedPostId  String
+  savedPost    SavedPost  @relation(fields: [savedPostId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+
+  @@unique([collectionId, savedPostId])
+  @@index([savedPostId])
+}
+
+// =======================================================================
+// NOTIFICATIONS
+// commentText is a snapshot, not a live FK to Comment — a notification
+// still reads correctly even if the referenced comment is later deleted
+// or edited. postId is nullable since FOLLOW notifications have no post.
+// =======================================================================
+enum NotificationType {
+  LIKE
+  COMMENT
+  FOLLOW
+  REPLY
+}
+
+model Notification {
+  id          String           @id @default(cuid())
+  recipientId String
+  recipient   User             @relation("NotificationsReceived", fields: [recipientId], references: [id], onDelete: Cascade)
+  actorId     String
+  actor       User             @relation("NotificationsSent", fields: [actorId], references: [id], onDelete: Cascade)
+  type        NotificationType
+
+  postId String?
+  post   Post?   @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  commentText String? @db.Text
+
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([recipientId, createdAt])
+}
+
+// =======================================================================
+// AUTH — magic link tokens
+// Not tied to a User via FK: a magic link is requested by email before
+// it's known whether that email has an account. Verification looks up
+// (or creates) the User by email at the point the token is redeemed —
+// same "login and signup are the same action" model the app's /auth
+// flow was built around.
+// =======================================================================
+model MagicLinkToken {
+  id        String    @id @default(cuid())
+  token     String    @unique
+  email     String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([email])
+}

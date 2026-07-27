@@ -17,7 +17,7 @@ type Props = {
 
 export function AuthGateModal({
   open,
-  message = "Sign in to see more from Vanity.",
+  message = "Sign in to continue using Vanity.",
   dismissible = true,
   onClose,
 }: Props) {

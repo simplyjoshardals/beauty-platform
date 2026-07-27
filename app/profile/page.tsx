@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { usePosts } from "@/context/PostsProvider";
 import { useFollow } from "@/context/FollowProvider";
 import { useProfile } from "@/context/ProfileProvider";
-import { CURRENT_USER } from "@/constants/currentUser";
+import { CURRENT_USER_ID } from "@/constants/currentUser";
 import { CURRENT_USER_PROFILE } from "@/data/currentUserProfile";
 import { ProfileHeader } from "@/components/profile/ProfileHeader";
 import { ProfileHeaderSkeleton } from "@/components/profile/ProfileHeaderSkeleton";
@@ -28,9 +28,7 @@ export default function ProfilePage() {
     return () => window.clearTimeout(timer);
   }, []);
 
-  const myPosts = posts.filter(
-    (post) => post.author.username === CURRENT_USER.username,
-  );
+  const myPosts = posts.filter((post) => post.author.id === CURRENT_USER_ID);
 
   // Computed once, wrapped once — RequireAuth only needs to appear a
   // single time regardless of which branch below actually renders.
@@ -52,7 +50,7 @@ export default function ProfilePage() {
     <div className="flex flex-col">
       <ProfileHeader
         isOwnProfile
-        username={CURRENT_USER.username}
+        username={profile.username}
         avatarSrc={profile.avatarSrc}
         bio={profile.bio}
         toneTag={profile.toneTag}

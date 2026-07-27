@@ -2,10 +2,12 @@
 
 import { createContext, useContext, useState, type ReactNode } from "react";
 import type { ProductTag } from "@/types/post";
-import { CURRENT_USER } from "@/constants/currentUser";
+import { CURRENT_USER_ID } from "@/constants/currentUser";
 import { CURRENT_USER_PROFILE } from "@/data/currentUserProfile";
 
 export type EditableProfile = {
+  id: string; // stable, never edited — see CURRENT_USER_ID
+  username: string; // now genuinely editable, unlike the old hardcoded "you"
   avatarSrc: string;
   bio: string;
   toneTag: string;
@@ -20,13 +22,14 @@ type ProfileContextValue = {
 const ProfileContext = createContext<ProfileContextValue | null>(null);
 
 // In-memory only, same caveat as posts/follow state — resets on refresh.
-// Deliberately does NOT include username: it currently doubles as the
-// stable identity key used for ownership checks (isOwnPost) and follow
-// lookups throughout the app. Making it editable safely needs a real
-// user-id system first, so it stays fixed on CURRENT_USER for now.
+// Seeded with a placeholder-looking username on purpose: onboarding's
+// first step now forces picking a real one before anything else, the
+// same way a real app wouldn't let you post as "user482910."
 export function ProfileProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<EditableProfile>({
-    avatarSrc: CURRENT_USER.avatarSrc,
+    id: CURRENT_USER_ID,
+    username: "newuser",
+    avatarSrc: "/mock/avatar-you.jpg",
     bio: CURRENT_USER_PROFILE.bio,
     toneTag: CURRENT_USER_PROFILE.toneTag,
     pinnedRoutine: CURRENT_USER_PROFILE.pinnedRoutine,

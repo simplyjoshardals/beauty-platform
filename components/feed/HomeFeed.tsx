@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { usePosts } from "@/context/PostsProvider";
 import { useFollow } from "@/context/FollowProvider";
-import { CURRENT_USER } from "@/constants/currentUser";
+import { CURRENT_USER_ID } from "@/constants/currentUser";
 import { PostCard } from "./PostCard";
 import { HomeFeedSkeleton } from "./HomeFeedSkeleton";
 import { EmptyHomeFeed } from "./EmptyHomeFeed";
@@ -29,8 +29,7 @@ export function HomeFeed() {
 
   const followingFeed = posts.filter(
     (post) =>
-      post.author.username === CURRENT_USER.username ||
-      isFollowing(post.author.username),
+      post.author.id === CURRENT_USER_ID || isFollowing(post.author.username),
   );
 
   if (followingFeed.length === 0) {

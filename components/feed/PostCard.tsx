@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
@@ -8,7 +8,8 @@ import { DotsThreeIcon, HeartIcon } from "@phosphor-icons/react";
 import type { Post } from "@/types/post";
 import type { Comment } from "@/types/comment";
 import { getRelativeTime } from "@/utils/time";
-import { CURRENT_USER } from "@/constants/currentUser";
+import { CURRENT_USER_ID } from "@/constants/currentUser";
+import { useProfile } from "@/context/ProfileProvider";
 import { Carousel } from "./Carousel";
 import { VideoPost } from "./VideoPost";
 import { BeforeAfterSlider } from "./BeforeAfterSlider";
@@ -37,6 +38,7 @@ export function PostCard({ post }: { post: Post }) {
   const followsMe = isMockFollowerOfCurrentUser(post.author.username);
   const { gateOpen, gateMessage, closeGate, guard } = useAuthGatedAction();
   const { isAuthenticated } = useAuth();
+  const { profile } = useProfile();
   const { isSaved, toggleSave } = useSavedPosts();
   const [likeCount, setLikeCount] = useState(post.likeCount);
   const [showHeartPop, setShowHeartPop] = useState(false);
@@ -46,8 +48,48 @@ export function PostCard({ post }: { post: Post }) {
   const [shareMenuOpen, setShareMenuOpen] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [showCopiedToast, setShowCopiedToast] = useState(false);
+
+  // The URL hash is what makes the comment sheet survive a REAL
+  // navigation away and back — e.g. tapping a commenter's avatar to view
+  // their profile, then pressing back. Local state alone can't do this:
+  // that navigation unmounts PostCard entirely, and a fresh useState(false)
+  // has no memory the sheet used to be open. The hash does, because the
+  // browser restores it as part of the actual URL when you go back.
+  const commentsHash = `#comments-${post.id}`;
+
+  useEffect(() => {
+    // Reopen on mount if we're arriving at a URL that still points here.
+    if (window.location.hash === commentsHash) {
+      setCommentsOpen(true);
+    }
+
+    // Back button/gesture while still on this same page: if the hash no
+    // longer matches, close — this is the "just press back to dismiss"
+    // case that doesn't involve leaving the page at all.
+    function handlePopState() {
+      if (window.location.hash !== commentsHash) {
+        setCommentsOpen(false);
+      }
+    }
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [commentsHash]);
+
+  function openComments() {
+    window.history.pushState(null, "", commentsHash);
+    setCommentsOpen(true);
+  }
+
+  function closeComments() {
+    if (window.location.hash === commentsHash) {
+      window.history.back();
+    }
+    setCommentsOpen(false);
+  }
   const [saveToCollectionOpen, setSaveToCollectionOpen] = useState(false);
-  const isOwnPost = post.author.username === CURRENT_USER.username;
+  // Compares by id, not username — stays correct even if I rename myself
+  // after this post already exists.
+  const isOwnPost = post.author.id === CURRENT_USER_ID;
 
   function handleDeletePress() {
     deletePost(post.id);
@@ -97,7 +139,15 @@ export function PostCard({ post }: { post: Post }) {
   function handleAddComment(text: string, parentId?: string) {
     const newComment: Comment = {
       id: crypto.randomUUID(),
-      author: CURRENT_USER,
+      // Live profile data, not the old static constant — this also means
+      // a comment you post right after changing your avatar/username
+      // actually shows the new one, instead of whatever was baked in at
+      // build time.
+      author: {
+        id: profile.id,
+        username: profile.username,
+        avatarSrc: profile.avatarSrc,
+      },
       text,
       likeCount: 0,
       createdAt: new Date().toISOString(),
@@ -110,8 +160,8 @@ export function PostCard({ post }: { post: Post }) {
         prev.map((c) =>
           c.id === parentId
             ? { ...c, replies: [...(c.replies ?? []), newComment] }
-            : c,
-        ),
+            : c
+        )
       );
     }
     setCommentCount((c) => c + 1);
@@ -129,12 +179,9 @@ export function PostCard({ post }: { post: Post }) {
       setComments((prev) =>
         prev.map((c) =>
           c.id === topLevelId
-            ? {
-                ...c,
-                replies: (c.replies ?? []).filter((r) => r.id !== commentId),
-              }
-            : c,
-        ),
+            ? { ...c, replies: (c.replies ?? []).filter((r) => r.id !== commentId) }
+            : c
+        )
       );
       setCommentCount((count) => Math.max(0, count - 1));
       return;
@@ -148,7 +195,7 @@ export function PostCard({ post }: { post: Post }) {
       // Not decremented: the placeholder still occupies a real slot in
       // the thread, unlike a fully-removed leaf comment.
       setComments((prev) =>
-        prev.map((c) => (c.id === commentId ? { ...c, deleted: true } : c)),
+        prev.map((c) => (c.id === commentId ? { ...c, deleted: true } : c))
       );
     } else {
       // No replies — true silent removal, no trace left behind.
@@ -176,10 +223,7 @@ export function PostCard({ post }: { post: Post }) {
   return (
     <article className="border-b border-foreground/10">
       <header className="flex items-center gap-2 px-3 py-2">
-        <Link
-          href={PATHS.USER_PROFILE(post.author.username)}
-          className="shrink-0"
-        >
+        <Link href={PATHS.USER_PROFILE(post.author.username)} className="shrink-0">
           <Image
             src={post.author.avatarSrc}
             alt={post.author.username}
@@ -205,10 +249,7 @@ export function PostCard({ post }: { post: Post }) {
                 <span className="text-foreground/30">·</span>
                 <button
                   type="button"
-                  onClick={guard(
-                    () => toggleFollow(post.author.username),
-                    `Sign in to follow @${post.author.username}.`,
-                  )}
+                  onClick={guard(() => toggleFollow(post.author.username))}
                   className="text-xs font-medium text-foreground/60"
                 >
                   {isFollowing(post.author.username)
@@ -239,10 +280,7 @@ export function PostCard({ post }: { post: Post }) {
         )}
       </header>
 
-      <div
-        className="relative"
-        onDoubleClick={guard(handleDoubleTap, "Sign in to like this post.")}
-      >
+      <div className="relative" onDoubleClick={guard(handleDoubleTap)}>
         {post.media.type === "image" && (
           <div className="relative aspect-square w-full">
             <Image
@@ -283,12 +321,9 @@ export function PostCard({ post }: { post: Post }) {
         saved={isSaved(post.id)}
         likeCount={likeCount}
         commentCount={commentCount}
-        onToggleLike={guard(toggleLike, "Sign in to like this post.")}
-        onToggleSave={guard(
-          () => toggleSave(post.id),
-          "Sign in to save this post.",
-        )}
-        onCommentPress={() => setCommentsOpen(true)}
+        onToggleLike={guard(toggleLike)}
+        onToggleSave={guard(() => toggleSave(post.id))}
+        onCommentPress={openComments}
         onSharePress={handleSharePress}
       />
 
@@ -303,11 +338,11 @@ export function PostCard({ post }: { post: Post }) {
 
       <CommentSheet
         open={commentsOpen}
-        onClose={() => setCommentsOpen(false)}
+        onClose={closeComments}
         comments={comments}
         onAddComment={handleAddComment}
         onDeleteComment={handleDeleteComment}
-        postAuthorUsername={post.author.username}
+        postAuthorId={post.author.id}
       />
 
       <ShareMenu
@@ -321,10 +356,7 @@ export function PostCard({ post }: { post: Post }) {
         onClose={() => setOptionsOpen(false)}
         isOwnPost={isOwnPost}
         onCopyLinkPress={handleCopyLinkFromOptions}
-        onSaveToCollectionPress={guard(
-          () => setSaveToCollectionOpen(true),
-          "Sign in to save this post.",
-        )}
+        onSaveToCollectionPress={guard(() => setSaveToCollectionOpen(true))}
         onDeletePress={handleDeletePress}
       />
 

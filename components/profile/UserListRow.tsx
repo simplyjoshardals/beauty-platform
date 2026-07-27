@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useFollow } from "@/context/FollowProvider";
-import { CURRENT_USER } from "@/constants/currentUser";
+import { useProfile } from "@/context/ProfileProvider";
 import { isMockFollowerOfCurrentUser } from "@/data/mockFollowers";
 import { PATHS } from "@/utils/paths";
 import { useAuthGatedAction } from "@/hooks/useAuthGatedAction";
@@ -17,10 +17,14 @@ import type { MockUser } from "@/data/mockUsers";
 // by whatever page happens to be rendering it.
 export function UserListRow({ user }: { user: MockUser }) {
   const { isFollowing, toggleFollow } = useFollow();
+  const { profile } = useProfile();
   const { gateOpen, gateMessage, closeGate, guard } = useAuthGatedAction();
   const following = isFollowing(user.username);
   const followsMe = isMockFollowerOfCurrentUser(user.username);
-  const isSelf = user.username === CURRENT_USER.username;
+  // Compared against your LIVE username — MOCK_USERS never actually
+  // includes "you," but if your current handle ever happened to collide
+  // with a listed username, this still correctly recognizes it's you.
+  const isSelf = user.username === profile.username;
 
   const label = following ? "Following" : followsMe ? "Follow back" : "Follow";
 
@@ -49,10 +53,7 @@ export function UserListRow({ user }: { user: MockUser }) {
       {!isSelf && (
         <button
           type="button"
-          onClick={guard(
-            () => toggleFollow(user.username),
-            `Sign in to follow @${user.username}.`,
-          )}
+          onClick={guard(() => toggleFollow(user.username))}
           className={`shrink-0 rounded-lg px-4 py-1.5 text-sm font-medium transition-colors ${
             following
               ? "border border-foreground/15 text-foreground"

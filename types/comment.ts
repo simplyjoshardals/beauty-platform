@@ -1,6 +1,6 @@
 export type Comment = {
   id: string;
-  author: { username: string; avatarSrc: string };
+  author: { id: string; username: string; avatarSrc: string };
   text: string;
   likeCount: number;
   createdAt: string;

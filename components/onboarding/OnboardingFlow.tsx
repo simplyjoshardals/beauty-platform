@@ -4,16 +4,20 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useProfile } from "@/context/ProfileProvider";
 import { PATHS } from "@/utils/paths";
+import { validateUsername } from "@/utils/username";
+import { UsernameStep } from "./UsernameStep";
 import { PhotoStep } from "./PhotoStep";
 import { AboutStep } from "./AboutStep";
 
-const TOTAL_STEPS = 2;
+const TOTAL_STEPS = 3;
 
 export function OnboardingFlow() {
   const router = useRouter();
   const { profile, updateProfile } = useProfile();
 
-  const [step, setStep] = useState<1 | 2>(1);
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [username, setUsername] = useState(profile.username);
+  const [usernameError, setUsernameError] = useState<string | null>(null);
   const [avatarSrc, setAvatarSrc] = useState(profile.avatarSrc);
   const [toneTag, setToneTag] = useState(profile.toneTag);
   const [bio, setBio] = useState(profile.bio);
@@ -24,9 +28,23 @@ export function OnboardingFlow() {
 
   function handleContinue() {
     if (step === 1) {
+      // Unlike photo/bio, a username genuinely isn't optional — this is
+      // the one step "Continue" actually blocks on.
+      const error = validateUsername(username, profile.username);
+      if (error) {
+        setUsernameError(error);
+        return;
+      }
+      updateProfile({ username: username.trim().toLowerCase() });
       setStep(2);
       return;
     }
+
+    if (step === 2) {
+      setStep(3);
+      return;
+    }
+
     // Final step — save whatever was filled in (including an unchanged
     // default avatar, if photo was skipped) and land on Home.
     updateProfile({ avatarSrc, toneTag, bio });
@@ -46,20 +64,35 @@ export function OnboardingFlow() {
             />
           ))}
         </div>
-        <button
-          type="button"
-          onClick={goToHome}
-          className="text-sm font-medium text-foreground/50"
-        >
-          Skip
-        </button>
+        {/* Skip only appears once past the username step — that one's
+            required, photo/bio genuinely aren't. */}
+        {step > 1 && (
+          <button
+            type="button"
+            onClick={goToHome}
+            className="text-sm font-medium text-foreground/50"
+          >
+            Skip
+          </button>
+        )}
       </div>
 
       <div className="flex flex-1 items-center justify-center">
         <div className="w-full max-w-xs">
-          {step === 1 ? (
+          {step === 1 && (
+            <UsernameStep
+              username={username}
+              onUsernameChange={(value) => {
+                setUsername(value);
+                setUsernameError(null);
+              }}
+              error={usernameError}
+            />
+          )}
+          {step === 2 && (
             <PhotoStep avatarSrc={avatarSrc} onAvatarChange={setAvatarSrc} />
-          ) : (
+          )}
+          {step === 3 && (
             <AboutStep
               toneTag={toneTag}
               onToneTagChange={setToneTag}

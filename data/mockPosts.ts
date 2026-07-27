@@ -4,10 +4,16 @@ import type { Post } from "@/types/post";
 // Sorted chronologically, newest first. No ranking logic on purpose.
 // Lives here (not inside HomeFeed) so the single-post route can look up
 // an individual post by id without duplicating this list.
+//
+// Every author object now carries a stable `id` (mirroring their
+// username here, since these seeded mock users never rename) — required
+// by the Post/Comment types so ownership comparisons app-wide can key off
+// id instead of username, the same fix applied to the real current user.
 export const mockPosts: Post[] = [
   {
     id: "1",
     author: {
+      id: "glowbyash",
       username: "glowbyash",
       avatarSrc: "/mock/avatar-1.webp",
       toneTag: "Combination skin",
@@ -30,14 +36,22 @@ export const mockPosts: Post[] = [
     comments: [
       {
         id: "c1",
-        author: { username: "tobiwears", avatarSrc: "/mock/avatar-5.webp" },
+        author: {
+          id: "tobiwears",
+          username: "tobiwears",
+          avatarSrc: "/mock/avatar-5.webp",
+        },
         text: "the blend on your cheek is unreal, what brush?",
         likeCount: 4,
         createdAt: "2026-07-15T20:45:00Z",
         replies: [
           {
             id: "c1r1",
-            author: { username: "glowbyash", avatarSrc: "/mock/avatar-1.webp" },
+            author: {
+              id: "glowbyash",
+              username: "glowbyash",
+              avatarSrc: "/mock/avatar-1.webp",
+            },
             text: "a cheap synthetic one honestly, technique matters more",
             likeCount: 9,
             createdAt: "2026-07-15T20:52:00Z",
@@ -46,28 +60,44 @@ export const mockPosts: Post[] = [
       },
       {
         id: "c9",
-        author: { username: "skinbytemi", avatarSrc: "/mock/avatar-2.webp" },
+        author: {
+          id: "skinbytemi",
+          username: "skinbytemi",
+          avatarSrc: "/mock/avatar-2.webp",
+        },
         text: "this is lovely",
         likeCount: 12,
         createdAt: "2026-07-15T20:00:00Z",
       },
       {
         id: "c2",
-        author: { username: "glowbyash", avatarSrc: "/mock/avatar-1.webp" },
+        author: {
+          id: "glowbyash",
+          username: "glowbyash",
+          avatarSrc: "/mock/avatar-1.webp",
+        },
         text: "thank youuu 🥹",
         likeCount: 12,
         createdAt: "2026-07-15T21:02:00Z",
       },
       {
         id: "c3",
-        author: { username: "tobiwears", avatarSrc: "/mock/avatar-5.webp" },
+        author: {
+          id: "tobiwears",
+          username: "tobiwears",
+          avatarSrc: "/mock/avatar-5.webp",
+        },
         text: "the blend on your cheek is unreal, what makeup?",
         likeCount: 4,
         createdAt: "2026-07-15T20:46:00Z",
         replies: [
           {
             id: "c1r2",
-            author: { username: "glowbyash", avatarSrc: "/mock/avatar-1.webp" },
+            author: {
+              id: "glowbyash",
+              username: "glowbyash",
+              avatarSrc: "/mock/avatar-1.webp",
+            },
             text: "a cheap synthetic one honestly, technique matters more",
             likeCount: 9,
             createdAt: "2026-07-15T20:53:00Z",
@@ -79,7 +109,11 @@ export const mockPosts: Post[] = [
   },
   {
     id: "2",
-    author: { username: "skinbytemi", avatarSrc: "/mock/avatar-2.webp" },
+    author: {
+      id: "skinbytemi",
+      username: "skinbytemi",
+      avatarSrc: "/mock/avatar-2.webp",
+    },
     media: {
       id: "m2",
       type: "before_after",
@@ -95,7 +129,11 @@ export const mockPosts: Post[] = [
   },
   {
     id: "3",
-    author: { username: "northofnorml", avatarSrc: "/mock/avatar-3.webp" },
+    author: {
+      id: "northofnorml",
+      username: "northofnorml",
+      avatarSrc: "/mock/avatar-3.webp",
+    },
     media: {
       id: "m3",
       type: "carousel",
@@ -113,7 +151,11 @@ export const mockPosts: Post[] = [
   },
   {
     id: "4",
-    author: { username: "grwmwithnaomi", avatarSrc: "/mock/avatar-4.webp" },
+    author: {
+      id: "grwmwithnaomi",
+      username: "grwmwithnaomi",
+      avatarSrc: "/mock/avatar-4.webp",
+    },
     media: {
       id: "m4",
       type: "video",
