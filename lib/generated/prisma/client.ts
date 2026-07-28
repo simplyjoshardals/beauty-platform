@@ -107,6 +107,11 @@ export type CollectionPost = Prisma.CollectionPostModel
  */
 export type Notification = Prisma.NotificationModel
 /**
+ * Model RefreshToken
+ * 
+ */
+export type RefreshToken = Prisma.RefreshTokenModel
+/**
  * Model MagicLinkToken
  * 
  */

@@ -27,7 +27,7 @@ export type AggregateMagicLinkToken = {
 export type MagicLinkTokenMinAggregateOutputType = {
   id: string | null
   token: string | null
-  email: string | null
+  userId: string | null
   expiresAt: Date | null
   usedAt: Date | null
   createdAt: Date | null
@@ -36,7 +36,7 @@ export type MagicLinkTokenMinAggregateOutputType = {
 export type MagicLinkTokenMaxAggregateOutputType = {
   id: string | null
   token: string | null
-  email: string | null
+  userId: string | null
   expiresAt: Date | null
   usedAt: Date | null
   createdAt: Date | null
@@ -45,7 +45,7 @@ export type MagicLinkTokenMaxAggregateOutputType = {
 export type MagicLinkTokenCountAggregateOutputType = {
   id: number
   token: number
-  email: number
+  userId: number
   expiresAt: number
   usedAt: number
   createdAt: number
@@ -56,7 +56,7 @@ export type MagicLinkTokenCountAggregateOutputType = {
 export type MagicLinkTokenMinAggregateInputType = {
   id?: true
   token?: true
-  email?: true
+  userId?: true
   expiresAt?: true
   usedAt?: true
   createdAt?: true
@@ -65,7 +65,7 @@ export type MagicLinkTokenMinAggregateInputType = {
 export type MagicLinkTokenMaxAggregateInputType = {
   id?: true
   token?: true
-  email?: true
+  userId?: true
   expiresAt?: true
   usedAt?: true
   createdAt?: true
@@ -74,7 +74,7 @@ export type MagicLinkTokenMaxAggregateInputType = {
 export type MagicLinkTokenCountAggregateInputType = {
   id?: true
   token?: true
-  email?: true
+  userId?: true
   expiresAt?: true
   usedAt?: true
   createdAt?: true
@@ -156,7 +156,7 @@ export type MagicLinkTokenGroupByArgs<ExtArgs extends runtime.Types.Extensions.I
 export type MagicLinkTokenGroupByOutputType = {
   id: string
   token: string
-  email: string
+  userId: string
   expiresAt: Date
   usedAt: Date | null
   createdAt: Date
@@ -186,19 +186,21 @@ export type MagicLinkTokenWhereInput = {
   NOT?: Prisma.MagicLinkTokenWhereInput | Prisma.MagicLinkTokenWhereInput[]
   id?: Prisma.StringFilter<"MagicLinkToken"> | string
   token?: Prisma.StringFilter<"MagicLinkToken"> | string
-  email?: Prisma.StringFilter<"MagicLinkToken"> | string
+  userId?: Prisma.StringFilter<"MagicLinkToken"> | string
   expiresAt?: Prisma.DateTimeFilter<"MagicLinkToken"> | Date | string
   usedAt?: Prisma.DateTimeNullableFilter<"MagicLinkToken"> | Date | string | null
   createdAt?: Prisma.DateTimeFilter<"MagicLinkToken"> | Date | string
+  user?: Prisma.XOR<Prisma.UserScalarRelationFilter, Prisma.UserWhereInput>
 }
 
 export type MagicLinkTokenOrderByWithRelationInput = {
   id?: Prisma.SortOrder
   token?: Prisma.SortOrder
-  email?: Prisma.SortOrder
+  userId?: Prisma.SortOrder
   expiresAt?: Prisma.SortOrder
   usedAt?: Prisma.SortOrderInput | Prisma.SortOrder
   createdAt?: Prisma.SortOrder
+  user?: Prisma.UserOrderByWithRelationInput
 }
 
 export type MagicLinkTokenWhereUniqueInput = Prisma.AtLeast<{
@@ -207,16 +209,17 @@ export type MagicLinkTokenWhereUniqueInput = Prisma.AtLeast<{
   AND?: Prisma.MagicLinkTokenWhereInput | Prisma.MagicLinkTokenWhereInput[]
   OR?: Prisma.MagicLinkTokenWhereInput[]
   NOT?: Prisma.MagicLinkTokenWhereInput | Prisma.MagicLinkTokenWhereInput[]
-  email?: Prisma.StringFilter<"MagicLinkToken"> | string
+  userId?: Prisma.StringFilter<"MagicLinkToken"> | string
   expiresAt?: Prisma.DateTimeFilter<"MagicLinkToken"> | Date | string
   usedAt?: Prisma.DateTimeNullableFilter<"MagicLinkToken"> | Date | string | null
   createdAt?: Prisma.DateTimeFilter<"MagicLinkToken"> | Date | string
+  user?: Prisma.XOR<Prisma.UserScalarRelationFilter, Prisma.UserWhereInput>
 }, "id" | "token">
 
 export type MagicLinkTokenOrderByWithAggregationInput = {
   id?: Prisma.SortOrder
   token?: Prisma.SortOrder
-  email?: Prisma.SortOrder
+  userId?: Prisma.SortOrder
   expiresAt?: Prisma.SortOrder
   usedAt?: Prisma.SortOrderInput | Prisma.SortOrder
   createdAt?: Prisma.SortOrder
@@ -231,7 +234,7 @@ export type MagicLinkTokenScalarWhereWithAggregatesInput = {
   NOT?: Prisma.MagicLinkTokenScalarWhereWithAggregatesInput | Prisma.MagicLinkTokenScalarWhereWithAggregatesInput[]
   id?: Prisma.StringWithAggregatesFilter<"MagicLinkToken"> | string
   token?: Prisma.StringWithAggregatesFilter<"MagicLinkToken"> | string
-  email?: Prisma.StringWithAggregatesFilter<"MagicLinkToken"> | string
+  userId?: Prisma.StringWithAggregatesFilter<"MagicLinkToken"> | string
   expiresAt?: Prisma.DateTimeWithAggregatesFilter<"MagicLinkToken"> | Date | string
   usedAt?: Prisma.DateTimeNullableWithAggregatesFilter<"MagicLinkToken"> | Date | string | null
   createdAt?: Prisma.DateTimeWithAggregatesFilter<"MagicLinkToken"> | Date | string
@@ -240,16 +243,16 @@ export type MagicLinkTokenScalarWhereWithAggregatesInput = {
 export type MagicLinkTokenCreateInput = {
   id?: string
   token: string
-  email: string
   expiresAt: Date | string
   usedAt?: Date | string | null
   createdAt?: Date | string
+  user: Prisma.UserCreateNestedOneWithoutMagicLinkTokensInput
 }
 
 export type MagicLinkTokenUncheckedCreateInput = {
   id?: string
   token: string
-  email: string
+  userId: string
   expiresAt: Date | string
   usedAt?: Date | string | null
   createdAt?: Date | string
@@ -258,16 +261,16 @@ export type MagicLinkTokenUncheckedCreateInput = {
 export type MagicLinkTokenUpdateInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   token?: Prisma.StringFieldUpdateOperationsInput | string
-  email?: Prisma.StringFieldUpdateOperationsInput | string
   expiresAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   usedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  user?: Prisma.UserUpdateOneRequiredWithoutMagicLinkTokensNestedInput
 }
 
 export type MagicLinkTokenUncheckedUpdateInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   token?: Prisma.StringFieldUpdateOperationsInput | string
-  email?: Prisma.StringFieldUpdateOperationsInput | string
+  userId?: Prisma.StringFieldUpdateOperationsInput | string
   expiresAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   usedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -276,7 +279,7 @@ export type MagicLinkTokenUncheckedUpdateInput = {
 export type MagicLinkTokenCreateManyInput = {
   id?: string
   token: string
-  email: string
+  userId: string
   expiresAt: Date | string
   usedAt?: Date | string | null
   createdAt?: Date | string
@@ -285,7 +288,6 @@ export type MagicLinkTokenCreateManyInput = {
 export type MagicLinkTokenUpdateManyMutationInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   token?: Prisma.StringFieldUpdateOperationsInput | string
-  email?: Prisma.StringFieldUpdateOperationsInput | string
   expiresAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   usedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -294,16 +296,26 @@ export type MagicLinkTokenUpdateManyMutationInput = {
 export type MagicLinkTokenUncheckedUpdateManyInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   token?: Prisma.StringFieldUpdateOperationsInput | string
-  email?: Prisma.StringFieldUpdateOperationsInput | string
+  userId?: Prisma.StringFieldUpdateOperationsInput | string
   expiresAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   usedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
+export type MagicLinkTokenListRelationFilter = {
+  every?: Prisma.MagicLinkTokenWhereInput
+  some?: Prisma.MagicLinkTokenWhereInput
+  none?: Prisma.MagicLinkTokenWhereInput
+}
+
+export type MagicLinkTokenOrderByRelationAggregateInput = {
+  _count?: Prisma.SortOrder
+}
+
 export type MagicLinkTokenCountOrderByAggregateInput = {
   id?: Prisma.SortOrder
   token?: Prisma.SortOrder
-  email?: Prisma.SortOrder
+  userId?: Prisma.SortOrder
   expiresAt?: Prisma.SortOrder
   usedAt?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
@@ -312,7 +324,7 @@ export type MagicLinkTokenCountOrderByAggregateInput = {
 export type MagicLinkTokenMaxOrderByAggregateInput = {
   id?: Prisma.SortOrder
   token?: Prisma.SortOrder
-  email?: Prisma.SortOrder
+  userId?: Prisma.SortOrder
   expiresAt?: Prisma.SortOrder
   usedAt?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
@@ -321,14 +333,138 @@ export type MagicLinkTokenMaxOrderByAggregateInput = {
 export type MagicLinkTokenMinOrderByAggregateInput = {
   id?: Prisma.SortOrder
   token?: Prisma.SortOrder
-  email?: Prisma.SortOrder
+  userId?: Prisma.SortOrder
   expiresAt?: Prisma.SortOrder
   usedAt?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
 }
 
-export type NullableDateTimeFieldUpdateOperationsInput = {
-  set?: Date | string | null
+export type MagicLinkTokenCreateNestedManyWithoutUserInput = {
+  create?: Prisma.XOR<Prisma.MagicLinkTokenCreateWithoutUserInput, Prisma.MagicLinkTokenUncheckedCreateWithoutUserInput> | Prisma.MagicLinkTokenCreateWithoutUserInput[] | Prisma.MagicLinkTokenUncheckedCreateWithoutUserInput[]
+  connectOrCreate?: Prisma.MagicLinkTokenCreateOrConnectWithoutUserInput | Prisma.MagicLinkTokenCreateOrConnectWithoutUserInput[]
+  createMany?: Prisma.MagicLinkTokenCreateManyUserInputEnvelope
+  connect?: Prisma.MagicLinkTokenWhereUniqueInput | Prisma.MagicLinkTokenWhereUniqueInput[]
+}
+
+export type MagicLinkTokenUncheckedCreateNestedManyWithoutUserInput = {
+  create?: Prisma.XOR<Prisma.MagicLinkTokenCreateWithoutUserInput, Prisma.MagicLinkTokenUncheckedCreateWithoutUserInput> | Prisma.MagicLinkTokenCreateWithoutUserInput[] | Prisma.MagicLinkTokenUncheckedCreateWithoutUserInput[]
+  connectOrCreate?: Prisma.MagicLinkTokenCreateOrConnectWithoutUserInput | Prisma.MagicLinkTokenCreateOrConnectWithoutUserInput[]
+  createMany?: Prisma.MagicLinkTokenCreateManyUserInputEnvelope
+  connect?: Prisma.MagicLinkTokenWhereUniqueInput | Prisma.MagicLinkTokenWhereUniqueInput[]
+}
+
+export type MagicLinkTokenUpdateManyWithoutUserNestedInput = {
+  create?: Prisma.XOR<Prisma.MagicLinkTokenCreateWithoutUserInput, Prisma.MagicLinkTokenUncheckedCreateWithoutUserInput> | Prisma.MagicLinkTokenCreateWithoutUserInput[] | Prisma.MagicLinkTokenUncheckedCreateWithoutUserInput[]
+  connectOrCreate?: Prisma.MagicLinkTokenCreateOrConnectWithoutUserInput | Prisma.MagicLinkTokenCreateOrConnectWithoutUserInput[]
+  upsert?: Prisma.MagicLinkTokenUpsertWithWhereUniqueWithoutUserInput | Prisma.MagicLinkTokenUpsertWithWhereUniqueWithoutUserInput[]
+  createMany?: Prisma.MagicLinkTokenCreateManyUserInputEnvelope
+  set?: Prisma.MagicLinkTokenWhereUniqueInput | Prisma.MagicLinkTokenWhereUniqueInput[]
+  disconnect?: Prisma.MagicLinkTokenWhereUniqueInput | Prisma.MagicLinkTokenWhereUniqueInput[]
+  delete?: Prisma.MagicLinkTokenWhereUniqueInput | Prisma.MagicLinkTokenWhereUniqueInput[]
+  connect?: Prisma.MagicLinkTokenWhereUniqueInput | Prisma.MagicLinkTokenWhereUniqueInput[]
+  update?: Prisma.MagicLinkTokenUpdateWithWhereUniqueWithoutUserInput | Prisma.MagicLinkTokenUpdateWithWhereUniqueWithoutUserInput[]
+  updateMany?: Prisma.MagicLinkTokenUpdateManyWithWhereWithoutUserInput | Prisma.MagicLinkTokenUpdateManyWithWhereWithoutUserInput[]
+  deleteMany?: Prisma.MagicLinkTokenScalarWhereInput | Prisma.MagicLinkTokenScalarWhereInput[]
+}
+
+export type MagicLinkTokenUncheckedUpdateManyWithoutUserNestedInput = {
+  create?: Prisma.XOR<Prisma.MagicLinkTokenCreateWithoutUserInput, Prisma.MagicLinkTokenUncheckedCreateWithoutUserInput> | Prisma.MagicLinkTokenCreateWithoutUserInput[] | Prisma.MagicLinkTokenUncheckedCreateWithoutUserInput[]
+  connectOrCreate?: Prisma.MagicLinkTokenCreateOrConnectWithoutUserInput | Prisma.MagicLinkTokenCreateOrConnectWithoutUserInput[]
+  upsert?: Prisma.MagicLinkTokenUpsertWithWhereUniqueWithoutUserInput | Prisma.MagicLinkTokenUpsertWithWhereUniqueWithoutUserInput[]
+  createMany?: Prisma.MagicLinkTokenCreateManyUserInputEnvelope
+  set?: Prisma.MagicLinkTokenWhereUniqueInput | Prisma.MagicLinkTokenWhereUniqueInput[]
+  disconnect?: Prisma.MagicLinkTokenWhereUniqueInput | Prisma.MagicLinkTokenWhereUniqueInput[]
+  delete?: Prisma.MagicLinkTokenWhereUniqueInput | Prisma.MagicLinkTokenWhereUniqueInput[]
+  connect?: Prisma.MagicLinkTokenWhereUniqueInput | Prisma.MagicLinkTokenWhereUniqueInput[]
+  update?: Prisma.MagicLinkTokenUpdateWithWhereUniqueWithoutUserInput | Prisma.MagicLinkTokenUpdateWithWhereUniqueWithoutUserInput[]
+  updateMany?: Prisma.MagicLinkTokenUpdateManyWithWhereWithoutUserInput | Prisma.MagicLinkTokenUpdateManyWithWhereWithoutUserInput[]
+  deleteMany?: Prisma.MagicLinkTokenScalarWhereInput | Prisma.MagicLinkTokenScalarWhereInput[]
+}
+
+export type MagicLinkTokenCreateWithoutUserInput = {
+  id?: string
+  token: string
+  expiresAt: Date | string
+  usedAt?: Date | string | null
+  createdAt?: Date | string
+}
+
+export type MagicLinkTokenUncheckedCreateWithoutUserInput = {
+  id?: string
+  token: string
+  expiresAt: Date | string
+  usedAt?: Date | string | null
+  createdAt?: Date | string
+}
+
+export type MagicLinkTokenCreateOrConnectWithoutUserInput = {
+  where: Prisma.MagicLinkTokenWhereUniqueInput
+  create: Prisma.XOR<Prisma.MagicLinkTokenCreateWithoutUserInput, Prisma.MagicLinkTokenUncheckedCreateWithoutUserInput>
+}
+
+export type MagicLinkTokenCreateManyUserInputEnvelope = {
+  data: Prisma.MagicLinkTokenCreateManyUserInput | Prisma.MagicLinkTokenCreateManyUserInput[]
+  skipDuplicates?: boolean
+}
+
+export type MagicLinkTokenUpsertWithWhereUniqueWithoutUserInput = {
+  where: Prisma.MagicLinkTokenWhereUniqueInput
+  update: Prisma.XOR<Prisma.MagicLinkTokenUpdateWithoutUserInput, Prisma.MagicLinkTokenUncheckedUpdateWithoutUserInput>
+  create: Prisma.XOR<Prisma.MagicLinkTokenCreateWithoutUserInput, Prisma.MagicLinkTokenUncheckedCreateWithoutUserInput>
+}
+
+export type MagicLinkTokenUpdateWithWhereUniqueWithoutUserInput = {
+  where: Prisma.MagicLinkTokenWhereUniqueInput
+  data: Prisma.XOR<Prisma.MagicLinkTokenUpdateWithoutUserInput, Prisma.MagicLinkTokenUncheckedUpdateWithoutUserInput>
+}
+
+export type MagicLinkTokenUpdateManyWithWhereWithoutUserInput = {
+  where: Prisma.MagicLinkTokenScalarWhereInput
+  data: Prisma.XOR<Prisma.MagicLinkTokenUpdateManyMutationInput, Prisma.MagicLinkTokenUncheckedUpdateManyWithoutUserInput>
+}
+
+export type MagicLinkTokenScalarWhereInput = {
+  AND?: Prisma.MagicLinkTokenScalarWhereInput | Prisma.MagicLinkTokenScalarWhereInput[]
+  OR?: Prisma.MagicLinkTokenScalarWhereInput[]
+  NOT?: Prisma.MagicLinkTokenScalarWhereInput | Prisma.MagicLinkTokenScalarWhereInput[]
+  id?: Prisma.StringFilter<"MagicLinkToken"> | string
+  token?: Prisma.StringFilter<"MagicLinkToken"> | string
+  userId?: Prisma.StringFilter<"MagicLinkToken"> | string
+  expiresAt?: Prisma.DateTimeFilter<"MagicLinkToken"> | Date | string
+  usedAt?: Prisma.DateTimeNullableFilter<"MagicLinkToken"> | Date | string | null
+  createdAt?: Prisma.DateTimeFilter<"MagicLinkToken"> | Date | string
+}
+
+export type MagicLinkTokenCreateManyUserInput = {
+  id?: string
+  token: string
+  expiresAt: Date | string
+  usedAt?: Date | string | null
+  createdAt?: Date | string
+}
+
+export type MagicLinkTokenUpdateWithoutUserInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  token?: Prisma.StringFieldUpdateOperationsInput | string
+  expiresAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  usedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+}
+
+export type MagicLinkTokenUncheckedUpdateWithoutUserInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  token?: Prisma.StringFieldUpdateOperationsInput | string
+  expiresAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  usedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+}
+
+export type MagicLinkTokenUncheckedUpdateManyWithoutUserInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  token?: Prisma.StringFieldUpdateOperationsInput | string
+  expiresAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  usedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
 
@@ -336,48 +472,62 @@ export type NullableDateTimeFieldUpdateOperationsInput = {
 export type MagicLinkTokenSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
   id?: boolean
   token?: boolean
-  email?: boolean
+  userId?: boolean
   expiresAt?: boolean
   usedAt?: boolean
   createdAt?: boolean
+  user?: boolean | Prisma.UserDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["magicLinkToken"]>
 
 export type MagicLinkTokenSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
   id?: boolean
   token?: boolean
-  email?: boolean
+  userId?: boolean
   expiresAt?: boolean
   usedAt?: boolean
   createdAt?: boolean
+  user?: boolean | Prisma.UserDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["magicLinkToken"]>
 
 export type MagicLinkTokenSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
   id?: boolean
   token?: boolean
-  email?: boolean
+  userId?: boolean
   expiresAt?: boolean
   usedAt?: boolean
   createdAt?: boolean
+  user?: boolean | Prisma.UserDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["magicLinkToken"]>
 
 export type MagicLinkTokenSelectScalar = {
   id?: boolean
   token?: boolean
-  email?: boolean
+  userId?: boolean
   expiresAt?: boolean
   usedAt?: boolean
   createdAt?: boolean
 }
 
-export type MagicLinkTokenOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "token" | "email" | "expiresAt" | "usedAt" | "createdAt", ExtArgs["result"]["magicLinkToken"]>
+export type MagicLinkTokenOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "token" | "userId" | "expiresAt" | "usedAt" | "createdAt", ExtArgs["result"]["magicLinkToken"]>
+export type MagicLinkTokenInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  user?: boolean | Prisma.UserDefaultArgs<ExtArgs>
+}
+export type MagicLinkTokenIncludeCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  user?: boolean | Prisma.UserDefaultArgs<ExtArgs>
+}
+export type MagicLinkTokenIncludeUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  user?: boolean | Prisma.UserDefaultArgs<ExtArgs>
+}
 
 export type $MagicLinkTokenPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "MagicLinkToken"
-  objects: {}
+  objects: {
+    user: Prisma.$UserPayload<ExtArgs>
+  }
   scalars: runtime.Types.Extensions.GetPayloadResult<{
     id: string
     token: string
-    email: string
+    userId: string
     expiresAt: Date
     usedAt: Date | null
     createdAt: Date
@@ -775,6 +925,7 @@ readonly fields: MagicLinkTokenFieldRefs;
  */
 export interface Prisma__MagicLinkTokenClient<T, Null = never, ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs, GlobalOmitOptions = {}> extends Prisma.PrismaPromise<T> {
   readonly [Symbol.toStringTag]: "PrismaPromise"
+  user<T extends Prisma.UserDefaultArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.UserDefaultArgs<ExtArgs>>): Prisma.Prisma__UserClient<runtime.Types.Result.GetResult<Prisma.$UserPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | Null, Null, ExtArgs, GlobalOmitOptions>
   /**
    * Attaches callbacks for the resolution and/or rejection of the Promise.
    * @param onfulfilled The callback to execute when the Promise is resolved.
@@ -806,7 +957,7 @@ export interface Prisma__MagicLinkTokenClient<T, Null = never, ExtArgs extends r
 export interface MagicLinkTokenFieldRefs {
   readonly id: Prisma.FieldRef<"MagicLinkToken", 'String'>
   readonly token: Prisma.FieldRef<"MagicLinkToken", 'String'>
-  readonly email: Prisma.FieldRef<"MagicLinkToken", 'String'>
+  readonly userId: Prisma.FieldRef<"MagicLinkToken", 'String'>
   readonly expiresAt: Prisma.FieldRef<"MagicLinkToken", 'DateTime'>
   readonly usedAt: Prisma.FieldRef<"MagicLinkToken", 'DateTime'>
   readonly createdAt: Prisma.FieldRef<"MagicLinkToken", 'DateTime'>
@@ -827,6 +978,10 @@ export type MagicLinkTokenFindUniqueArgs<ExtArgs extends runtime.Types.Extension
    */
   omit?: Prisma.MagicLinkTokenOmit<ExtArgs> | null
   /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.MagicLinkTokenInclude<ExtArgs> | null
+  /**
    * Filter, which MagicLinkToken to fetch.
    */
   where: Prisma.MagicLinkTokenWhereUniqueInput
@@ -845,6 +1000,10 @@ export type MagicLinkTokenFindUniqueOrThrowArgs<ExtArgs extends runtime.Types.Ex
    */
   omit?: Prisma.MagicLinkTokenOmit<ExtArgs> | null
   /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.MagicLinkTokenInclude<ExtArgs> | null
+  /**
    * Filter, which MagicLinkToken to fetch.
    */
   where: Prisma.MagicLinkTokenWhereUniqueInput
@@ -862,6 +1021,10 @@ export type MagicLinkTokenFindFirstArgs<ExtArgs extends runtime.Types.Extensions
    * Omit specific fields from the MagicLinkToken
    */
   omit?: Prisma.MagicLinkTokenOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.MagicLinkTokenInclude<ExtArgs> | null
   /**
    * Filter, which MagicLinkToken to fetch.
    */
@@ -911,6 +1074,10 @@ export type MagicLinkTokenFindFirstOrThrowArgs<ExtArgs extends runtime.Types.Ext
    */
   omit?: Prisma.MagicLinkTokenOmit<ExtArgs> | null
   /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.MagicLinkTokenInclude<ExtArgs> | null
+  /**
    * Filter, which MagicLinkToken to fetch.
    */
   where?: Prisma.MagicLinkTokenWhereInput
@@ -958,6 +1125,10 @@ export type MagicLinkTokenFindManyArgs<ExtArgs extends runtime.Types.Extensions.
    * Omit specific fields from the MagicLinkToken
    */
   omit?: Prisma.MagicLinkTokenOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.MagicLinkTokenInclude<ExtArgs> | null
   /**
    * Filter, which MagicLinkTokens to fetch.
    */
@@ -1007,6 +1178,10 @@ export type MagicLinkTokenCreateArgs<ExtArgs extends runtime.Types.Extensions.In
    */
   omit?: Prisma.MagicLinkTokenOmit<ExtArgs> | null
   /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.MagicLinkTokenInclude<ExtArgs> | null
+  /**
    * The data needed to create a MagicLinkToken.
    */
   data: Prisma.XOR<Prisma.MagicLinkTokenCreateInput, Prisma.MagicLinkTokenUncheckedCreateInput>
@@ -1040,6 +1215,10 @@ export type MagicLinkTokenCreateManyAndReturnArgs<ExtArgs extends runtime.Types.
    */
   data: Prisma.MagicLinkTokenCreateManyInput | Prisma.MagicLinkTokenCreateManyInput[]
   skipDuplicates?: boolean
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.MagicLinkTokenIncludeCreateManyAndReturn<ExtArgs> | null
 }
 
 /**
@@ -1054,6 +1233,10 @@ export type MagicLinkTokenUpdateArgs<ExtArgs extends runtime.Types.Extensions.In
    * Omit specific fields from the MagicLinkToken
    */
   omit?: Prisma.MagicLinkTokenOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.MagicLinkTokenInclude<ExtArgs> | null
   /**
    * The data needed to update a MagicLinkToken.
    */
@@ -1106,6 +1289,10 @@ export type MagicLinkTokenUpdateManyAndReturnArgs<ExtArgs extends runtime.Types.
    * Limit how many MagicLinkTokens to update.
    */
   limit?: number
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.MagicLinkTokenIncludeUpdateManyAndReturn<ExtArgs> | null
 }
 
 /**
@@ -1120,6 +1307,10 @@ export type MagicLinkTokenUpsertArgs<ExtArgs extends runtime.Types.Extensions.In
    * Omit specific fields from the MagicLinkToken
    */
   omit?: Prisma.MagicLinkTokenOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.MagicLinkTokenInclude<ExtArgs> | null
   /**
    * The filter to search for the MagicLinkToken to update in case it exists.
    */
@@ -1146,6 +1337,10 @@ export type MagicLinkTokenDeleteArgs<ExtArgs extends runtime.Types.Extensions.In
    * Omit specific fields from the MagicLinkToken
    */
   omit?: Prisma.MagicLinkTokenOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.MagicLinkTokenInclude<ExtArgs> | null
   /**
    * Filter which MagicLinkToken to delete.
    */
@@ -1178,4 +1373,8 @@ export type MagicLinkTokenDefaultArgs<ExtArgs extends runtime.Types.Extensions.I
    * Omit specific fields from the MagicLinkToken
    */
   omit?: Prisma.MagicLinkTokenOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.MagicLinkTokenInclude<ExtArgs> | null
 }

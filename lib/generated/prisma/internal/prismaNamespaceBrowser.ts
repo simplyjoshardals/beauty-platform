@@ -64,6 +64,7 @@ export const ModelName = {
   Collection: 'Collection',
   CollectionPost: 'CollectionPost',
   Notification: 'Notification',
+  RefreshToken: 'RefreshToken',
   MagicLinkToken: 'MagicLinkToken'
 } as const
 
@@ -90,6 +91,7 @@ export const UserScalarFieldEnum = {
   avatarSrc: 'avatarSrc',
   bio: 'bio',
   toneTag: 'toneTag',
+  onboardingCompletedAt: 'onboardingCompletedAt',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
 } as const
@@ -234,10 +236,22 @@ export const NotificationScalarFieldEnum = {
 export type NotificationScalarFieldEnum = (typeof NotificationScalarFieldEnum)[keyof typeof NotificationScalarFieldEnum]
 
 
+export const RefreshTokenScalarFieldEnum = {
+  id: 'id',
+  token: 'token',
+  userId: 'userId',
+  expiresAt: 'expiresAt',
+  createdAt: 'createdAt',
+  rotatedAt: 'rotatedAt'
+} as const
+
+export type RefreshTokenScalarFieldEnum = (typeof RefreshTokenScalarFieldEnum)[keyof typeof RefreshTokenScalarFieldEnum]
+
+
 export const MagicLinkTokenScalarFieldEnum = {
   id: 'id',
   token: 'token',
-  email: 'email',
+  userId: 'userId',
   expiresAt: 'expiresAt',
   usedAt: 'usedAt',
   createdAt: 'createdAt'

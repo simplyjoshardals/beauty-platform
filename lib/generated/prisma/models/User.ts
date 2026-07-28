@@ -31,6 +31,7 @@ export type UserMinAggregateOutputType = {
   avatarSrc: string | null
   bio: string | null
   toneTag: string | null
+  onboardingCompletedAt: Date | null
   createdAt: Date | null
   updatedAt: Date | null
 }
@@ -42,6 +43,7 @@ export type UserMaxAggregateOutputType = {
   avatarSrc: string | null
   bio: string | null
   toneTag: string | null
+  onboardingCompletedAt: Date | null
   createdAt: Date | null
   updatedAt: Date | null
 }
@@ -53,6 +55,7 @@ export type UserCountAggregateOutputType = {
   avatarSrc: number
   bio: number
   toneTag: number
+  onboardingCompletedAt: number
   createdAt: number
   updatedAt: number
   _all: number
@@ -66,6 +69,7 @@ export type UserMinAggregateInputType = {
   avatarSrc?: true
   bio?: true
   toneTag?: true
+  onboardingCompletedAt?: true
   createdAt?: true
   updatedAt?: true
 }
@@ -77,6 +81,7 @@ export type UserMaxAggregateInputType = {
   avatarSrc?: true
   bio?: true
   toneTag?: true
+  onboardingCompletedAt?: true
   createdAt?: true
   updatedAt?: true
 }
@@ -88,6 +93,7 @@ export type UserCountAggregateInputType = {
   avatarSrc?: true
   bio?: true
   toneTag?: true
+  onboardingCompletedAt?: true
   createdAt?: true
   updatedAt?: true
   _all?: true
@@ -172,6 +178,7 @@ export type UserGroupByOutputType = {
   avatarSrc: string
   bio: string
   toneTag: string
+  onboardingCompletedAt: Date | null
   createdAt: Date
   updatedAt: Date
   _count: UserCountAggregateOutputType | null
@@ -204,6 +211,7 @@ export type UserWhereInput = {
   avatarSrc?: Prisma.StringFilter<"User"> | string
   bio?: Prisma.StringFilter<"User"> | string
   toneTag?: Prisma.StringFilter<"User"> | string
+  onboardingCompletedAt?: Prisma.DateTimeNullableFilter<"User"> | Date | string | null
   createdAt?: Prisma.DateTimeFilter<"User"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"User"> | Date | string
   posts?: Prisma.PostListRelationFilter
@@ -213,6 +221,8 @@ export type UserWhereInput = {
   savedPosts?: Prisma.SavedPostListRelationFilter
   collections?: Prisma.CollectionListRelationFilter
   routineItems?: Prisma.RoutineItemListRelationFilter
+  refreshTokens?: Prisma.RefreshTokenListRelationFilter
+  magicLinkTokens?: Prisma.MagicLinkTokenListRelationFilter
   following?: Prisma.FollowListRelationFilter
   followers?: Prisma.FollowListRelationFilter
   notificationsReceived?: Prisma.NotificationListRelationFilter
@@ -226,6 +236,7 @@ export type UserOrderByWithRelationInput = {
   avatarSrc?: Prisma.SortOrder
   bio?: Prisma.SortOrder
   toneTag?: Prisma.SortOrder
+  onboardingCompletedAt?: Prisma.SortOrderInput | Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   posts?: Prisma.PostOrderByRelationAggregateInput
@@ -235,6 +246,8 @@ export type UserOrderByWithRelationInput = {
   savedPosts?: Prisma.SavedPostOrderByRelationAggregateInput
   collections?: Prisma.CollectionOrderByRelationAggregateInput
   routineItems?: Prisma.RoutineItemOrderByRelationAggregateInput
+  refreshTokens?: Prisma.RefreshTokenOrderByRelationAggregateInput
+  magicLinkTokens?: Prisma.MagicLinkTokenOrderByRelationAggregateInput
   following?: Prisma.FollowOrderByRelationAggregateInput
   followers?: Prisma.FollowOrderByRelationAggregateInput
   notificationsReceived?: Prisma.NotificationOrderByRelationAggregateInput
@@ -251,6 +264,7 @@ export type UserWhereUniqueInput = Prisma.AtLeast<{
   avatarSrc?: Prisma.StringFilter<"User"> | string
   bio?: Prisma.StringFilter<"User"> | string
   toneTag?: Prisma.StringFilter<"User"> | string
+  onboardingCompletedAt?: Prisma.DateTimeNullableFilter<"User"> | Date | string | null
   createdAt?: Prisma.DateTimeFilter<"User"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"User"> | Date | string
   posts?: Prisma.PostListRelationFilter
@@ -260,6 +274,8 @@ export type UserWhereUniqueInput = Prisma.AtLeast<{
   savedPosts?: Prisma.SavedPostListRelationFilter
   collections?: Prisma.CollectionListRelationFilter
   routineItems?: Prisma.RoutineItemListRelationFilter
+  refreshTokens?: Prisma.RefreshTokenListRelationFilter
+  magicLinkTokens?: Prisma.MagicLinkTokenListRelationFilter
   following?: Prisma.FollowListRelationFilter
   followers?: Prisma.FollowListRelationFilter
   notificationsReceived?: Prisma.NotificationListRelationFilter
@@ -273,6 +289,7 @@ export type UserOrderByWithAggregationInput = {
   avatarSrc?: Prisma.SortOrder
   bio?: Prisma.SortOrder
   toneTag?: Prisma.SortOrder
+  onboardingCompletedAt?: Prisma.SortOrderInput | Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   _count?: Prisma.UserCountOrderByAggregateInput
@@ -290,6 +307,7 @@ export type UserScalarWhereWithAggregatesInput = {
   avatarSrc?: Prisma.StringWithAggregatesFilter<"User"> | string
   bio?: Prisma.StringWithAggregatesFilter<"User"> | string
   toneTag?: Prisma.StringWithAggregatesFilter<"User"> | string
+  onboardingCompletedAt?: Prisma.DateTimeNullableWithAggregatesFilter<"User"> | Date | string | null
   createdAt?: Prisma.DateTimeWithAggregatesFilter<"User"> | Date | string
   updatedAt?: Prisma.DateTimeWithAggregatesFilter<"User"> | Date | string
 }
@@ -301,6 +319,7 @@ export type UserCreateInput = {
   avatarSrc: string
   bio?: string
   toneTag?: string
+  onboardingCompletedAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   posts?: Prisma.PostCreateNestedManyWithoutAuthorInput
@@ -310,6 +329,8 @@ export type UserCreateInput = {
   savedPosts?: Prisma.SavedPostCreateNestedManyWithoutUserInput
   collections?: Prisma.CollectionCreateNestedManyWithoutUserInput
   routineItems?: Prisma.RoutineItemCreateNestedManyWithoutUserInput
+  refreshTokens?: Prisma.RefreshTokenCreateNestedManyWithoutUserInput
+  magicLinkTokens?: Prisma.MagicLinkTokenCreateNestedManyWithoutUserInput
   following?: Prisma.FollowCreateNestedManyWithoutFollowerInput
   followers?: Prisma.FollowCreateNestedManyWithoutFollowingInput
   notificationsReceived?: Prisma.NotificationCreateNestedManyWithoutRecipientInput
@@ -323,6 +344,7 @@ export type UserUncheckedCreateInput = {
   avatarSrc: string
   bio?: string
   toneTag?: string
+  onboardingCompletedAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   posts?: Prisma.PostUncheckedCreateNestedManyWithoutAuthorInput
@@ -332,6 +354,8 @@ export type UserUncheckedCreateInput = {
   savedPosts?: Prisma.SavedPostUncheckedCreateNestedManyWithoutUserInput
   collections?: Prisma.CollectionUncheckedCreateNestedManyWithoutUserInput
   routineItems?: Prisma.RoutineItemUncheckedCreateNestedManyWithoutUserInput
+  refreshTokens?: Prisma.RefreshTokenUncheckedCreateNestedManyWithoutUserInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUncheckedCreateNestedManyWithoutUserInput
   following?: Prisma.FollowUncheckedCreateNestedManyWithoutFollowerInput
   followers?: Prisma.FollowUncheckedCreateNestedManyWithoutFollowingInput
   notificationsReceived?: Prisma.NotificationUncheckedCreateNestedManyWithoutRecipientInput
@@ -345,6 +369,7 @@ export type UserUpdateInput = {
   avatarSrc?: Prisma.StringFieldUpdateOperationsInput | string
   bio?: Prisma.StringFieldUpdateOperationsInput | string
   toneTag?: Prisma.StringFieldUpdateOperationsInput | string
+  onboardingCompletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   posts?: Prisma.PostUpdateManyWithoutAuthorNestedInput
@@ -354,6 +379,8 @@ export type UserUpdateInput = {
   savedPosts?: Prisma.SavedPostUpdateManyWithoutUserNestedInput
   collections?: Prisma.CollectionUpdateManyWithoutUserNestedInput
   routineItems?: Prisma.RoutineItemUpdateManyWithoutUserNestedInput
+  refreshTokens?: Prisma.RefreshTokenUpdateManyWithoutUserNestedInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUpdateManyWithoutUserNestedInput
   following?: Prisma.FollowUpdateManyWithoutFollowerNestedInput
   followers?: Prisma.FollowUpdateManyWithoutFollowingNestedInput
   notificationsReceived?: Prisma.NotificationUpdateManyWithoutRecipientNestedInput
@@ -367,6 +394,7 @@ export type UserUncheckedUpdateInput = {
   avatarSrc?: Prisma.StringFieldUpdateOperationsInput | string
   bio?: Prisma.StringFieldUpdateOperationsInput | string
   toneTag?: Prisma.StringFieldUpdateOperationsInput | string
+  onboardingCompletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   posts?: Prisma.PostUncheckedUpdateManyWithoutAuthorNestedInput
@@ -376,6 +404,8 @@ export type UserUncheckedUpdateInput = {
   savedPosts?: Prisma.SavedPostUncheckedUpdateManyWithoutUserNestedInput
   collections?: Prisma.CollectionUncheckedUpdateManyWithoutUserNestedInput
   routineItems?: Prisma.RoutineItemUncheckedUpdateManyWithoutUserNestedInput
+  refreshTokens?: Prisma.RefreshTokenUncheckedUpdateManyWithoutUserNestedInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUncheckedUpdateManyWithoutUserNestedInput
   following?: Prisma.FollowUncheckedUpdateManyWithoutFollowerNestedInput
   followers?: Prisma.FollowUncheckedUpdateManyWithoutFollowingNestedInput
   notificationsReceived?: Prisma.NotificationUncheckedUpdateManyWithoutRecipientNestedInput
@@ -389,6 +419,7 @@ export type UserCreateManyInput = {
   avatarSrc: string
   bio?: string
   toneTag?: string
+  onboardingCompletedAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
 }
@@ -400,6 +431,7 @@ export type UserUpdateManyMutationInput = {
   avatarSrc?: Prisma.StringFieldUpdateOperationsInput | string
   bio?: Prisma.StringFieldUpdateOperationsInput | string
   toneTag?: Prisma.StringFieldUpdateOperationsInput | string
+  onboardingCompletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -411,6 +443,7 @@ export type UserUncheckedUpdateManyInput = {
   avatarSrc?: Prisma.StringFieldUpdateOperationsInput | string
   bio?: Prisma.StringFieldUpdateOperationsInput | string
   toneTag?: Prisma.StringFieldUpdateOperationsInput | string
+  onboardingCompletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -422,6 +455,7 @@ export type UserCountOrderByAggregateInput = {
   avatarSrc?: Prisma.SortOrder
   bio?: Prisma.SortOrder
   toneTag?: Prisma.SortOrder
+  onboardingCompletedAt?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
 }
@@ -433,6 +467,7 @@ export type UserMaxOrderByAggregateInput = {
   avatarSrc?: Prisma.SortOrder
   bio?: Prisma.SortOrder
   toneTag?: Prisma.SortOrder
+  onboardingCompletedAt?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
 }
@@ -444,6 +479,7 @@ export type UserMinOrderByAggregateInput = {
   avatarSrc?: Prisma.SortOrder
   bio?: Prisma.SortOrder
   toneTag?: Prisma.SortOrder
+  onboardingCompletedAt?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
 }
@@ -455,6 +491,10 @@ export type UserScalarRelationFilter = {
 
 export type StringFieldUpdateOperationsInput = {
   set?: string
+}
+
+export type NullableDateTimeFieldUpdateOperationsInput = {
+  set?: Date | string | null
 }
 
 export type DateTimeFieldUpdateOperationsInput = {
@@ -615,6 +655,34 @@ export type UserUpdateOneRequiredWithoutNotificationsSentNestedInput = {
   update?: Prisma.XOR<Prisma.XOR<Prisma.UserUpdateToOneWithWhereWithoutNotificationsSentInput, Prisma.UserUpdateWithoutNotificationsSentInput>, Prisma.UserUncheckedUpdateWithoutNotificationsSentInput>
 }
 
+export type UserCreateNestedOneWithoutRefreshTokensInput = {
+  create?: Prisma.XOR<Prisma.UserCreateWithoutRefreshTokensInput, Prisma.UserUncheckedCreateWithoutRefreshTokensInput>
+  connectOrCreate?: Prisma.UserCreateOrConnectWithoutRefreshTokensInput
+  connect?: Prisma.UserWhereUniqueInput
+}
+
+export type UserUpdateOneRequiredWithoutRefreshTokensNestedInput = {
+  create?: Prisma.XOR<Prisma.UserCreateWithoutRefreshTokensInput, Prisma.UserUncheckedCreateWithoutRefreshTokensInput>
+  connectOrCreate?: Prisma.UserCreateOrConnectWithoutRefreshTokensInput
+  upsert?: Prisma.UserUpsertWithoutRefreshTokensInput
+  connect?: Prisma.UserWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.UserUpdateToOneWithWhereWithoutRefreshTokensInput, Prisma.UserUpdateWithoutRefreshTokensInput>, Prisma.UserUncheckedUpdateWithoutRefreshTokensInput>
+}
+
+export type UserCreateNestedOneWithoutMagicLinkTokensInput = {
+  create?: Prisma.XOR<Prisma.UserCreateWithoutMagicLinkTokensInput, Prisma.UserUncheckedCreateWithoutMagicLinkTokensInput>
+  connectOrCreate?: Prisma.UserCreateOrConnectWithoutMagicLinkTokensInput
+  connect?: Prisma.UserWhereUniqueInput
+}
+
+export type UserUpdateOneRequiredWithoutMagicLinkTokensNestedInput = {
+  create?: Prisma.XOR<Prisma.UserCreateWithoutMagicLinkTokensInput, Prisma.UserUncheckedCreateWithoutMagicLinkTokensInput>
+  connectOrCreate?: Prisma.UserCreateOrConnectWithoutMagicLinkTokensInput
+  upsert?: Prisma.UserUpsertWithoutMagicLinkTokensInput
+  connect?: Prisma.UserWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.UserUpdateToOneWithWhereWithoutMagicLinkTokensInput, Prisma.UserUpdateWithoutMagicLinkTokensInput>, Prisma.UserUncheckedUpdateWithoutMagicLinkTokensInput>
+}
+
 export type UserCreateWithoutFollowingInput = {
   id?: string
   username: string
@@ -622,6 +690,7 @@ export type UserCreateWithoutFollowingInput = {
   avatarSrc: string
   bio?: string
   toneTag?: string
+  onboardingCompletedAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   posts?: Prisma.PostCreateNestedManyWithoutAuthorInput
@@ -631,6 +700,8 @@ export type UserCreateWithoutFollowingInput = {
   savedPosts?: Prisma.SavedPostCreateNestedManyWithoutUserInput
   collections?: Prisma.CollectionCreateNestedManyWithoutUserInput
   routineItems?: Prisma.RoutineItemCreateNestedManyWithoutUserInput
+  refreshTokens?: Prisma.RefreshTokenCreateNestedManyWithoutUserInput
+  magicLinkTokens?: Prisma.MagicLinkTokenCreateNestedManyWithoutUserInput
   followers?: Prisma.FollowCreateNestedManyWithoutFollowingInput
   notificationsReceived?: Prisma.NotificationCreateNestedManyWithoutRecipientInput
   notificationsSent?: Prisma.NotificationCreateNestedManyWithoutActorInput
@@ -643,6 +714,7 @@ export type UserUncheckedCreateWithoutFollowingInput = {
   avatarSrc: string
   bio?: string
   toneTag?: string
+  onboardingCompletedAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   posts?: Prisma.PostUncheckedCreateNestedManyWithoutAuthorInput
@@ -652,6 +724,8 @@ export type UserUncheckedCreateWithoutFollowingInput = {
   savedPosts?: Prisma.SavedPostUncheckedCreateNestedManyWithoutUserInput
   collections?: Prisma.CollectionUncheckedCreateNestedManyWithoutUserInput
   routineItems?: Prisma.RoutineItemUncheckedCreateNestedManyWithoutUserInput
+  refreshTokens?: Prisma.RefreshTokenUncheckedCreateNestedManyWithoutUserInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUncheckedCreateNestedManyWithoutUserInput
   followers?: Prisma.FollowUncheckedCreateNestedManyWithoutFollowingInput
   notificationsReceived?: Prisma.NotificationUncheckedCreateNestedManyWithoutRecipientInput
   notificationsSent?: Prisma.NotificationUncheckedCreateNestedManyWithoutActorInput
@@ -669,6 +743,7 @@ export type UserCreateWithoutFollowersInput = {
   avatarSrc: string
   bio?: string
   toneTag?: string
+  onboardingCompletedAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   posts?: Prisma.PostCreateNestedManyWithoutAuthorInput
@@ -678,6 +753,8 @@ export type UserCreateWithoutFollowersInput = {
   savedPosts?: Prisma.SavedPostCreateNestedManyWithoutUserInput
   collections?: Prisma.CollectionCreateNestedManyWithoutUserInput
   routineItems?: Prisma.RoutineItemCreateNestedManyWithoutUserInput
+  refreshTokens?: Prisma.RefreshTokenCreateNestedManyWithoutUserInput
+  magicLinkTokens?: Prisma.MagicLinkTokenCreateNestedManyWithoutUserInput
   following?: Prisma.FollowCreateNestedManyWithoutFollowerInput
   notificationsReceived?: Prisma.NotificationCreateNestedManyWithoutRecipientInput
   notificationsSent?: Prisma.NotificationCreateNestedManyWithoutActorInput
@@ -690,6 +767,7 @@ export type UserUncheckedCreateWithoutFollowersInput = {
   avatarSrc: string
   bio?: string
   toneTag?: string
+  onboardingCompletedAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   posts?: Prisma.PostUncheckedCreateNestedManyWithoutAuthorInput
@@ -699,6 +777,8 @@ export type UserUncheckedCreateWithoutFollowersInput = {
   savedPosts?: Prisma.SavedPostUncheckedCreateNestedManyWithoutUserInput
   collections?: Prisma.CollectionUncheckedCreateNestedManyWithoutUserInput
   routineItems?: Prisma.RoutineItemUncheckedCreateNestedManyWithoutUserInput
+  refreshTokens?: Prisma.RefreshTokenUncheckedCreateNestedManyWithoutUserInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUncheckedCreateNestedManyWithoutUserInput
   following?: Prisma.FollowUncheckedCreateNestedManyWithoutFollowerInput
   notificationsReceived?: Prisma.NotificationUncheckedCreateNestedManyWithoutRecipientInput
   notificationsSent?: Prisma.NotificationUncheckedCreateNestedManyWithoutActorInput
@@ -727,6 +807,7 @@ export type UserUpdateWithoutFollowingInput = {
   avatarSrc?: Prisma.StringFieldUpdateOperationsInput | string
   bio?: Prisma.StringFieldUpdateOperationsInput | string
   toneTag?: Prisma.StringFieldUpdateOperationsInput | string
+  onboardingCompletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   posts?: Prisma.PostUpdateManyWithoutAuthorNestedInput
@@ -736,6 +817,8 @@ export type UserUpdateWithoutFollowingInput = {
   savedPosts?: Prisma.SavedPostUpdateManyWithoutUserNestedInput
   collections?: Prisma.CollectionUpdateManyWithoutUserNestedInput
   routineItems?: Prisma.RoutineItemUpdateManyWithoutUserNestedInput
+  refreshTokens?: Prisma.RefreshTokenUpdateManyWithoutUserNestedInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUpdateManyWithoutUserNestedInput
   followers?: Prisma.FollowUpdateManyWithoutFollowingNestedInput
   notificationsReceived?: Prisma.NotificationUpdateManyWithoutRecipientNestedInput
   notificationsSent?: Prisma.NotificationUpdateManyWithoutActorNestedInput
@@ -748,6 +831,7 @@ export type UserUncheckedUpdateWithoutFollowingInput = {
   avatarSrc?: Prisma.StringFieldUpdateOperationsInput | string
   bio?: Prisma.StringFieldUpdateOperationsInput | string
   toneTag?: Prisma.StringFieldUpdateOperationsInput | string
+  onboardingCompletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   posts?: Prisma.PostUncheckedUpdateManyWithoutAuthorNestedInput
@@ -757,6 +841,8 @@ export type UserUncheckedUpdateWithoutFollowingInput = {
   savedPosts?: Prisma.SavedPostUncheckedUpdateManyWithoutUserNestedInput
   collections?: Prisma.CollectionUncheckedUpdateManyWithoutUserNestedInput
   routineItems?: Prisma.RoutineItemUncheckedUpdateManyWithoutUserNestedInput
+  refreshTokens?: Prisma.RefreshTokenUncheckedUpdateManyWithoutUserNestedInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUncheckedUpdateManyWithoutUserNestedInput
   followers?: Prisma.FollowUncheckedUpdateManyWithoutFollowingNestedInput
   notificationsReceived?: Prisma.NotificationUncheckedUpdateManyWithoutRecipientNestedInput
   notificationsSent?: Prisma.NotificationUncheckedUpdateManyWithoutActorNestedInput
@@ -780,6 +866,7 @@ export type UserUpdateWithoutFollowersInput = {
   avatarSrc?: Prisma.StringFieldUpdateOperationsInput | string
   bio?: Prisma.StringFieldUpdateOperationsInput | string
   toneTag?: Prisma.StringFieldUpdateOperationsInput | string
+  onboardingCompletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   posts?: Prisma.PostUpdateManyWithoutAuthorNestedInput
@@ -789,6 +876,8 @@ export type UserUpdateWithoutFollowersInput = {
   savedPosts?: Prisma.SavedPostUpdateManyWithoutUserNestedInput
   collections?: Prisma.CollectionUpdateManyWithoutUserNestedInput
   routineItems?: Prisma.RoutineItemUpdateManyWithoutUserNestedInput
+  refreshTokens?: Prisma.RefreshTokenUpdateManyWithoutUserNestedInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUpdateManyWithoutUserNestedInput
   following?: Prisma.FollowUpdateManyWithoutFollowerNestedInput
   notificationsReceived?: Prisma.NotificationUpdateManyWithoutRecipientNestedInput
   notificationsSent?: Prisma.NotificationUpdateManyWithoutActorNestedInput
@@ -801,6 +890,7 @@ export type UserUncheckedUpdateWithoutFollowersInput = {
   avatarSrc?: Prisma.StringFieldUpdateOperationsInput | string
   bio?: Prisma.StringFieldUpdateOperationsInput | string
   toneTag?: Prisma.StringFieldUpdateOperationsInput | string
+  onboardingCompletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   posts?: Prisma.PostUncheckedUpdateManyWithoutAuthorNestedInput
@@ -810,6 +900,8 @@ export type UserUncheckedUpdateWithoutFollowersInput = {
   savedPosts?: Prisma.SavedPostUncheckedUpdateManyWithoutUserNestedInput
   collections?: Prisma.CollectionUncheckedUpdateManyWithoutUserNestedInput
   routineItems?: Prisma.RoutineItemUncheckedUpdateManyWithoutUserNestedInput
+  refreshTokens?: Prisma.RefreshTokenUncheckedUpdateManyWithoutUserNestedInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUncheckedUpdateManyWithoutUserNestedInput
   following?: Prisma.FollowUncheckedUpdateManyWithoutFollowerNestedInput
   notificationsReceived?: Prisma.NotificationUncheckedUpdateManyWithoutRecipientNestedInput
   notificationsSent?: Prisma.NotificationUncheckedUpdateManyWithoutActorNestedInput
@@ -822,6 +914,7 @@ export type UserCreateWithoutPostsInput = {
   avatarSrc: string
   bio?: string
   toneTag?: string
+  onboardingCompletedAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   comments?: Prisma.CommentCreateNestedManyWithoutAuthorInput
@@ -830,6 +923,8 @@ export type UserCreateWithoutPostsInput = {
   savedPosts?: Prisma.SavedPostCreateNestedManyWithoutUserInput
   collections?: Prisma.CollectionCreateNestedManyWithoutUserInput
   routineItems?: Prisma.RoutineItemCreateNestedManyWithoutUserInput
+  refreshTokens?: Prisma.RefreshTokenCreateNestedManyWithoutUserInput
+  magicLinkTokens?: Prisma.MagicLinkTokenCreateNestedManyWithoutUserInput
   following?: Prisma.FollowCreateNestedManyWithoutFollowerInput
   followers?: Prisma.FollowCreateNestedManyWithoutFollowingInput
   notificationsReceived?: Prisma.NotificationCreateNestedManyWithoutRecipientInput
@@ -843,6 +938,7 @@ export type UserUncheckedCreateWithoutPostsInput = {
   avatarSrc: string
   bio?: string
   toneTag?: string
+  onboardingCompletedAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   comments?: Prisma.CommentUncheckedCreateNestedManyWithoutAuthorInput
@@ -851,6 +947,8 @@ export type UserUncheckedCreateWithoutPostsInput = {
   savedPosts?: Prisma.SavedPostUncheckedCreateNestedManyWithoutUserInput
   collections?: Prisma.CollectionUncheckedCreateNestedManyWithoutUserInput
   routineItems?: Prisma.RoutineItemUncheckedCreateNestedManyWithoutUserInput
+  refreshTokens?: Prisma.RefreshTokenUncheckedCreateNestedManyWithoutUserInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUncheckedCreateNestedManyWithoutUserInput
   following?: Prisma.FollowUncheckedCreateNestedManyWithoutFollowerInput
   followers?: Prisma.FollowUncheckedCreateNestedManyWithoutFollowingInput
   notificationsReceived?: Prisma.NotificationUncheckedCreateNestedManyWithoutRecipientInput
@@ -880,6 +978,7 @@ export type UserUpdateWithoutPostsInput = {
   avatarSrc?: Prisma.StringFieldUpdateOperationsInput | string
   bio?: Prisma.StringFieldUpdateOperationsInput | string
   toneTag?: Prisma.StringFieldUpdateOperationsInput | string
+  onboardingCompletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   comments?: Prisma.CommentUpdateManyWithoutAuthorNestedInput
@@ -888,6 +987,8 @@ export type UserUpdateWithoutPostsInput = {
   savedPosts?: Prisma.SavedPostUpdateManyWithoutUserNestedInput
   collections?: Prisma.CollectionUpdateManyWithoutUserNestedInput
   routineItems?: Prisma.RoutineItemUpdateManyWithoutUserNestedInput
+  refreshTokens?: Prisma.RefreshTokenUpdateManyWithoutUserNestedInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUpdateManyWithoutUserNestedInput
   following?: Prisma.FollowUpdateManyWithoutFollowerNestedInput
   followers?: Prisma.FollowUpdateManyWithoutFollowingNestedInput
   notificationsReceived?: Prisma.NotificationUpdateManyWithoutRecipientNestedInput
@@ -901,6 +1002,7 @@ export type UserUncheckedUpdateWithoutPostsInput = {
   avatarSrc?: Prisma.StringFieldUpdateOperationsInput | string
   bio?: Prisma.StringFieldUpdateOperationsInput | string
   toneTag?: Prisma.StringFieldUpdateOperationsInput | string
+  onboardingCompletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   comments?: Prisma.CommentUncheckedUpdateManyWithoutAuthorNestedInput
@@ -909,6 +1011,8 @@ export type UserUncheckedUpdateWithoutPostsInput = {
   savedPosts?: Prisma.SavedPostUncheckedUpdateManyWithoutUserNestedInput
   collections?: Prisma.CollectionUncheckedUpdateManyWithoutUserNestedInput
   routineItems?: Prisma.RoutineItemUncheckedUpdateManyWithoutUserNestedInput
+  refreshTokens?: Prisma.RefreshTokenUncheckedUpdateManyWithoutUserNestedInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUncheckedUpdateManyWithoutUserNestedInput
   following?: Prisma.FollowUncheckedUpdateManyWithoutFollowerNestedInput
   followers?: Prisma.FollowUncheckedUpdateManyWithoutFollowingNestedInput
   notificationsReceived?: Prisma.NotificationUncheckedUpdateManyWithoutRecipientNestedInput
@@ -922,6 +1026,7 @@ export type UserCreateWithoutRoutineItemsInput = {
   avatarSrc: string
   bio?: string
   toneTag?: string
+  onboardingCompletedAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   posts?: Prisma.PostCreateNestedManyWithoutAuthorInput
@@ -930,6 +1035,8 @@ export type UserCreateWithoutRoutineItemsInput = {
   commentLikes?: Prisma.CommentLikeCreateNestedManyWithoutUserInput
   savedPosts?: Prisma.SavedPostCreateNestedManyWithoutUserInput
   collections?: Prisma.CollectionCreateNestedManyWithoutUserInput
+  refreshTokens?: Prisma.RefreshTokenCreateNestedManyWithoutUserInput
+  magicLinkTokens?: Prisma.MagicLinkTokenCreateNestedManyWithoutUserInput
   following?: Prisma.FollowCreateNestedManyWithoutFollowerInput
   followers?: Prisma.FollowCreateNestedManyWithoutFollowingInput
   notificationsReceived?: Prisma.NotificationCreateNestedManyWithoutRecipientInput
@@ -943,6 +1050,7 @@ export type UserUncheckedCreateWithoutRoutineItemsInput = {
   avatarSrc: string
   bio?: string
   toneTag?: string
+  onboardingCompletedAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   posts?: Prisma.PostUncheckedCreateNestedManyWithoutAuthorInput
@@ -951,6 +1059,8 @@ export type UserUncheckedCreateWithoutRoutineItemsInput = {
   commentLikes?: Prisma.CommentLikeUncheckedCreateNestedManyWithoutUserInput
   savedPosts?: Prisma.SavedPostUncheckedCreateNestedManyWithoutUserInput
   collections?: Prisma.CollectionUncheckedCreateNestedManyWithoutUserInput
+  refreshTokens?: Prisma.RefreshTokenUncheckedCreateNestedManyWithoutUserInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUncheckedCreateNestedManyWithoutUserInput
   following?: Prisma.FollowUncheckedCreateNestedManyWithoutFollowerInput
   followers?: Prisma.FollowUncheckedCreateNestedManyWithoutFollowingInput
   notificationsReceived?: Prisma.NotificationUncheckedCreateNestedManyWithoutRecipientInput
@@ -980,6 +1090,7 @@ export type UserUpdateWithoutRoutineItemsInput = {
   avatarSrc?: Prisma.StringFieldUpdateOperationsInput | string
   bio?: Prisma.StringFieldUpdateOperationsInput | string
   toneTag?: Prisma.StringFieldUpdateOperationsInput | string
+  onboardingCompletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   posts?: Prisma.PostUpdateManyWithoutAuthorNestedInput
@@ -988,6 +1099,8 @@ export type UserUpdateWithoutRoutineItemsInput = {
   commentLikes?: Prisma.CommentLikeUpdateManyWithoutUserNestedInput
   savedPosts?: Prisma.SavedPostUpdateManyWithoutUserNestedInput
   collections?: Prisma.CollectionUpdateManyWithoutUserNestedInput
+  refreshTokens?: Prisma.RefreshTokenUpdateManyWithoutUserNestedInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUpdateManyWithoutUserNestedInput
   following?: Prisma.FollowUpdateManyWithoutFollowerNestedInput
   followers?: Prisma.FollowUpdateManyWithoutFollowingNestedInput
   notificationsReceived?: Prisma.NotificationUpdateManyWithoutRecipientNestedInput
@@ -1001,6 +1114,7 @@ export type UserUncheckedUpdateWithoutRoutineItemsInput = {
   avatarSrc?: Prisma.StringFieldUpdateOperationsInput | string
   bio?: Prisma.StringFieldUpdateOperationsInput | string
   toneTag?: Prisma.StringFieldUpdateOperationsInput | string
+  onboardingCompletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   posts?: Prisma.PostUncheckedUpdateManyWithoutAuthorNestedInput
@@ -1009,6 +1123,8 @@ export type UserUncheckedUpdateWithoutRoutineItemsInput = {
   commentLikes?: Prisma.CommentLikeUncheckedUpdateManyWithoutUserNestedInput
   savedPosts?: Prisma.SavedPostUncheckedUpdateManyWithoutUserNestedInput
   collections?: Prisma.CollectionUncheckedUpdateManyWithoutUserNestedInput
+  refreshTokens?: Prisma.RefreshTokenUncheckedUpdateManyWithoutUserNestedInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUncheckedUpdateManyWithoutUserNestedInput
   following?: Prisma.FollowUncheckedUpdateManyWithoutFollowerNestedInput
   followers?: Prisma.FollowUncheckedUpdateManyWithoutFollowingNestedInput
   notificationsReceived?: Prisma.NotificationUncheckedUpdateManyWithoutRecipientNestedInput
@@ -1022,6 +1138,7 @@ export type UserCreateWithoutLikesInput = {
   avatarSrc: string
   bio?: string
   toneTag?: string
+  onboardingCompletedAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   posts?: Prisma.PostCreateNestedManyWithoutAuthorInput
@@ -1030,6 +1147,8 @@ export type UserCreateWithoutLikesInput = {
   savedPosts?: Prisma.SavedPostCreateNestedManyWithoutUserInput
   collections?: Prisma.CollectionCreateNestedManyWithoutUserInput
   routineItems?: Prisma.RoutineItemCreateNestedManyWithoutUserInput
+  refreshTokens?: Prisma.RefreshTokenCreateNestedManyWithoutUserInput
+  magicLinkTokens?: Prisma.MagicLinkTokenCreateNestedManyWithoutUserInput
   following?: Prisma.FollowCreateNestedManyWithoutFollowerInput
   followers?: Prisma.FollowCreateNestedManyWithoutFollowingInput
   notificationsReceived?: Prisma.NotificationCreateNestedManyWithoutRecipientInput
@@ -1043,6 +1162,7 @@ export type UserUncheckedCreateWithoutLikesInput = {
   avatarSrc: string
   bio?: string
   toneTag?: string
+  onboardingCompletedAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   posts?: Prisma.PostUncheckedCreateNestedManyWithoutAuthorInput
@@ -1051,6 +1171,8 @@ export type UserUncheckedCreateWithoutLikesInput = {
   savedPosts?: Prisma.SavedPostUncheckedCreateNestedManyWithoutUserInput
   collections?: Prisma.CollectionUncheckedCreateNestedManyWithoutUserInput
   routineItems?: Prisma.RoutineItemUncheckedCreateNestedManyWithoutUserInput
+  refreshTokens?: Prisma.RefreshTokenUncheckedCreateNestedManyWithoutUserInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUncheckedCreateNestedManyWithoutUserInput
   following?: Prisma.FollowUncheckedCreateNestedManyWithoutFollowerInput
   followers?: Prisma.FollowUncheckedCreateNestedManyWithoutFollowingInput
   notificationsReceived?: Prisma.NotificationUncheckedCreateNestedManyWithoutRecipientInput
@@ -1080,6 +1202,7 @@ export type UserUpdateWithoutLikesInput = {
   avatarSrc?: Prisma.StringFieldUpdateOperationsInput | string
   bio?: Prisma.StringFieldUpdateOperationsInput | string
   toneTag?: Prisma.StringFieldUpdateOperationsInput | string
+  onboardingCompletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   posts?: Prisma.PostUpdateManyWithoutAuthorNestedInput
@@ -1088,6 +1211,8 @@ export type UserUpdateWithoutLikesInput = {
   savedPosts?: Prisma.SavedPostUpdateManyWithoutUserNestedInput
   collections?: Prisma.CollectionUpdateManyWithoutUserNestedInput
   routineItems?: Prisma.RoutineItemUpdateManyWithoutUserNestedInput
+  refreshTokens?: Prisma.RefreshTokenUpdateManyWithoutUserNestedInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUpdateManyWithoutUserNestedInput
   following?: Prisma.FollowUpdateManyWithoutFollowerNestedInput
   followers?: Prisma.FollowUpdateManyWithoutFollowingNestedInput
   notificationsReceived?: Prisma.NotificationUpdateManyWithoutRecipientNestedInput
@@ -1101,6 +1226,7 @@ export type UserUncheckedUpdateWithoutLikesInput = {
   avatarSrc?: Prisma.StringFieldUpdateOperationsInput | string
   bio?: Prisma.StringFieldUpdateOperationsInput | string
   toneTag?: Prisma.StringFieldUpdateOperationsInput | string
+  onboardingCompletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   posts?: Prisma.PostUncheckedUpdateManyWithoutAuthorNestedInput
@@ -1109,6 +1235,8 @@ export type UserUncheckedUpdateWithoutLikesInput = {
   savedPosts?: Prisma.SavedPostUncheckedUpdateManyWithoutUserNestedInput
   collections?: Prisma.CollectionUncheckedUpdateManyWithoutUserNestedInput
   routineItems?: Prisma.RoutineItemUncheckedUpdateManyWithoutUserNestedInput
+  refreshTokens?: Prisma.RefreshTokenUncheckedUpdateManyWithoutUserNestedInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUncheckedUpdateManyWithoutUserNestedInput
   following?: Prisma.FollowUncheckedUpdateManyWithoutFollowerNestedInput
   followers?: Prisma.FollowUncheckedUpdateManyWithoutFollowingNestedInput
   notificationsReceived?: Prisma.NotificationUncheckedUpdateManyWithoutRecipientNestedInput
@@ -1122,6 +1250,7 @@ export type UserCreateWithoutCommentsInput = {
   avatarSrc: string
   bio?: string
   toneTag?: string
+  onboardingCompletedAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   posts?: Prisma.PostCreateNestedManyWithoutAuthorInput
@@ -1130,6 +1259,8 @@ export type UserCreateWithoutCommentsInput = {
   savedPosts?: Prisma.SavedPostCreateNestedManyWithoutUserInput
   collections?: Prisma.CollectionCreateNestedManyWithoutUserInput
   routineItems?: Prisma.RoutineItemCreateNestedManyWithoutUserInput
+  refreshTokens?: Prisma.RefreshTokenCreateNestedManyWithoutUserInput
+  magicLinkTokens?: Prisma.MagicLinkTokenCreateNestedManyWithoutUserInput
   following?: Prisma.FollowCreateNestedManyWithoutFollowerInput
   followers?: Prisma.FollowCreateNestedManyWithoutFollowingInput
   notificationsReceived?: Prisma.NotificationCreateNestedManyWithoutRecipientInput
@@ -1143,6 +1274,7 @@ export type UserUncheckedCreateWithoutCommentsInput = {
   avatarSrc: string
   bio?: string
   toneTag?: string
+  onboardingCompletedAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   posts?: Prisma.PostUncheckedCreateNestedManyWithoutAuthorInput
@@ -1151,6 +1283,8 @@ export type UserUncheckedCreateWithoutCommentsInput = {
   savedPosts?: Prisma.SavedPostUncheckedCreateNestedManyWithoutUserInput
   collections?: Prisma.CollectionUncheckedCreateNestedManyWithoutUserInput
   routineItems?: Prisma.RoutineItemUncheckedCreateNestedManyWithoutUserInput
+  refreshTokens?: Prisma.RefreshTokenUncheckedCreateNestedManyWithoutUserInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUncheckedCreateNestedManyWithoutUserInput
   following?: Prisma.FollowUncheckedCreateNestedManyWithoutFollowerInput
   followers?: Prisma.FollowUncheckedCreateNestedManyWithoutFollowingInput
   notificationsReceived?: Prisma.NotificationUncheckedCreateNestedManyWithoutRecipientInput
@@ -1180,6 +1314,7 @@ export type UserUpdateWithoutCommentsInput = {
   avatarSrc?: Prisma.StringFieldUpdateOperationsInput | string
   bio?: Prisma.StringFieldUpdateOperationsInput | string
   toneTag?: Prisma.StringFieldUpdateOperationsInput | string
+  onboardingCompletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   posts?: Prisma.PostUpdateManyWithoutAuthorNestedInput
@@ -1188,6 +1323,8 @@ export type UserUpdateWithoutCommentsInput = {
   savedPosts?: Prisma.SavedPostUpdateManyWithoutUserNestedInput
   collections?: Prisma.CollectionUpdateManyWithoutUserNestedInput
   routineItems?: Prisma.RoutineItemUpdateManyWithoutUserNestedInput
+  refreshTokens?: Prisma.RefreshTokenUpdateManyWithoutUserNestedInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUpdateManyWithoutUserNestedInput
   following?: Prisma.FollowUpdateManyWithoutFollowerNestedInput
   followers?: Prisma.FollowUpdateManyWithoutFollowingNestedInput
   notificationsReceived?: Prisma.NotificationUpdateManyWithoutRecipientNestedInput
@@ -1201,6 +1338,7 @@ export type UserUncheckedUpdateWithoutCommentsInput = {
   avatarSrc?: Prisma.StringFieldUpdateOperationsInput | string
   bio?: Prisma.StringFieldUpdateOperationsInput | string
   toneTag?: Prisma.StringFieldUpdateOperationsInput | string
+  onboardingCompletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   posts?: Prisma.PostUncheckedUpdateManyWithoutAuthorNestedInput
@@ -1209,6 +1347,8 @@ export type UserUncheckedUpdateWithoutCommentsInput = {
   savedPosts?: Prisma.SavedPostUncheckedUpdateManyWithoutUserNestedInput
   collections?: Prisma.CollectionUncheckedUpdateManyWithoutUserNestedInput
   routineItems?: Prisma.RoutineItemUncheckedUpdateManyWithoutUserNestedInput
+  refreshTokens?: Prisma.RefreshTokenUncheckedUpdateManyWithoutUserNestedInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUncheckedUpdateManyWithoutUserNestedInput
   following?: Prisma.FollowUncheckedUpdateManyWithoutFollowerNestedInput
   followers?: Prisma.FollowUncheckedUpdateManyWithoutFollowingNestedInput
   notificationsReceived?: Prisma.NotificationUncheckedUpdateManyWithoutRecipientNestedInput
@@ -1222,6 +1362,7 @@ export type UserCreateWithoutCommentLikesInput = {
   avatarSrc: string
   bio?: string
   toneTag?: string
+  onboardingCompletedAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   posts?: Prisma.PostCreateNestedManyWithoutAuthorInput
@@ -1230,6 +1371,8 @@ export type UserCreateWithoutCommentLikesInput = {
   savedPosts?: Prisma.SavedPostCreateNestedManyWithoutUserInput
   collections?: Prisma.CollectionCreateNestedManyWithoutUserInput
   routineItems?: Prisma.RoutineItemCreateNestedManyWithoutUserInput
+  refreshTokens?: Prisma.RefreshTokenCreateNestedManyWithoutUserInput
+  magicLinkTokens?: Prisma.MagicLinkTokenCreateNestedManyWithoutUserInput
   following?: Prisma.FollowCreateNestedManyWithoutFollowerInput
   followers?: Prisma.FollowCreateNestedManyWithoutFollowingInput
   notificationsReceived?: Prisma.NotificationCreateNestedManyWithoutRecipientInput
@@ -1243,6 +1386,7 @@ export type UserUncheckedCreateWithoutCommentLikesInput = {
   avatarSrc: string
   bio?: string
   toneTag?: string
+  onboardingCompletedAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   posts?: Prisma.PostUncheckedCreateNestedManyWithoutAuthorInput
@@ -1251,6 +1395,8 @@ export type UserUncheckedCreateWithoutCommentLikesInput = {
   savedPosts?: Prisma.SavedPostUncheckedCreateNestedManyWithoutUserInput
   collections?: Prisma.CollectionUncheckedCreateNestedManyWithoutUserInput
   routineItems?: Prisma.RoutineItemUncheckedCreateNestedManyWithoutUserInput
+  refreshTokens?: Prisma.RefreshTokenUncheckedCreateNestedManyWithoutUserInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUncheckedCreateNestedManyWithoutUserInput
   following?: Prisma.FollowUncheckedCreateNestedManyWithoutFollowerInput
   followers?: Prisma.FollowUncheckedCreateNestedManyWithoutFollowingInput
   notificationsReceived?: Prisma.NotificationUncheckedCreateNestedManyWithoutRecipientInput
@@ -1280,6 +1426,7 @@ export type UserUpdateWithoutCommentLikesInput = {
   avatarSrc?: Prisma.StringFieldUpdateOperationsInput | string
   bio?: Prisma.StringFieldUpdateOperationsInput | string
   toneTag?: Prisma.StringFieldUpdateOperationsInput | string
+  onboardingCompletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   posts?: Prisma.PostUpdateManyWithoutAuthorNestedInput
@@ -1288,6 +1435,8 @@ export type UserUpdateWithoutCommentLikesInput = {
   savedPosts?: Prisma.SavedPostUpdateManyWithoutUserNestedInput
   collections?: Prisma.CollectionUpdateManyWithoutUserNestedInput
   routineItems?: Prisma.RoutineItemUpdateManyWithoutUserNestedInput
+  refreshTokens?: Prisma.RefreshTokenUpdateManyWithoutUserNestedInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUpdateManyWithoutUserNestedInput
   following?: Prisma.FollowUpdateManyWithoutFollowerNestedInput
   followers?: Prisma.FollowUpdateManyWithoutFollowingNestedInput
   notificationsReceived?: Prisma.NotificationUpdateManyWithoutRecipientNestedInput
@@ -1301,6 +1450,7 @@ export type UserUncheckedUpdateWithoutCommentLikesInput = {
   avatarSrc?: Prisma.StringFieldUpdateOperationsInput | string
   bio?: Prisma.StringFieldUpdateOperationsInput | string
   toneTag?: Prisma.StringFieldUpdateOperationsInput | string
+  onboardingCompletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   posts?: Prisma.PostUncheckedUpdateManyWithoutAuthorNestedInput
@@ -1309,6 +1459,8 @@ export type UserUncheckedUpdateWithoutCommentLikesInput = {
   savedPosts?: Prisma.SavedPostUncheckedUpdateManyWithoutUserNestedInput
   collections?: Prisma.CollectionUncheckedUpdateManyWithoutUserNestedInput
   routineItems?: Prisma.RoutineItemUncheckedUpdateManyWithoutUserNestedInput
+  refreshTokens?: Prisma.RefreshTokenUncheckedUpdateManyWithoutUserNestedInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUncheckedUpdateManyWithoutUserNestedInput
   following?: Prisma.FollowUncheckedUpdateManyWithoutFollowerNestedInput
   followers?: Prisma.FollowUncheckedUpdateManyWithoutFollowingNestedInput
   notificationsReceived?: Prisma.NotificationUncheckedUpdateManyWithoutRecipientNestedInput
@@ -1322,6 +1474,7 @@ export type UserCreateWithoutSavedPostsInput = {
   avatarSrc: string
   bio?: string
   toneTag?: string
+  onboardingCompletedAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   posts?: Prisma.PostCreateNestedManyWithoutAuthorInput
@@ -1330,6 +1483,8 @@ export type UserCreateWithoutSavedPostsInput = {
   commentLikes?: Prisma.CommentLikeCreateNestedManyWithoutUserInput
   collections?: Prisma.CollectionCreateNestedManyWithoutUserInput
   routineItems?: Prisma.RoutineItemCreateNestedManyWithoutUserInput
+  refreshTokens?: Prisma.RefreshTokenCreateNestedManyWithoutUserInput
+  magicLinkTokens?: Prisma.MagicLinkTokenCreateNestedManyWithoutUserInput
   following?: Prisma.FollowCreateNestedManyWithoutFollowerInput
   followers?: Prisma.FollowCreateNestedManyWithoutFollowingInput
   notificationsReceived?: Prisma.NotificationCreateNestedManyWithoutRecipientInput
@@ -1343,6 +1498,7 @@ export type UserUncheckedCreateWithoutSavedPostsInput = {
   avatarSrc: string
   bio?: string
   toneTag?: string
+  onboardingCompletedAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   posts?: Prisma.PostUncheckedCreateNestedManyWithoutAuthorInput
@@ -1351,6 +1507,8 @@ export type UserUncheckedCreateWithoutSavedPostsInput = {
   commentLikes?: Prisma.CommentLikeUncheckedCreateNestedManyWithoutUserInput
   collections?: Prisma.CollectionUncheckedCreateNestedManyWithoutUserInput
   routineItems?: Prisma.RoutineItemUncheckedCreateNestedManyWithoutUserInput
+  refreshTokens?: Prisma.RefreshTokenUncheckedCreateNestedManyWithoutUserInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUncheckedCreateNestedManyWithoutUserInput
   following?: Prisma.FollowUncheckedCreateNestedManyWithoutFollowerInput
   followers?: Prisma.FollowUncheckedCreateNestedManyWithoutFollowingInput
   notificationsReceived?: Prisma.NotificationUncheckedCreateNestedManyWithoutRecipientInput
@@ -1380,6 +1538,7 @@ export type UserUpdateWithoutSavedPostsInput = {
   avatarSrc?: Prisma.StringFieldUpdateOperationsInput | string
   bio?: Prisma.StringFieldUpdateOperationsInput | string
   toneTag?: Prisma.StringFieldUpdateOperationsInput | string
+  onboardingCompletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   posts?: Prisma.PostUpdateManyWithoutAuthorNestedInput
@@ -1388,6 +1547,8 @@ export type UserUpdateWithoutSavedPostsInput = {
   commentLikes?: Prisma.CommentLikeUpdateManyWithoutUserNestedInput
   collections?: Prisma.CollectionUpdateManyWithoutUserNestedInput
   routineItems?: Prisma.RoutineItemUpdateManyWithoutUserNestedInput
+  refreshTokens?: Prisma.RefreshTokenUpdateManyWithoutUserNestedInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUpdateManyWithoutUserNestedInput
   following?: Prisma.FollowUpdateManyWithoutFollowerNestedInput
   followers?: Prisma.FollowUpdateManyWithoutFollowingNestedInput
   notificationsReceived?: Prisma.NotificationUpdateManyWithoutRecipientNestedInput
@@ -1401,6 +1562,7 @@ export type UserUncheckedUpdateWithoutSavedPostsInput = {
   avatarSrc?: Prisma.StringFieldUpdateOperationsInput | string
   bio?: Prisma.StringFieldUpdateOperationsInput | string
   toneTag?: Prisma.StringFieldUpdateOperationsInput | string
+  onboardingCompletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   posts?: Prisma.PostUncheckedUpdateManyWithoutAuthorNestedInput
@@ -1409,6 +1571,8 @@ export type UserUncheckedUpdateWithoutSavedPostsInput = {
   commentLikes?: Prisma.CommentLikeUncheckedUpdateManyWithoutUserNestedInput
   collections?: Prisma.CollectionUncheckedUpdateManyWithoutUserNestedInput
   routineItems?: Prisma.RoutineItemUncheckedUpdateManyWithoutUserNestedInput
+  refreshTokens?: Prisma.RefreshTokenUncheckedUpdateManyWithoutUserNestedInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUncheckedUpdateManyWithoutUserNestedInput
   following?: Prisma.FollowUncheckedUpdateManyWithoutFollowerNestedInput
   followers?: Prisma.FollowUncheckedUpdateManyWithoutFollowingNestedInput
   notificationsReceived?: Prisma.NotificationUncheckedUpdateManyWithoutRecipientNestedInput
@@ -1422,6 +1586,7 @@ export type UserCreateWithoutCollectionsInput = {
   avatarSrc: string
   bio?: string
   toneTag?: string
+  onboardingCompletedAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   posts?: Prisma.PostCreateNestedManyWithoutAuthorInput
@@ -1430,6 +1595,8 @@ export type UserCreateWithoutCollectionsInput = {
   commentLikes?: Prisma.CommentLikeCreateNestedManyWithoutUserInput
   savedPosts?: Prisma.SavedPostCreateNestedManyWithoutUserInput
   routineItems?: Prisma.RoutineItemCreateNestedManyWithoutUserInput
+  refreshTokens?: Prisma.RefreshTokenCreateNestedManyWithoutUserInput
+  magicLinkTokens?: Prisma.MagicLinkTokenCreateNestedManyWithoutUserInput
   following?: Prisma.FollowCreateNestedManyWithoutFollowerInput
   followers?: Prisma.FollowCreateNestedManyWithoutFollowingInput
   notificationsReceived?: Prisma.NotificationCreateNestedManyWithoutRecipientInput
@@ -1443,6 +1610,7 @@ export type UserUncheckedCreateWithoutCollectionsInput = {
   avatarSrc: string
   bio?: string
   toneTag?: string
+  onboardingCompletedAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   posts?: Prisma.PostUncheckedCreateNestedManyWithoutAuthorInput
@@ -1451,6 +1619,8 @@ export type UserUncheckedCreateWithoutCollectionsInput = {
   commentLikes?: Prisma.CommentLikeUncheckedCreateNestedManyWithoutUserInput
   savedPosts?: Prisma.SavedPostUncheckedCreateNestedManyWithoutUserInput
   routineItems?: Prisma.RoutineItemUncheckedCreateNestedManyWithoutUserInput
+  refreshTokens?: Prisma.RefreshTokenUncheckedCreateNestedManyWithoutUserInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUncheckedCreateNestedManyWithoutUserInput
   following?: Prisma.FollowUncheckedCreateNestedManyWithoutFollowerInput
   followers?: Prisma.FollowUncheckedCreateNestedManyWithoutFollowingInput
   notificationsReceived?: Prisma.NotificationUncheckedCreateNestedManyWithoutRecipientInput
@@ -1480,6 +1650,7 @@ export type UserUpdateWithoutCollectionsInput = {
   avatarSrc?: Prisma.StringFieldUpdateOperationsInput | string
   bio?: Prisma.StringFieldUpdateOperationsInput | string
   toneTag?: Prisma.StringFieldUpdateOperationsInput | string
+  onboardingCompletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   posts?: Prisma.PostUpdateManyWithoutAuthorNestedInput
@@ -1488,6 +1659,8 @@ export type UserUpdateWithoutCollectionsInput = {
   commentLikes?: Prisma.CommentLikeUpdateManyWithoutUserNestedInput
   savedPosts?: Prisma.SavedPostUpdateManyWithoutUserNestedInput
   routineItems?: Prisma.RoutineItemUpdateManyWithoutUserNestedInput
+  refreshTokens?: Prisma.RefreshTokenUpdateManyWithoutUserNestedInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUpdateManyWithoutUserNestedInput
   following?: Prisma.FollowUpdateManyWithoutFollowerNestedInput
   followers?: Prisma.FollowUpdateManyWithoutFollowingNestedInput
   notificationsReceived?: Prisma.NotificationUpdateManyWithoutRecipientNestedInput
@@ -1501,6 +1674,7 @@ export type UserUncheckedUpdateWithoutCollectionsInput = {
   avatarSrc?: Prisma.StringFieldUpdateOperationsInput | string
   bio?: Prisma.StringFieldUpdateOperationsInput | string
   toneTag?: Prisma.StringFieldUpdateOperationsInput | string
+  onboardingCompletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   posts?: Prisma.PostUncheckedUpdateManyWithoutAuthorNestedInput
@@ -1509,6 +1683,8 @@ export type UserUncheckedUpdateWithoutCollectionsInput = {
   commentLikes?: Prisma.CommentLikeUncheckedUpdateManyWithoutUserNestedInput
   savedPosts?: Prisma.SavedPostUncheckedUpdateManyWithoutUserNestedInput
   routineItems?: Prisma.RoutineItemUncheckedUpdateManyWithoutUserNestedInput
+  refreshTokens?: Prisma.RefreshTokenUncheckedUpdateManyWithoutUserNestedInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUncheckedUpdateManyWithoutUserNestedInput
   following?: Prisma.FollowUncheckedUpdateManyWithoutFollowerNestedInput
   followers?: Prisma.FollowUncheckedUpdateManyWithoutFollowingNestedInput
   notificationsReceived?: Prisma.NotificationUncheckedUpdateManyWithoutRecipientNestedInput
@@ -1522,6 +1698,7 @@ export type UserCreateWithoutNotificationsReceivedInput = {
   avatarSrc: string
   bio?: string
   toneTag?: string
+  onboardingCompletedAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   posts?: Prisma.PostCreateNestedManyWithoutAuthorInput
@@ -1531,6 +1708,8 @@ export type UserCreateWithoutNotificationsReceivedInput = {
   savedPosts?: Prisma.SavedPostCreateNestedManyWithoutUserInput
   collections?: Prisma.CollectionCreateNestedManyWithoutUserInput
   routineItems?: Prisma.RoutineItemCreateNestedManyWithoutUserInput
+  refreshTokens?: Prisma.RefreshTokenCreateNestedManyWithoutUserInput
+  magicLinkTokens?: Prisma.MagicLinkTokenCreateNestedManyWithoutUserInput
   following?: Prisma.FollowCreateNestedManyWithoutFollowerInput
   followers?: Prisma.FollowCreateNestedManyWithoutFollowingInput
   notificationsSent?: Prisma.NotificationCreateNestedManyWithoutActorInput
@@ -1543,6 +1722,7 @@ export type UserUncheckedCreateWithoutNotificationsReceivedInput = {
   avatarSrc: string
   bio?: string
   toneTag?: string
+  onboardingCompletedAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   posts?: Prisma.PostUncheckedCreateNestedManyWithoutAuthorInput
@@ -1552,6 +1732,8 @@ export type UserUncheckedCreateWithoutNotificationsReceivedInput = {
   savedPosts?: Prisma.SavedPostUncheckedCreateNestedManyWithoutUserInput
   collections?: Prisma.CollectionUncheckedCreateNestedManyWithoutUserInput
   routineItems?: Prisma.RoutineItemUncheckedCreateNestedManyWithoutUserInput
+  refreshTokens?: Prisma.RefreshTokenUncheckedCreateNestedManyWithoutUserInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUncheckedCreateNestedManyWithoutUserInput
   following?: Prisma.FollowUncheckedCreateNestedManyWithoutFollowerInput
   followers?: Prisma.FollowUncheckedCreateNestedManyWithoutFollowingInput
   notificationsSent?: Prisma.NotificationUncheckedCreateNestedManyWithoutActorInput
@@ -1569,6 +1751,7 @@ export type UserCreateWithoutNotificationsSentInput = {
   avatarSrc: string
   bio?: string
   toneTag?: string
+  onboardingCompletedAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   posts?: Prisma.PostCreateNestedManyWithoutAuthorInput
@@ -1578,6 +1761,8 @@ export type UserCreateWithoutNotificationsSentInput = {
   savedPosts?: Prisma.SavedPostCreateNestedManyWithoutUserInput
   collections?: Prisma.CollectionCreateNestedManyWithoutUserInput
   routineItems?: Prisma.RoutineItemCreateNestedManyWithoutUserInput
+  refreshTokens?: Prisma.RefreshTokenCreateNestedManyWithoutUserInput
+  magicLinkTokens?: Prisma.MagicLinkTokenCreateNestedManyWithoutUserInput
   following?: Prisma.FollowCreateNestedManyWithoutFollowerInput
   followers?: Prisma.FollowCreateNestedManyWithoutFollowingInput
   notificationsReceived?: Prisma.NotificationCreateNestedManyWithoutRecipientInput
@@ -1590,6 +1775,7 @@ export type UserUncheckedCreateWithoutNotificationsSentInput = {
   avatarSrc: string
   bio?: string
   toneTag?: string
+  onboardingCompletedAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   posts?: Prisma.PostUncheckedCreateNestedManyWithoutAuthorInput
@@ -1599,6 +1785,8 @@ export type UserUncheckedCreateWithoutNotificationsSentInput = {
   savedPosts?: Prisma.SavedPostUncheckedCreateNestedManyWithoutUserInput
   collections?: Prisma.CollectionUncheckedCreateNestedManyWithoutUserInput
   routineItems?: Prisma.RoutineItemUncheckedCreateNestedManyWithoutUserInput
+  refreshTokens?: Prisma.RefreshTokenUncheckedCreateNestedManyWithoutUserInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUncheckedCreateNestedManyWithoutUserInput
   following?: Prisma.FollowUncheckedCreateNestedManyWithoutFollowerInput
   followers?: Prisma.FollowUncheckedCreateNestedManyWithoutFollowingInput
   notificationsReceived?: Prisma.NotificationUncheckedCreateNestedManyWithoutRecipientInput
@@ -1627,6 +1815,7 @@ export type UserUpdateWithoutNotificationsReceivedInput = {
   avatarSrc?: Prisma.StringFieldUpdateOperationsInput | string
   bio?: Prisma.StringFieldUpdateOperationsInput | string
   toneTag?: Prisma.StringFieldUpdateOperationsInput | string
+  onboardingCompletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   posts?: Prisma.PostUpdateManyWithoutAuthorNestedInput
@@ -1636,6 +1825,8 @@ export type UserUpdateWithoutNotificationsReceivedInput = {
   savedPosts?: Prisma.SavedPostUpdateManyWithoutUserNestedInput
   collections?: Prisma.CollectionUpdateManyWithoutUserNestedInput
   routineItems?: Prisma.RoutineItemUpdateManyWithoutUserNestedInput
+  refreshTokens?: Prisma.RefreshTokenUpdateManyWithoutUserNestedInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUpdateManyWithoutUserNestedInput
   following?: Prisma.FollowUpdateManyWithoutFollowerNestedInput
   followers?: Prisma.FollowUpdateManyWithoutFollowingNestedInput
   notificationsSent?: Prisma.NotificationUpdateManyWithoutActorNestedInput
@@ -1648,6 +1839,7 @@ export type UserUncheckedUpdateWithoutNotificationsReceivedInput = {
   avatarSrc?: Prisma.StringFieldUpdateOperationsInput | string
   bio?: Prisma.StringFieldUpdateOperationsInput | string
   toneTag?: Prisma.StringFieldUpdateOperationsInput | string
+  onboardingCompletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   posts?: Prisma.PostUncheckedUpdateManyWithoutAuthorNestedInput
@@ -1657,6 +1849,8 @@ export type UserUncheckedUpdateWithoutNotificationsReceivedInput = {
   savedPosts?: Prisma.SavedPostUncheckedUpdateManyWithoutUserNestedInput
   collections?: Prisma.CollectionUncheckedUpdateManyWithoutUserNestedInput
   routineItems?: Prisma.RoutineItemUncheckedUpdateManyWithoutUserNestedInput
+  refreshTokens?: Prisma.RefreshTokenUncheckedUpdateManyWithoutUserNestedInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUncheckedUpdateManyWithoutUserNestedInput
   following?: Prisma.FollowUncheckedUpdateManyWithoutFollowerNestedInput
   followers?: Prisma.FollowUncheckedUpdateManyWithoutFollowingNestedInput
   notificationsSent?: Prisma.NotificationUncheckedUpdateManyWithoutActorNestedInput
@@ -1680,6 +1874,7 @@ export type UserUpdateWithoutNotificationsSentInput = {
   avatarSrc?: Prisma.StringFieldUpdateOperationsInput | string
   bio?: Prisma.StringFieldUpdateOperationsInput | string
   toneTag?: Prisma.StringFieldUpdateOperationsInput | string
+  onboardingCompletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   posts?: Prisma.PostUpdateManyWithoutAuthorNestedInput
@@ -1689,6 +1884,8 @@ export type UserUpdateWithoutNotificationsSentInput = {
   savedPosts?: Prisma.SavedPostUpdateManyWithoutUserNestedInput
   collections?: Prisma.CollectionUpdateManyWithoutUserNestedInput
   routineItems?: Prisma.RoutineItemUpdateManyWithoutUserNestedInput
+  refreshTokens?: Prisma.RefreshTokenUpdateManyWithoutUserNestedInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUpdateManyWithoutUserNestedInput
   following?: Prisma.FollowUpdateManyWithoutFollowerNestedInput
   followers?: Prisma.FollowUpdateManyWithoutFollowingNestedInput
   notificationsReceived?: Prisma.NotificationUpdateManyWithoutRecipientNestedInput
@@ -1701,6 +1898,7 @@ export type UserUncheckedUpdateWithoutNotificationsSentInput = {
   avatarSrc?: Prisma.StringFieldUpdateOperationsInput | string
   bio?: Prisma.StringFieldUpdateOperationsInput | string
   toneTag?: Prisma.StringFieldUpdateOperationsInput | string
+  onboardingCompletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   posts?: Prisma.PostUncheckedUpdateManyWithoutAuthorNestedInput
@@ -1710,9 +1908,235 @@ export type UserUncheckedUpdateWithoutNotificationsSentInput = {
   savedPosts?: Prisma.SavedPostUncheckedUpdateManyWithoutUserNestedInput
   collections?: Prisma.CollectionUncheckedUpdateManyWithoutUserNestedInput
   routineItems?: Prisma.RoutineItemUncheckedUpdateManyWithoutUserNestedInput
+  refreshTokens?: Prisma.RefreshTokenUncheckedUpdateManyWithoutUserNestedInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUncheckedUpdateManyWithoutUserNestedInput
   following?: Prisma.FollowUncheckedUpdateManyWithoutFollowerNestedInput
   followers?: Prisma.FollowUncheckedUpdateManyWithoutFollowingNestedInput
   notificationsReceived?: Prisma.NotificationUncheckedUpdateManyWithoutRecipientNestedInput
+}
+
+export type UserCreateWithoutRefreshTokensInput = {
+  id?: string
+  username: string
+  email: string
+  avatarSrc: string
+  bio?: string
+  toneTag?: string
+  onboardingCompletedAt?: Date | string | null
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  posts?: Prisma.PostCreateNestedManyWithoutAuthorInput
+  comments?: Prisma.CommentCreateNestedManyWithoutAuthorInput
+  likes?: Prisma.LikeCreateNestedManyWithoutUserInput
+  commentLikes?: Prisma.CommentLikeCreateNestedManyWithoutUserInput
+  savedPosts?: Prisma.SavedPostCreateNestedManyWithoutUserInput
+  collections?: Prisma.CollectionCreateNestedManyWithoutUserInput
+  routineItems?: Prisma.RoutineItemCreateNestedManyWithoutUserInput
+  magicLinkTokens?: Prisma.MagicLinkTokenCreateNestedManyWithoutUserInput
+  following?: Prisma.FollowCreateNestedManyWithoutFollowerInput
+  followers?: Prisma.FollowCreateNestedManyWithoutFollowingInput
+  notificationsReceived?: Prisma.NotificationCreateNestedManyWithoutRecipientInput
+  notificationsSent?: Prisma.NotificationCreateNestedManyWithoutActorInput
+}
+
+export type UserUncheckedCreateWithoutRefreshTokensInput = {
+  id?: string
+  username: string
+  email: string
+  avatarSrc: string
+  bio?: string
+  toneTag?: string
+  onboardingCompletedAt?: Date | string | null
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  posts?: Prisma.PostUncheckedCreateNestedManyWithoutAuthorInput
+  comments?: Prisma.CommentUncheckedCreateNestedManyWithoutAuthorInput
+  likes?: Prisma.LikeUncheckedCreateNestedManyWithoutUserInput
+  commentLikes?: Prisma.CommentLikeUncheckedCreateNestedManyWithoutUserInput
+  savedPosts?: Prisma.SavedPostUncheckedCreateNestedManyWithoutUserInput
+  collections?: Prisma.CollectionUncheckedCreateNestedManyWithoutUserInput
+  routineItems?: Prisma.RoutineItemUncheckedCreateNestedManyWithoutUserInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUncheckedCreateNestedManyWithoutUserInput
+  following?: Prisma.FollowUncheckedCreateNestedManyWithoutFollowerInput
+  followers?: Prisma.FollowUncheckedCreateNestedManyWithoutFollowingInput
+  notificationsReceived?: Prisma.NotificationUncheckedCreateNestedManyWithoutRecipientInput
+  notificationsSent?: Prisma.NotificationUncheckedCreateNestedManyWithoutActorInput
+}
+
+export type UserCreateOrConnectWithoutRefreshTokensInput = {
+  where: Prisma.UserWhereUniqueInput
+  create: Prisma.XOR<Prisma.UserCreateWithoutRefreshTokensInput, Prisma.UserUncheckedCreateWithoutRefreshTokensInput>
+}
+
+export type UserUpsertWithoutRefreshTokensInput = {
+  update: Prisma.XOR<Prisma.UserUpdateWithoutRefreshTokensInput, Prisma.UserUncheckedUpdateWithoutRefreshTokensInput>
+  create: Prisma.XOR<Prisma.UserCreateWithoutRefreshTokensInput, Prisma.UserUncheckedCreateWithoutRefreshTokensInput>
+  where?: Prisma.UserWhereInput
+}
+
+export type UserUpdateToOneWithWhereWithoutRefreshTokensInput = {
+  where?: Prisma.UserWhereInput
+  data: Prisma.XOR<Prisma.UserUpdateWithoutRefreshTokensInput, Prisma.UserUncheckedUpdateWithoutRefreshTokensInput>
+}
+
+export type UserUpdateWithoutRefreshTokensInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  username?: Prisma.StringFieldUpdateOperationsInput | string
+  email?: Prisma.StringFieldUpdateOperationsInput | string
+  avatarSrc?: Prisma.StringFieldUpdateOperationsInput | string
+  bio?: Prisma.StringFieldUpdateOperationsInput | string
+  toneTag?: Prisma.StringFieldUpdateOperationsInput | string
+  onboardingCompletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  posts?: Prisma.PostUpdateManyWithoutAuthorNestedInput
+  comments?: Prisma.CommentUpdateManyWithoutAuthorNestedInput
+  likes?: Prisma.LikeUpdateManyWithoutUserNestedInput
+  commentLikes?: Prisma.CommentLikeUpdateManyWithoutUserNestedInput
+  savedPosts?: Prisma.SavedPostUpdateManyWithoutUserNestedInput
+  collections?: Prisma.CollectionUpdateManyWithoutUserNestedInput
+  routineItems?: Prisma.RoutineItemUpdateManyWithoutUserNestedInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUpdateManyWithoutUserNestedInput
+  following?: Prisma.FollowUpdateManyWithoutFollowerNestedInput
+  followers?: Prisma.FollowUpdateManyWithoutFollowingNestedInput
+  notificationsReceived?: Prisma.NotificationUpdateManyWithoutRecipientNestedInput
+  notificationsSent?: Prisma.NotificationUpdateManyWithoutActorNestedInput
+}
+
+export type UserUncheckedUpdateWithoutRefreshTokensInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  username?: Prisma.StringFieldUpdateOperationsInput | string
+  email?: Prisma.StringFieldUpdateOperationsInput | string
+  avatarSrc?: Prisma.StringFieldUpdateOperationsInput | string
+  bio?: Prisma.StringFieldUpdateOperationsInput | string
+  toneTag?: Prisma.StringFieldUpdateOperationsInput | string
+  onboardingCompletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  posts?: Prisma.PostUncheckedUpdateManyWithoutAuthorNestedInput
+  comments?: Prisma.CommentUncheckedUpdateManyWithoutAuthorNestedInput
+  likes?: Prisma.LikeUncheckedUpdateManyWithoutUserNestedInput
+  commentLikes?: Prisma.CommentLikeUncheckedUpdateManyWithoutUserNestedInput
+  savedPosts?: Prisma.SavedPostUncheckedUpdateManyWithoutUserNestedInput
+  collections?: Prisma.CollectionUncheckedUpdateManyWithoutUserNestedInput
+  routineItems?: Prisma.RoutineItemUncheckedUpdateManyWithoutUserNestedInput
+  magicLinkTokens?: Prisma.MagicLinkTokenUncheckedUpdateManyWithoutUserNestedInput
+  following?: Prisma.FollowUncheckedUpdateManyWithoutFollowerNestedInput
+  followers?: Prisma.FollowUncheckedUpdateManyWithoutFollowingNestedInput
+  notificationsReceived?: Prisma.NotificationUncheckedUpdateManyWithoutRecipientNestedInput
+  notificationsSent?: Prisma.NotificationUncheckedUpdateManyWithoutActorNestedInput
+}
+
+export type UserCreateWithoutMagicLinkTokensInput = {
+  id?: string
+  username: string
+  email: string
+  avatarSrc: string
+  bio?: string
+  toneTag?: string
+  onboardingCompletedAt?: Date | string | null
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  posts?: Prisma.PostCreateNestedManyWithoutAuthorInput
+  comments?: Prisma.CommentCreateNestedManyWithoutAuthorInput
+  likes?: Prisma.LikeCreateNestedManyWithoutUserInput
+  commentLikes?: Prisma.CommentLikeCreateNestedManyWithoutUserInput
+  savedPosts?: Prisma.SavedPostCreateNestedManyWithoutUserInput
+  collections?: Prisma.CollectionCreateNestedManyWithoutUserInput
+  routineItems?: Prisma.RoutineItemCreateNestedManyWithoutUserInput
+  refreshTokens?: Prisma.RefreshTokenCreateNestedManyWithoutUserInput
+  following?: Prisma.FollowCreateNestedManyWithoutFollowerInput
+  followers?: Prisma.FollowCreateNestedManyWithoutFollowingInput
+  notificationsReceived?: Prisma.NotificationCreateNestedManyWithoutRecipientInput
+  notificationsSent?: Prisma.NotificationCreateNestedManyWithoutActorInput
+}
+
+export type UserUncheckedCreateWithoutMagicLinkTokensInput = {
+  id?: string
+  username: string
+  email: string
+  avatarSrc: string
+  bio?: string
+  toneTag?: string
+  onboardingCompletedAt?: Date | string | null
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  posts?: Prisma.PostUncheckedCreateNestedManyWithoutAuthorInput
+  comments?: Prisma.CommentUncheckedCreateNestedManyWithoutAuthorInput
+  likes?: Prisma.LikeUncheckedCreateNestedManyWithoutUserInput
+  commentLikes?: Prisma.CommentLikeUncheckedCreateNestedManyWithoutUserInput
+  savedPosts?: Prisma.SavedPostUncheckedCreateNestedManyWithoutUserInput
+  collections?: Prisma.CollectionUncheckedCreateNestedManyWithoutUserInput
+  routineItems?: Prisma.RoutineItemUncheckedCreateNestedManyWithoutUserInput
+  refreshTokens?: Prisma.RefreshTokenUncheckedCreateNestedManyWithoutUserInput
+  following?: Prisma.FollowUncheckedCreateNestedManyWithoutFollowerInput
+  followers?: Prisma.FollowUncheckedCreateNestedManyWithoutFollowingInput
+  notificationsReceived?: Prisma.NotificationUncheckedCreateNestedManyWithoutRecipientInput
+  notificationsSent?: Prisma.NotificationUncheckedCreateNestedManyWithoutActorInput
+}
+
+export type UserCreateOrConnectWithoutMagicLinkTokensInput = {
+  where: Prisma.UserWhereUniqueInput
+  create: Prisma.XOR<Prisma.UserCreateWithoutMagicLinkTokensInput, Prisma.UserUncheckedCreateWithoutMagicLinkTokensInput>
+}
+
+export type UserUpsertWithoutMagicLinkTokensInput = {
+  update: Prisma.XOR<Prisma.UserUpdateWithoutMagicLinkTokensInput, Prisma.UserUncheckedUpdateWithoutMagicLinkTokensInput>
+  create: Prisma.XOR<Prisma.UserCreateWithoutMagicLinkTokensInput, Prisma.UserUncheckedCreateWithoutMagicLinkTokensInput>
+  where?: Prisma.UserWhereInput
+}
+
+export type UserUpdateToOneWithWhereWithoutMagicLinkTokensInput = {
+  where?: Prisma.UserWhereInput
+  data: Prisma.XOR<Prisma.UserUpdateWithoutMagicLinkTokensInput, Prisma.UserUncheckedUpdateWithoutMagicLinkTokensInput>
+}
+
+export type UserUpdateWithoutMagicLinkTokensInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  username?: Prisma.StringFieldUpdateOperationsInput | string
+  email?: Prisma.StringFieldUpdateOperationsInput | string
+  avatarSrc?: Prisma.StringFieldUpdateOperationsInput | string
+  bio?: Prisma.StringFieldUpdateOperationsInput | string
+  toneTag?: Prisma.StringFieldUpdateOperationsInput | string
+  onboardingCompletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  posts?: Prisma.PostUpdateManyWithoutAuthorNestedInput
+  comments?: Prisma.CommentUpdateManyWithoutAuthorNestedInput
+  likes?: Prisma.LikeUpdateManyWithoutUserNestedInput
+  commentLikes?: Prisma.CommentLikeUpdateManyWithoutUserNestedInput
+  savedPosts?: Prisma.SavedPostUpdateManyWithoutUserNestedInput
+  collections?: Prisma.CollectionUpdateManyWithoutUserNestedInput
+  routineItems?: Prisma.RoutineItemUpdateManyWithoutUserNestedInput
+  refreshTokens?: Prisma.RefreshTokenUpdateManyWithoutUserNestedInput
+  following?: Prisma.FollowUpdateManyWithoutFollowerNestedInput
+  followers?: Prisma.FollowUpdateManyWithoutFollowingNestedInput
+  notificationsReceived?: Prisma.NotificationUpdateManyWithoutRecipientNestedInput
+  notificationsSent?: Prisma.NotificationUpdateManyWithoutActorNestedInput
+}
+
+export type UserUncheckedUpdateWithoutMagicLinkTokensInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  username?: Prisma.StringFieldUpdateOperationsInput | string
+  email?: Prisma.StringFieldUpdateOperationsInput | string
+  avatarSrc?: Prisma.StringFieldUpdateOperationsInput | string
+  bio?: Prisma.StringFieldUpdateOperationsInput | string
+  toneTag?: Prisma.StringFieldUpdateOperationsInput | string
+  onboardingCompletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  posts?: Prisma.PostUncheckedUpdateManyWithoutAuthorNestedInput
+  comments?: Prisma.CommentUncheckedUpdateManyWithoutAuthorNestedInput
+  likes?: Prisma.LikeUncheckedUpdateManyWithoutUserNestedInput
+  commentLikes?: Prisma.CommentLikeUncheckedUpdateManyWithoutUserNestedInput
+  savedPosts?: Prisma.SavedPostUncheckedUpdateManyWithoutUserNestedInput
+  collections?: Prisma.CollectionUncheckedUpdateManyWithoutUserNestedInput
+  routineItems?: Prisma.RoutineItemUncheckedUpdateManyWithoutUserNestedInput
+  refreshTokens?: Prisma.RefreshTokenUncheckedUpdateManyWithoutUserNestedInput
+  following?: Prisma.FollowUncheckedUpdateManyWithoutFollowerNestedInput
+  followers?: Prisma.FollowUncheckedUpdateManyWithoutFollowingNestedInput
+  notificationsReceived?: Prisma.NotificationUncheckedUpdateManyWithoutRecipientNestedInput
+  notificationsSent?: Prisma.NotificationUncheckedUpdateManyWithoutActorNestedInput
 }
 
 
@@ -1728,6 +2152,8 @@ export type UserCountOutputType = {
   savedPosts: number
   collections: number
   routineItems: number
+  refreshTokens: number
+  magicLinkTokens: number
   following: number
   followers: number
   notificationsReceived: number
@@ -1742,6 +2168,8 @@ export type UserCountOutputTypeSelect<ExtArgs extends runtime.Types.Extensions.I
   savedPosts?: boolean | UserCountOutputTypeCountSavedPostsArgs
   collections?: boolean | UserCountOutputTypeCountCollectionsArgs
   routineItems?: boolean | UserCountOutputTypeCountRoutineItemsArgs
+  refreshTokens?: boolean | UserCountOutputTypeCountRefreshTokensArgs
+  magicLinkTokens?: boolean | UserCountOutputTypeCountMagicLinkTokensArgs
   following?: boolean | UserCountOutputTypeCountFollowingArgs
   followers?: boolean | UserCountOutputTypeCountFollowersArgs
   notificationsReceived?: boolean | UserCountOutputTypeCountNotificationsReceivedArgs
@@ -1810,6 +2238,20 @@ export type UserCountOutputTypeCountRoutineItemsArgs<ExtArgs extends runtime.Typ
 /**
  * UserCountOutputType without action
  */
+export type UserCountOutputTypeCountRefreshTokensArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  where?: Prisma.RefreshTokenWhereInput
+}
+
+/**
+ * UserCountOutputType without action
+ */
+export type UserCountOutputTypeCountMagicLinkTokensArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  where?: Prisma.MagicLinkTokenWhereInput
+}
+
+/**
+ * UserCountOutputType without action
+ */
 export type UserCountOutputTypeCountFollowingArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   where?: Prisma.FollowWhereInput
 }
@@ -1843,6 +2285,7 @@ export type UserSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = r
   avatarSrc?: boolean
   bio?: boolean
   toneTag?: boolean
+  onboardingCompletedAt?: boolean
   createdAt?: boolean
   updatedAt?: boolean
   posts?: boolean | Prisma.User$postsArgs<ExtArgs>
@@ -1852,6 +2295,8 @@ export type UserSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = r
   savedPosts?: boolean | Prisma.User$savedPostsArgs<ExtArgs>
   collections?: boolean | Prisma.User$collectionsArgs<ExtArgs>
   routineItems?: boolean | Prisma.User$routineItemsArgs<ExtArgs>
+  refreshTokens?: boolean | Prisma.User$refreshTokensArgs<ExtArgs>
+  magicLinkTokens?: boolean | Prisma.User$magicLinkTokensArgs<ExtArgs>
   following?: boolean | Prisma.User$followingArgs<ExtArgs>
   followers?: boolean | Prisma.User$followersArgs<ExtArgs>
   notificationsReceived?: boolean | Prisma.User$notificationsReceivedArgs<ExtArgs>
@@ -1866,6 +2311,7 @@ export type UserSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extensio
   avatarSrc?: boolean
   bio?: boolean
   toneTag?: boolean
+  onboardingCompletedAt?: boolean
   createdAt?: boolean
   updatedAt?: boolean
 }, ExtArgs["result"]["user"]>
@@ -1877,6 +2323,7 @@ export type UserSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensio
   avatarSrc?: boolean
   bio?: boolean
   toneTag?: boolean
+  onboardingCompletedAt?: boolean
   createdAt?: boolean
   updatedAt?: boolean
 }, ExtArgs["result"]["user"]>
@@ -1888,11 +2335,12 @@ export type UserSelectScalar = {
   avatarSrc?: boolean
   bio?: boolean
   toneTag?: boolean
+  onboardingCompletedAt?: boolean
   createdAt?: boolean
   updatedAt?: boolean
 }
 
-export type UserOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "username" | "email" | "avatarSrc" | "bio" | "toneTag" | "createdAt" | "updatedAt", ExtArgs["result"]["user"]>
+export type UserOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "username" | "email" | "avatarSrc" | "bio" | "toneTag" | "onboardingCompletedAt" | "createdAt" | "updatedAt", ExtArgs["result"]["user"]>
 export type UserInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   posts?: boolean | Prisma.User$postsArgs<ExtArgs>
   comments?: boolean | Prisma.User$commentsArgs<ExtArgs>
@@ -1901,6 +2349,8 @@ export type UserInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = 
   savedPosts?: boolean | Prisma.User$savedPostsArgs<ExtArgs>
   collections?: boolean | Prisma.User$collectionsArgs<ExtArgs>
   routineItems?: boolean | Prisma.User$routineItemsArgs<ExtArgs>
+  refreshTokens?: boolean | Prisma.User$refreshTokensArgs<ExtArgs>
+  magicLinkTokens?: boolean | Prisma.User$magicLinkTokensArgs<ExtArgs>
   following?: boolean | Prisma.User$followingArgs<ExtArgs>
   followers?: boolean | Prisma.User$followersArgs<ExtArgs>
   notificationsReceived?: boolean | Prisma.User$notificationsReceivedArgs<ExtArgs>
@@ -1920,6 +2370,8 @@ export type $UserPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs =
     savedPosts: Prisma.$SavedPostPayload<ExtArgs>[]
     collections: Prisma.$CollectionPayload<ExtArgs>[]
     routineItems: Prisma.$RoutineItemPayload<ExtArgs>[]
+    refreshTokens: Prisma.$RefreshTokenPayload<ExtArgs>[]
+    magicLinkTokens: Prisma.$MagicLinkTokenPayload<ExtArgs>[]
     following: Prisma.$FollowPayload<ExtArgs>[]
     followers: Prisma.$FollowPayload<ExtArgs>[]
     notificationsReceived: Prisma.$NotificationPayload<ExtArgs>[]
@@ -1932,6 +2384,7 @@ export type $UserPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs =
     avatarSrc: string
     bio: string
     toneTag: string
+    onboardingCompletedAt: Date | null
     createdAt: Date
     updatedAt: Date
   }, ExtArgs["result"]["user"]>
@@ -2335,6 +2788,8 @@ export interface Prisma__UserClient<T, Null = never, ExtArgs extends runtime.Typ
   savedPosts<T extends Prisma.User$savedPostsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.User$savedPostsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$SavedPostPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   collections<T extends Prisma.User$collectionsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.User$collectionsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$CollectionPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   routineItems<T extends Prisma.User$routineItemsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.User$routineItemsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$RoutineItemPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
+  refreshTokens<T extends Prisma.User$refreshTokensArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.User$refreshTokensArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$RefreshTokenPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
+  magicLinkTokens<T extends Prisma.User$magicLinkTokensArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.User$magicLinkTokensArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$MagicLinkTokenPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   following<T extends Prisma.User$followingArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.User$followingArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$FollowPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   followers<T extends Prisma.User$followersArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.User$followersArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$FollowPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   notificationsReceived<T extends Prisma.User$notificationsReceivedArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.User$notificationsReceivedArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$NotificationPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
@@ -2374,6 +2829,7 @@ export interface UserFieldRefs {
   readonly avatarSrc: Prisma.FieldRef<"User", 'String'>
   readonly bio: Prisma.FieldRef<"User", 'String'>
   readonly toneTag: Prisma.FieldRef<"User", 'String'>
+  readonly onboardingCompletedAt: Prisma.FieldRef<"User", 'DateTime'>
   readonly createdAt: Prisma.FieldRef<"User", 'DateTime'>
   readonly updatedAt: Prisma.FieldRef<"User", 'DateTime'>
 }
@@ -2934,6 +3390,54 @@ export type User$routineItemsArgs<ExtArgs extends runtime.Types.Extensions.Inter
   take?: number
   skip?: number
   distinct?: Prisma.RoutineItemScalarFieldEnum | Prisma.RoutineItemScalarFieldEnum[]
+}
+
+/**
+ * User.refreshTokens
+ */
+export type User$refreshTokensArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the RefreshToken
+   */
+  select?: Prisma.RefreshTokenSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the RefreshToken
+   */
+  omit?: Prisma.RefreshTokenOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.RefreshTokenInclude<ExtArgs> | null
+  where?: Prisma.RefreshTokenWhereInput
+  orderBy?: Prisma.RefreshTokenOrderByWithRelationInput | Prisma.RefreshTokenOrderByWithRelationInput[]
+  cursor?: Prisma.RefreshTokenWhereUniqueInput
+  take?: number
+  skip?: number
+  distinct?: Prisma.RefreshTokenScalarFieldEnum | Prisma.RefreshTokenScalarFieldEnum[]
+}
+
+/**
+ * User.magicLinkTokens
+ */
+export type User$magicLinkTokensArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the MagicLinkToken
+   */
+  select?: Prisma.MagicLinkTokenSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the MagicLinkToken
+   */
+  omit?: Prisma.MagicLinkTokenOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.MagicLinkTokenInclude<ExtArgs> | null
+  where?: Prisma.MagicLinkTokenWhereInput
+  orderBy?: Prisma.MagicLinkTokenOrderByWithRelationInput | Prisma.MagicLinkTokenOrderByWithRelationInput[]
+  cursor?: Prisma.MagicLinkTokenWhereUniqueInput
+  take?: number
+  skip?: number
+  distinct?: Prisma.MagicLinkTokenScalarFieldEnum | Prisma.MagicLinkTokenScalarFieldEnum[]
 }
 
 /**

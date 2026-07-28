@@ -1,4 +1,3 @@
-
 generator client {
   provider = "prisma-client"
   output   = "../lib/generated/prisma"
@@ -7,7 +6,6 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
-
 
 // =======================================================================
 // USER
@@ -18,22 +16,28 @@ datasource db {
 // you want it enforced at the DB level too, not just in the app).
 // =======================================================================
 model User {
-  id        String   @id @default(cuid())
-  username  String   @unique @db.VarChar(20)
-  email     String   @unique
-  avatarSrc String
-  bio       String   @default("") @db.Text
-  toneTag   String   @default("")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                   String    @id @default(cuid())
+  username             String    @unique @db.VarChar(20)
+  email                String    @unique
+  avatarSrc            String
+  bio                  String    @default("") @db.Text
+  toneTag              String    @default("")
+  // Null until onboarding is finished — this is what lets the backend
+  // tell the frontend "send this person to onboarding" vs "just log them
+  // in," instead of the frontend having to guess.
+  onboardingCompletedAt DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
-  posts        Post[]
-  comments     Comment[]
-  likes        Like[]
-  commentLikes CommentLike[]
-  savedPosts   SavedPost[]
-  collections  Collection[]
-  routineItems RoutineItem[] // profile's "pinned routine" chips
+  posts         Post[]
+  comments      Comment[]
+  likes         Like[]
+  commentLikes  CommentLike[]
+  savedPosts    SavedPost[]
+  collections   Collection[]
+  routineItems  RoutineItem[] // profile's "pinned routine" chips
+  refreshTokens RefreshToken[]
+  magicLinkTokens MagicLinkToken[]
 
   following Follow[] @relation("UserFollowing")
   followers Follow[] @relation("UserFollowers")
@@ -282,20 +286,46 @@ model Notification {
 }
 
 // =======================================================================
+// SESSIONS — refresh tokens
+// A row per active session/device. verifyRefreshToken checks it exists,
+// belongs to the claimed user, and hasn't expired; expired rows get
+// cleaned up lazily on check, or via a periodic cleanupExpiredTokens job.
+// =======================================================================
+model RefreshToken {
+  id        String    @id @default(cuid())
+  token     String    @unique
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+  // Set the moment this token gets rotated into a new one, instead of
+  // deleting the row outright. That's what makes reuse detectable: a
+  // refresh attempt using a token that's already rotated is a strong
+  // signal of a stolen/stale copy, not just an ordinary invalid token —
+  // but only if the old row still exists to be checked against.
+  rotatedAt DateTime?
+
+  @@index([userId])
+}
+
+// =======================================================================
 // AUTH — magic link tokens
-// Not tied to a User via FK: a magic link is requested by email before
-// it's known whether that email has an account. Verification looks up
-// (or creates) the User by email at the point the token is redeemed —
-// same "login and signup are the same action" model the app's /auth
-// flow was built around.
+// Tied to a real userId (not just an email string) — unlike the earlier
+// draft, this implementation creates the User row the moment a link is
+// requested (even for a brand-new email), so by the time a token exists
+// the user it belongs to always does too. Replaces the old boilerplate's
+// separate "email verification" token entirely: clicking the link both
+// verifies the email AND logs the person in, in one step, so there's no
+// separate verification-only concept needed.
 // =======================================================================
 model MagicLinkToken {
   id        String    @id @default(cuid())
   token     String    @unique
-  email     String
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   expiresAt DateTime
   usedAt    DateTime?
   createdAt DateTime  @default(now())
 
-  @@index([email])
+  @@index([userId])
 }
