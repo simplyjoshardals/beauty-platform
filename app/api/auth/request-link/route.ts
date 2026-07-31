@@ -22,7 +22,7 @@ function generatePlaceholderUsername(): string {
 // distinction anymore.
 export async function POST(req: NextRequest) {
   try {
-    const { email } = await req.json();
+    const { email, redirectTo } = await req.json();
 
     if (!email || typeof email !== "string" || !EMAIL_PATTERN.test(email)) {
       return NextResponse.json(
@@ -30,6 +30,14 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
+
+    // Only ever treat this as a same-app relative path — it arrives as
+    // plain client input, so nothing stops someone from sending an
+    // absolute external URL here otherwise.
+    const safeRedirect =
+      typeof redirectTo === "string" && redirectTo.startsWith("/")
+        ? redirectTo
+        : undefined;
 
     const normalizedEmail = email.trim().toLowerCase();
 
@@ -75,7 +83,10 @@ export async function POST(req: NextRequest) {
     // then calls this API's sibling verify endpoint itself. Confusing
     // API paths with frontend paths here would send people to a bare
     // JSON response instead of the actual verify screen.
-    const verifyUrl = `${process.env.NEXT_PUBLIC_SITE_URL}${PATHS.AUTH_VERIFY(token)}`;
+    const redirectQuery = safeRedirect
+      ? `?redirect=${encodeURIComponent(safeRedirect)}`
+      : "";
+    const verifyUrl = `${process.env.NEXT_PUBLIC_SITE_URL}${PATHS.AUTH_VERIFY(token)}${redirectQuery}`;
 
     await sendSafeEmail(
       {

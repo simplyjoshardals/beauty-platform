@@ -1,14 +1,18 @@
 import { NextResponse } from "next/server";
-import { REFRESH_TOKEN_EXPIRES_DAYS } from "@/constants/auth-constants";
+import {
+  REFRESH_TOKEN_EXPIRES_DAYS,
+  ACCESS_TOKEN_EXPIRES_SECONDS,
+} from "@/constants/auth-constants";
 
-// ACCESS_TOKEN_EXPIRES_IN is "15m" as a JWT expiry string, but the
-// original boilerplate's login route separately hardcoded the cookie's
-// own Max-Age to 5 minutes — a real mismatch: the cookie would vanish
-// from the browser 10 minutes before the JWT inside it actually expired,
-// silently forcing an early refresh every time. This constant is what
-// the cookie's Max-Age is actually built from now, kept in seconds and
-// deliberately matching the token's real lifetime.
-const ACCESS_TOKEN_MAX_AGE_SECONDS = 15 * 60;
+// Cookie Max-Age is now built from the exact same constant the JWT
+// itself is signed with (lib/auth.ts) — previously these were two
+// separate literals ("15m" string vs. a hardcoded 15*60) that only
+// happened to agree. The original boilerplate's login route had these
+// drift apart entirely (JWT: 15m, cookie: 5m), causing the cookie to
+// vanish from the browser 10 minutes before the token inside it actually
+// expired. One shared number makes that class of bug structurally
+// impossible to reintroduce.
+const ACCESS_TOKEN_MAX_AGE_SECONDS = ACCESS_TOKEN_EXPIRES_SECONDS;
 const REFRESH_TOKEN_MAX_AGE_SECONDS = REFRESH_TOKEN_EXPIRES_DAYS * 24 * 60 * 60;
 
 function buildCookie(name: string, value: string, maxAgeSeconds: number) {

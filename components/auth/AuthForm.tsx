@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { EnvelopeSimpleIcon } from "@phosphor-icons/react";
-import { useAuth } from "@/context/AuthProvider";
+import { requestMagicLink } from "@/services/authService";
 import { CheckEmailScreen } from "./CheckEmailScreen";
 
 // One form, no heading prop — with a magic-link flow, "log in" and "sign
@@ -14,12 +14,12 @@ function isValidEmail(value: string) {
 }
 
 export function AuthForm({ redirectTo }: { redirectTo?: string }) {
-  const { requestMagicLink } = useAuth();
   const [email, setEmail] = useState("");
   const [submittedEmail, setSubmittedEmail] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     const trimmed = email.trim();
     if (!isValidEmail(trimmed)) {
@@ -27,7 +27,17 @@ export function AuthForm({ redirectTo }: { redirectTo?: string }) {
       return;
     }
     setError(null);
-    requestMagicLink(trimmed);
+    setSubmitting(true);
+
+    const result = await requestMagicLink(trimmed, redirectTo);
+
+    setSubmitting(false);
+
+    if (!result?.success) {
+      setError(result?.error || "Something went wrong. Please try again.");
+      return;
+    }
+
     setSubmittedEmail(trimmed);
   }
 
@@ -60,14 +70,16 @@ export function AuthForm({ redirectTo }: { redirectTo?: string }) {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
               autoFocus
-              className="w-full rounded-lg border border-foreground/15 bg-transparent px-3 py-2.5 text-sm outline-none"
+              disabled={submitting}
+              className="w-full rounded-lg border border-foreground/15 bg-transparent px-3 py-2.5 text-sm outline-none disabled:opacity-60"
             />
             {error && <p className="text-xs text-red-500">{error}</p>}
             <button
               type="submit"
-              className="mt-1 w-full rounded-lg bg-foreground py-2.5 text-sm font-medium text-background"
+              disabled={submitting}
+              className="mt-1 w-full rounded-lg bg-foreground py-2.5 text-sm font-medium text-background disabled:opacity-60"
             >
-              Continue
+              {submitting ? "Sending…" : "Continue"}
             </button>
           </form>
         </div>

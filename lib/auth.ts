@@ -4,20 +4,25 @@ import { prisma } from "./prisma";
 import {
   MAGIC_LINK_EXPIRES_MS,
   REFRESH_TOKEN_EXPIRES_DAYS,
+  ACCESS_TOKEN_EXPIRES_SECONDS,
 } from "@/constants/auth-constants";
 
 const JWT_SECRET = process.env.JWT_SECRET!;
 if (!JWT_SECRET) throw new Error("JWT_SECRET not set in env");
 
-export const ACCESS_TOKEN_EXPIRES_IN = "15m";
-
 // ---------------------------------------------------------------------
 // Access tokens — unchanged from the password-based version. Whether
 // someone authenticated with a password or a magic link has no bearing
-// on how the SESSION itself works once they're in.
+// on how the SESSION itself works once they're in. Signed using the
+// same ACCESS_TOKEN_EXPIRES_SECONDS constant the cookie's Max-Age is
+// built from in authCookies.ts — jsonwebtoken's expiresIn accepts a
+// plain number of seconds just as well as a string like "15m", so there's
+// no need for two separate representations of the same duration.
 // ---------------------------------------------------------------------
 export function signAccessToken(payload: object) {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: ACCESS_TOKEN_EXPIRES_IN });
+  return jwt.sign(payload, JWT_SECRET, {
+    expiresIn: ACCESS_TOKEN_EXPIRES_SECONDS,
+  });
 }
 
 export function verifyAccessToken(token: string) {

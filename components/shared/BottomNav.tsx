@@ -12,7 +12,7 @@ import {
 } from "@phosphor-icons/react";
 import { PATHS } from "@/utils/paths";
 import { useNotifications } from "@/context/NotificationsProvider";
-import { useAuth } from "@/context/AuthProvider";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { useProfile } from "@/context/ProfileProvider";
 
 const tabs = [
@@ -52,7 +52,7 @@ function isTabActive(pathname: string, href: string) {
 export function BottomNav() {
   const pathname = usePathname();
   const { unreadCount } = useNotifications();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated } = useCurrentUser();
   const { profile } = useProfile();
 
   return (
@@ -63,8 +63,9 @@ export function BottomNav() {
       {tabs.map(({ id, label, href, icon: Icon }) => {
         const isActive = isTabActive(pathname, href);
         // Real session, real avatar to show — falls back to the generic
-        // icon when nobody's actually signed in (AuthProvider's
-        // isAuthenticated is still false until a magic link is verified).
+        // icon when nobody's actually signed in (useCurrentUser's
+        // isAuthenticated reflects a real /api/user/me check, not a
+        // client-only flag).
         const showAvatar = id === "profile" && isAuthenticated;
 
         return (

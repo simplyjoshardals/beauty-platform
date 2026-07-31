@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useAuth } from "@/context/AuthProvider";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { AuthGateModal } from "./AuthGateModal";
 
 type Props = {
@@ -15,7 +15,13 @@ type Props = {
 // action-level gates on /p/[postId] and /u/[username]), so it's
 // non-dismissible: signing in is the only way forward.
 export function RequireAuth({ children, message }: Props) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoading } = useCurrentUser();
+
+  // isAuthenticated starts false before the session check resolves, not
+  // just when someone's genuinely logged out — without this check, an
+  // actually-logged-in person would see the sign-in gate flash briefly on
+  // every full page load, before the real /api/user/me result comes back.
+  if (isLoading) return null;
 
   if (!isAuthenticated) {
     return <AuthGateModal open dismissible={false} message={message} />;

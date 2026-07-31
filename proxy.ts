@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyAccessToken, checkRefreshToken, signAccessToken } from "./lib/auth";
+import {
+  verifyAccessToken,
+  checkRefreshToken,
+  signAccessToken,
+} from "./lib/auth";
 import { prisma } from "./lib/prisma";
 
 function addSecurityHeaders(response: NextResponse) {
   response.headers.set(
     "X-Robots-Tag",
-    "noindex, nofollow, noarchive, nosnippet"
+    "noindex, nofollow, noarchive, nosnippet",
   );
   response.headers.set("X-Content-Type-Options", "nosniff");
   response.headers.set("X-Frame-Options", "DENY");
@@ -41,13 +45,24 @@ function isBot(userAgent: string): boolean {
   return botPatterns.some((pattern) => lowerUA.includes(pattern));
 }
 
+// Builds a NextResponse.next() that actually forwards a header to the
+// downstream Route Handler's req.headers — just calling
+// NextResponse.next().headers.set(...) does NOT do this; it only sets a
+// header on the response sent back to the browser. This is the pattern
+// that's actually required for the route handler to see it.
+function nextWithRequestHeader(req: NextRequest, name: string, value: string) {
+  const headers = new Headers(req.headers);
+  headers.set(name, value);
+  return NextResponse.next({ request: { headers } });
+}
+
 export async function proxy(req: NextRequest) {
   const pathname = req.nextUrl.pathname;
 
   const userAgent = req.headers.get("user-agent") || "";
   if (isBot(userAgent)) {
     return addSecurityHeaders(
-      new NextResponse("Access Denied", { status: 403 })
+      new NextResponse("Access Denied", { status: 403 }),
     );
   }
 
@@ -57,7 +72,7 @@ export async function proxy(req: NextRequest) {
   // to this list as real feature API routes (posts, comments, follow,
   // saved, notifications) get built.
   const isProtectedRoute = ["/api/user"].some((route) =>
-    pathname.startsWith(route)
+    pathname.startsWith(route),
   );
 
   if (!isProtectedRoute) {
@@ -72,10 +87,13 @@ export async function proxy(req: NextRequest) {
   if (accessToken) {
     try {
       const payload = verifyAccessToken(accessToken);
-      const res = NextResponse.next();
+      const res = nextWithRequestHeader(
+        req,
+        "x-user-id",
+        (payload as { sub: string }).sub,
+      );
       // No x-user-role header — the schema has no `role` concept.
       // Add one back here (and to User) if/when an admin tier exists.
-      res.headers.set("x-user-id", (payload as { sub: string }).sub);
       return addSecurityHeaders(res);
     } catch {
       // Access token invalid/expired, fall through to refresh
@@ -98,8 +116,8 @@ export async function proxy(req: NextRequest) {
         const res = addSecurityHeaders(
           NextResponse.json(
             { success: false, error: "Unauthorized" },
-            { status: 401 }
-          )
+            { status: 401 },
+          ),
         );
         // Every session for this user was already revoked inside
         // checkRefreshToken — clear this device's cookies too, since
@@ -107,7 +125,7 @@ export async function proxy(req: NextRequest) {
         for (const name of ["accessToken", "refreshToken", "uid"]) {
           res.headers.append(
             "Set-Cookie",
-            `${name}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`
+            `${name}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`,
           );
         }
         return res;
@@ -122,7 +140,7 @@ export async function proxy(req: NextRequest) {
         if (user) {
           const newAccessToken = signAccessToken({ sub: user.id });
 
-          const res = NextResponse.next();
+          const res = nextWithRequestHeader(req, "x-user-id", user.id);
 
           const cookieAccess = [
             `accessToken=${newAccessToken}`,
@@ -136,7 +154,6 @@ export async function proxy(req: NextRequest) {
             .join("; ");
 
           res.headers.append("Set-Cookie", cookieAccess);
-          res.headers.set("x-user-id", user.id);
 
           return addSecurityHeaders(res);
         }
@@ -150,8 +167,8 @@ export async function proxy(req: NextRequest) {
   return addSecurityHeaders(
     NextResponse.json(
       { success: false, error: "Unauthorized" },
-      { status: 401 }
-    )
+      { status: 401 },
+    ),
   );
 }
 

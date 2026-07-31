@@ -7,15 +7,15 @@ import {
   XCircleIcon,
   SpinnerGapIcon,
 } from "@phosphor-icons/react";
-import { useAuth } from "@/context/AuthProvider";
+import { useQueryClient } from "@tanstack/react-query";
+import { verifyMagicLink } from "@/services/authService";
 import { PATHS } from "@/utils/paths";
 
 type Status = "verifying" | "success" | "expired" | "invalid";
 
-// Simulated network delay before "validating" — stands in for a real
-// backend round trip. See AuthProvider.verifyToken for what makes a token
-// "expired" vs "invalid" vs valid in this simulation.
-const VERIFY_DELAY_MS = 1200;
+// A real UX nicety, not a fake-latency simulation — keeps the "You're
+// in!" checkmark on screen just long enough to actually register before
+// redirecting, regardless of how fast the real network request resolved.
 const REDIRECT_DELAY_MS = 900;
 
 export function VerifyContent({
@@ -26,8 +26,9 @@ export function VerifyContent({
   redirectTo?: string;
 }) {
   const router = useRouter();
-  const { verifyToken } = useAuth();
+  const queryClient = useQueryClient();
   const [status, setStatus] = useState<Status>("verifying");
+  const [needsOnboarding, setNeedsOnboarding] = useState(true);
 
   // Only ever treat this as a same-app relative path — a query param is
   // just a string an attacker could set to anything, so this guards
@@ -36,32 +37,54 @@ export function VerifyContent({
     redirectTo && redirectTo.startsWith("/") ? redirectTo : undefined;
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      if (!token) {
-        setStatus("invalid");
+    let cancelled = false;
+
+    async function run() {
+      const result = await verifyMagicLink(token);
+      if (cancelled) return;
+
+      if (!result?.success) {
+        // Backend returns error: "expired" | "invalid" (or a generic
+        // server-error string on a 500) — anything unrecognized falls
+        // back to "invalid" rather than leaving the spinner stuck.
+        setStatus(result?.error === "expired" ? "expired" : "invalid");
         return;
       }
-      const result = verifyToken(token);
-      setStatus(result);
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, VERIFY_DELAY_MS);
-    return () => window.clearTimeout(timer);
-  }, [token]);
+
+      setNeedsOnboarding(Boolean(result.needsOnboarding));
+      // The verify response already set fresh session cookies — this
+      // just tells useCurrentUser (everywhere it's used, app-wide) to
+      // refetch /api/user/me now instead of waiting for its next natural
+      // refetch, so isAuthenticated flips to true immediately rather
+      // than staying stale until some other trigger (focus, reconnect).
+      await queryClient.invalidateQueries({ queryKey: ["currentUser"] });
+      setStatus("success");
+    }
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [token, queryClient]);
 
   useEffect(() => {
     if (status !== "success") return;
-    // Someone who got sent here from a specific gated page/action goes
-    // straight back to it — onboarding is only for a "fresh" sign-in with
-    // no particular origin, not for someone just trying to finish what
-    // they were already doing.
-    const destination = safeRedirect ?? PATHS.ONBOARDING;
+
+    // A real, definitive answer from the backend now, not a guess. A
+    // brand-new account (no username chosen yet) always goes through
+    // onboarding first — even over a remembered redirect, since picking
+    // a username isn't optional. A returning user goes straight back to
+    // wherever they were gated from, or Home if there's nowhere specific.
+    const destination = needsOnboarding
+      ? PATHS.ONBOARDING
+      : (safeRedirect ?? PATHS.HOME);
+
     const timer = window.setTimeout(
       () => router.replace(destination),
       REDIRECT_DELAY_MS,
     );
     return () => window.clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, router]);
+  }, [status, needsOnboarding, safeRedirect, router]);
 
   return (
     <div className="fixed left-1/2 top-0 bottom-0 z-80 flex w-full max-w-lg -translate-x-1/2 flex-col items-center justify-center bg-background px-6 text-center">

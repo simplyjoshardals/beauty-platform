@@ -26,7 +26,7 @@ import { usePosts } from "@/context/PostsProvider";
 import { isMockFollowerOfCurrentUser } from "@/data/mockFollowers";
 import { PATHS } from "@/utils/paths";
 import { useAuthGatedAction } from "@/hooks/useAuthGatedAction";
-import { useAuth } from "@/context/AuthProvider";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { AuthGateModal } from "@/components/auth/AuthGateModal";
 
 export function PostCard({ post }: { post: Post }) {
@@ -37,7 +37,7 @@ export function PostCard({ post }: { post: Post }) {
   const pathname = usePathname();
   const followsMe = isMockFollowerOfCurrentUser(post.author.username);
   const { gateOpen, gateMessage, closeGate, guard } = useAuthGatedAction();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated } = useCurrentUser();
   const { profile } = useProfile();
   const { isSaved, toggleSave } = useSavedPosts();
   const [likeCount, setLikeCount] = useState(post.likeCount);
@@ -160,8 +160,8 @@ export function PostCard({ post }: { post: Post }) {
         prev.map((c) =>
           c.id === parentId
             ? { ...c, replies: [...(c.replies ?? []), newComment] }
-            : c
-        )
+            : c,
+        ),
       );
     }
     setCommentCount((c) => c + 1);
@@ -179,9 +179,12 @@ export function PostCard({ post }: { post: Post }) {
       setComments((prev) =>
         prev.map((c) =>
           c.id === topLevelId
-            ? { ...c, replies: (c.replies ?? []).filter((r) => r.id !== commentId) }
-            : c
-        )
+            ? {
+                ...c,
+                replies: (c.replies ?? []).filter((r) => r.id !== commentId),
+              }
+            : c,
+        ),
       );
       setCommentCount((count) => Math.max(0, count - 1));
       return;
@@ -195,7 +198,7 @@ export function PostCard({ post }: { post: Post }) {
       // Not decremented: the placeholder still occupies a real slot in
       // the thread, unlike a fully-removed leaf comment.
       setComments((prev) =>
-        prev.map((c) => (c.id === commentId ? { ...c, deleted: true } : c))
+        prev.map((c) => (c.id === commentId ? { ...c, deleted: true } : c)),
       );
     } else {
       // No replies — true silent removal, no trace left behind.
@@ -223,7 +226,10 @@ export function PostCard({ post }: { post: Post }) {
   return (
     <article className="border-b border-foreground/10">
       <header className="flex items-center gap-2 px-3 py-2">
-        <Link href={PATHS.USER_PROFILE(post.author.username)} className="shrink-0">
+        <Link
+          href={PATHS.USER_PROFILE(post.author.username)}
+          className="shrink-0"
+        >
           <Image
             src={post.author.avatarSrc}
             alt={post.author.username}

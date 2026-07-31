@@ -11,10 +11,13 @@ export async function getCurrentUser() {
 // Replaces registerUser + loginUser + resendVerificationToken — a magic
 // link makes signup, login, and resend the exact same call. No password
 // is ever involved, so there's nothing else to send here beyond email.
-export async function requestMagicLink(email: string) {
+// redirectTo (if present) is where the person should land after
+// verifying — the backend embeds it in the actual emailed link's URL,
+// since that link is what /auth/verify/[token] eventually reads it from.
+export async function requestMagicLink(email: string, redirectTo?: string) {
   return apiFetch(API_ROUTES.AUTH.REQUEST_LINK, {
     method: "POST",
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({ email, redirectTo }),
     authRequired: false,
   });
 }

@@ -8,7 +8,7 @@ import { FollowProvider } from "@/context/FollowProvider";
 import { ProfileProvider } from "@/context/ProfileProvider";
 import { NotificationsProvider } from "@/context/NotificationsProvider";
 import { SavedPostsProvider } from "@/context/SavedPostsProvider";
-import { AuthProvider } from "@/context/AuthProvider";
+import { Providers } from "./providers";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -63,7 +63,7 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body className="min-h-full flex flex-col">
-        <AuthProvider>
+        <Providers>
           <PostsProvider>
             <FollowProvider>
               <ProfileProvider>
@@ -79,7 +79,7 @@ export default function RootLayout({
               </ProfileProvider>
             </FollowProvider>
           </PostsProvider>
-        </AuthProvider>
+        </Providers>
       </body>
     </html>
   );
