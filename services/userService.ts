@@ -1,5 +1,6 @@
 import { apiFetch } from "@/utils/apiClient";
 import { API_ROUTES } from "@/utils/apiRoutes";
+import type { ProductTag } from "@/types/post";
 
 export type CompleteOnboardingInput = {
   username: string;
@@ -25,5 +26,22 @@ export async function completeOnboarding(data: CompleteOnboardingInput) {
 export async function checkUsernameAvailability(username: string) {
   return apiFetch(API_ROUTES.USER.CHECK_USERNAME(username), {
     method: "GET",
+  });
+}
+
+export type UpdateProfileInput = {
+  username?: string;
+  // Must be a real uploaded URL from useUploadMedia — never a blob:
+  // URL. Same caveat as CompleteOnboardingInput's avatarSrc.
+  avatarSrc?: string;
+  toneTag?: string;
+  bio?: string;
+  pinnedRoutine?: ProductTag[];
+};
+
+export async function updateProfile(data: UpdateProfileInput) {
+  return apiFetch(API_ROUTES.USER.ME, {
+    method: "PATCH",
+    body: JSON.stringify(data),
   });
 }

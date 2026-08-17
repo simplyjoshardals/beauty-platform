@@ -9,7 +9,7 @@ import type { Post } from "@/types/post";
 import type { Comment } from "@/types/comment";
 import { getRelativeTime } from "@/utils/time";
 import { CURRENT_USER_ID } from "@/constants/currentUser";
-import { useProfile } from "@/context/ProfileProvider";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { Carousel } from "./Carousel";
 import { VideoPost } from "./VideoPost";
 import { BeforeAfterSlider } from "./BeforeAfterSlider";
@@ -26,7 +26,6 @@ import { usePosts } from "@/context/PostsProvider";
 import { isMockFollowerOfCurrentUser } from "@/data/mockFollowers";
 import { PATHS } from "@/utils/paths";
 import { useAuthGatedAction } from "@/hooks/useAuthGatedAction";
-import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { AuthGateModal } from "@/components/auth/AuthGateModal";
 
 export function PostCard({ post }: { post: Post }) {
@@ -38,7 +37,7 @@ export function PostCard({ post }: { post: Post }) {
   const followsMe = isMockFollowerOfCurrentUser(post.author.username);
   const { gateOpen, gateMessage, closeGate, guard } = useAuthGatedAction();
   const { isAuthenticated } = useCurrentUser();
-  const { profile } = useProfile();
+  const { user } = useCurrentUser();
   const { isSaved, toggleSave } = useSavedPosts();
   const [likeCount, setLikeCount] = useState(post.likeCount);
   const [showHeartPop, setShowHeartPop] = useState(false);
@@ -137,6 +136,8 @@ export function PostCard({ post }: { post: Post }) {
   }
 
   function handleAddComment(text: string, parentId?: string) {
+    if (!user) return;
+
     const newComment: Comment = {
       id: crypto.randomUUID(),
       // Live profile data, not the old static constant — this also means
@@ -144,9 +145,9 @@ export function PostCard({ post }: { post: Post }) {
       // actually shows the new one, instead of whatever was baked in at
       // build time.
       author: {
-        id: profile.id,
-        username: profile.username,
-        avatarSrc: profile.avatarSrc,
+        id: user.id,
+        username: user.username,
+        avatarSrc: user.avatarSrc,
       },
       text,
       likeCount: 0,

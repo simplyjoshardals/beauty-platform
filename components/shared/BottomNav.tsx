@@ -13,7 +13,6 @@ import {
 import { PATHS } from "@/utils/paths";
 import { useNotifications } from "@/context/NotificationsProvider";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { useProfile } from "@/context/ProfileProvider";
 
 const tabs = [
   { id: "home", label: "Home", href: PATHS.HOME, icon: HouseIcon },
@@ -52,8 +51,7 @@ function isTabActive(pathname: string, href: string) {
 export function BottomNav() {
   const pathname = usePathname();
   const { unreadCount } = useNotifications();
-  const { isAuthenticated } = useCurrentUser();
-  const { profile } = useProfile();
+  const { user, isAuthenticated } = useCurrentUser();
 
   return (
     <nav
@@ -84,7 +82,7 @@ export function BottomNav() {
                   }`}
                 >
                   <Image
-                    src={profile.avatarSrc}
+                    src={user?.avatarSrc ?? ""}
                     alt=""
                     width={26}
                     height={26}

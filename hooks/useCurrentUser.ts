@@ -2,12 +2,16 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { getCurrentUser } from "@/services/authService";
+import type { ProductTag } from "@/types/post";
 
 export type CurrentUser = {
   id: string;
   username: string;
   email: string;
   avatarSrc: string;
+  bio: string;
+  toneTag: string;
+  pinnedRoutine: ProductTag[];
   onboardingCompletedAt: string | null;
 };
 

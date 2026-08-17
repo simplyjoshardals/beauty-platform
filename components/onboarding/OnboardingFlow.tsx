@@ -225,13 +225,11 @@ export function OnboardingFlow() {
         disabled={continueDisabled}
         className="mb-[calc(1.5rem+env(safe-area-inset-bottom))] w-full rounded-lg bg-foreground py-2.5 text-sm font-medium text-background disabled:opacity-60"
       >
-        {avatarUploading
-          ? "Uploading…"
-          : submitting
-            ? "Saving…"
-            : step === TOTAL_STEPS
-              ? "Finish"
-              : "Continue"}
+        {avatarUploading || submitting
+          ? "Saving…"
+          : step === TOTAL_STEPS
+            ? "Finish"
+            : "Continue"}
       </button>
     </div>
   );

@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useFollow } from "@/context/FollowProvider";
-import { useProfile } from "@/context/ProfileProvider";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { isMockFollowerOfCurrentUser } from "@/data/mockFollowers";
 import { PATHS } from "@/utils/paths";
 import { useAuthGatedAction } from "@/hooks/useAuthGatedAction";
@@ -17,14 +17,14 @@ import type { MockUser } from "@/data/mockUsers";
 // by whatever page happens to be rendering it.
 export function UserListRow({ user }: { user: MockUser }) {
   const { isFollowing, toggleFollow } = useFollow();
-  const { profile } = useProfile();
+  const { user: currentUser } = useCurrentUser();
   const { gateOpen, gateMessage, closeGate, guard } = useAuthGatedAction();
   const following = isFollowing(user.username);
   const followsMe = isMockFollowerOfCurrentUser(user.username);
   // Compared against your LIVE username — MOCK_USERS never actually
   // includes "you," but if your current handle ever happened to collide
   // with a listed username, this still correctly recognizes it's you.
-  const isSelf = user.username === profile.username;
+  const isSelf = user.username === currentUser?.username;
 
   const label = following ? "Following" : followsMe ? "Follow back" : "Follow";
 

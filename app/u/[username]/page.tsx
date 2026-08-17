@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { notFound } from "next/navigation";
 import { usePosts } from "@/context/PostsProvider";
 import { useFollow } from "@/context/FollowProvider";
-import { useProfile } from "@/context/ProfileProvider";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { getMockUser } from "@/data/mockUsers";
 import { isMockFollowerOfCurrentUser } from "@/data/mockFollowers";
 import { PATHS } from "@/utils/paths";
@@ -28,7 +28,7 @@ export default function UserProfilePage({ params }: Props) {
   const router = useRouter();
   const { posts } = usePosts();
   const { isFollowing, toggleFollow } = useFollow();
-  const { profile } = useProfile();
+  const { user: currentUser } = useCurrentUser();
   const [loading, setLoading] = useState(true);
   const { gateOpen, closeGate, guard } = useAuthGatedAction();
 
@@ -38,7 +38,7 @@ export default function UserProfilePage({ params }: Props) {
   // Compared against your LIVE username (not a frozen constant) — since
   // username is now editable, visiting /u/your-new-handle needs to still
   // correctly recognize it's you, right after a rename.
-  const isSelf = username === profile.username;
+  const isSelf = username === currentUser?.username;
 
   useEffect(() => {
     if (isSelf) {

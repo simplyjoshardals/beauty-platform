@@ -5,7 +5,6 @@ import { BottomNav } from "@/components/shared/BottomNav";
 import TopNav from "@/components/shared/TopNav";
 import { PostsProvider } from "@/context/PostsProvider";
 import { FollowProvider } from "@/context/FollowProvider";
-import { ProfileProvider } from "@/context/ProfileProvider";
 import { NotificationsProvider } from "@/context/NotificationsProvider";
 import { SavedPostsProvider } from "@/context/SavedPostsProvider";
 import { Providers } from "./providers";
@@ -66,17 +65,15 @@ export default function RootLayout({
         <Providers>
           <PostsProvider>
             <FollowProvider>
-              <ProfileProvider>
-                <NotificationsProvider>
-                  <SavedPostsProvider>
-                    <TopNav />
-                    <main className="mx-auto w-full max-w-lg flex-1 pt-[calc(3.5rem+env(safe-area-inset-top))] pb-[calc(3.5rem+env(safe-area-inset-bottom))]">
-                      {children}
-                    </main>
-                    <BottomNav />
-                  </SavedPostsProvider>
-                </NotificationsProvider>
-              </ProfileProvider>
+              <NotificationsProvider>
+                <SavedPostsProvider>
+                  <TopNav />
+                  <main className="mx-auto w-full max-w-lg flex-1 pt-[calc(3.5rem+env(safe-area-inset-top))] pb-[calc(3.5rem+env(safe-area-inset-bottom))]">
+                    {children}
+                  </main>
+                  <BottomNav />
+                </SavedPostsProvider>
+              </NotificationsProvider>
             </FollowProvider>
           </PostsProvider>
         </Providers>
