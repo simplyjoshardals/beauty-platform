@@ -22,7 +22,7 @@ type Props = {
 // onboarding page is naturally exempt from this without needing a
 // special prop: pathname === PATHS.ONBOARDING is exactly the condition
 // that skips the redirect below.
-export function RequireAuth({ children, message }: Props) {
+export function RequireAuth({ children, message }: Props) { 
   const { isAuthenticated, needsOnboarding, isLoading } = useCurrentUser();
   const router = useRouter();
   const pathname = usePathname();
