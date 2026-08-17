@@ -1,24 +1,19 @@
-import { MOCK_USERS } from "@/data/mockUsers";
+import { USERNAME_PATTERN, USERNAME_FORMAT_ERROR } from "@/constants/username";
 
-const USERNAME_PATTERN = /^[a-z0-9_.]{3,20}$/;
-
-export function validateUsername(
-  value: string,
-  currentUsername: string,
-): string | null {
+// Format only — "taken" is no longer checked here. It used to compare
+// against MOCK_USERS (frontend-only demo data with no relation to the
+// real database), which meant it could falsely reject a genuinely
+// available username just because it happened to collide with a fake
+// demo account. Real uniqueness now belongs entirely to the backend:
+// useUsernameAvailability for live feedback, and the onboarding
+// endpoint's own check as the final authority.
+export function validateUsername(value: string): string | null {
   const trimmed = value.trim().toLowerCase();
 
   if (trimmed.length === 0) return "Choose a username.";
   if (!USERNAME_PATTERN.test(trimmed)) {
-    return "3–20 characters: lowercase letters, numbers, underscores, or periods.";
+    return USERNAME_FORMAT_ERROR;
   }
-  // Comparing against MOCK_USERS only, not the real user's own current
-  // value — otherwise saving your own unchanged username would falsely
-  // flag as "taken."
-  const taken =
-    trimmed !== currentUsername.toLowerCase() &&
-    MOCK_USERS.some((u) => u.username.toLowerCase() === trimmed);
-  if (taken) return "That username is already taken.";
 
   return null;
 }

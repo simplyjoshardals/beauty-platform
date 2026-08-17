@@ -8,6 +8,7 @@ export type CurrentUser = {
   username: string;
   email: string;
   avatarSrc: string;
+  onboardingCompletedAt: string | null;
 };
 
 // Replaces AuthProvider's isAuthenticated boolean entirely. Session
@@ -26,9 +27,15 @@ export function useCurrentUser() {
     },
   });
 
+  const user = query.data ?? null;
+
   return {
-    user: query.data ?? null,
-    isAuthenticated: Boolean(query.data),
+    user,
+    isAuthenticated: Boolean(user),
+    // Only meaningful once actually authenticated — a logged-out visitor
+    // isn't "needing onboarding," they're just logged out, which
+    // RequireAuth already handles as a separate, earlier check.
+    needsOnboarding: Boolean(user) && user?.onboardingCompletedAt == null,
     isLoading: query.isLoading,
     refetch: query.refetch,
   };

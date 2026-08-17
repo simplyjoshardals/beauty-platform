@@ -32,7 +32,7 @@ export function EditProfileForm() {
   }
 
   function handleSave() {
-    const error = validateUsername(username, profile.username);
+    const error = validateUsername(username);
     if (error) {
       setUsernameError(error);
       return;

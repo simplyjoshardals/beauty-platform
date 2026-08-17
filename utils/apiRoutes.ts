@@ -15,5 +15,12 @@ export const API_ROUTES = {
 
   USER: {
     ME: "/api/user/me",
+    ONBOARDING: "/api/user/onboarding",
+    CHECK_USERNAME: (username: string) =>
+      `/api/user/username-available?username=${encodeURIComponent(username)}`,
+  },
+
+  UPLOAD: {
+    SIGNATURE: "/api/upload/signature",
   },
 };

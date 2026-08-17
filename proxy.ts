@@ -71,7 +71,7 @@ export async function proxy(req: NextRequest) {
   // belonged to a different app entirely and weren't carried over. Add
   // to this list as real feature API routes (posts, comments, follow,
   // saved, notifications) get built.
-  const isProtectedRoute = ["/api/user"].some((route) =>
+  const isProtectedRoute = ["/api/user", "/api/upload"].some((route) =>
     pathname.startsWith(route),
   );
 

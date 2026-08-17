@@ -2,14 +2,25 @@
 
 import { useRef } from "react";
 import Image from "next/image";
-import { CameraIcon } from "@phosphor-icons/react";
+import { CameraIcon, SpinnerGapIcon } from "@phosphor-icons/react";
 
 type Props = {
   avatarSrc: string;
-  onAvatarChange: (src: string) => void;
+  onFileSelected: (file: File) => void;
+  uploading?: boolean;
+  error?: string | null;
 };
 
-export function PhotoStep({ avatarSrc, onAvatarChange }: Props) {
+// File selection is handled by the parent (OnboardingFlow), not here —
+// it owns the local preview and holds onto the picked file until the
+// user finishes onboarding, when the real upload actually happens.
+// This component doesn't need to know any of that.
+export function PhotoStep({
+  avatarSrc,
+  onFileSelected,
+  uploading = false,
+  error = null,
+}: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   return (
@@ -33,7 +44,11 @@ export function PhotoStep({ avatarSrc, onAvatarChange }: Props) {
           className="object-cover"
         />
         <span className="absolute inset-0 flex items-center justify-center bg-black/30">
-          <CameraIcon size={22} weight="fill" className="text-white" />
+          {uploading ? (
+            <SpinnerGapIcon size={22} className="animate-spin text-white" />
+          ) : (
+            <CameraIcon size={22} weight="fill" className="text-white" />
+          )}
         </span>
       </button>
 
@@ -43,7 +58,7 @@ export function PhotoStep({ avatarSrc, onAvatarChange }: Props) {
         accept="image/*"
         onChange={(e) => {
           const file = e.target.files?.[0];
-          if (file) onAvatarChange(URL.createObjectURL(file));
+          if (file) onFileSelected(file);
         }}
         className="hidden"
       />
@@ -51,10 +66,13 @@ export function PhotoStep({ avatarSrc, onAvatarChange }: Props) {
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
-        className="mt-3 text-sm font-medium text-foreground"
+        disabled={uploading}
+        className="mt-3 text-sm font-medium text-foreground disabled:opacity-50"
       >
-        Choose photo
+        {uploading ? "Uploading…" : "Choose photo"}
       </button>
+
+      {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
     </div>
   );
 }

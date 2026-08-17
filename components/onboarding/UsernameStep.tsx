@@ -1,12 +1,25 @@
 "use client";
 
+import {
+  CheckCircleIcon,
+  XCircleIcon,
+  SpinnerGapIcon,
+} from "@phosphor-icons/react";
+import type { UsernameCheckStatus } from "@/hooks/useUsernameAvailability";
+
 type Props = {
   username: string;
   onUsernameChange: (value: string) => void;
   error: string | null;
+  checkStatus?: UsernameCheckStatus;
 };
 
-export function UsernameStep({ username, onUsernameChange, error }: Props) {
+export function UsernameStep({
+  username,
+  onUsernameChange,
+  error,
+  checkStatus = "idle",
+}: Props) {
   return (
     <div className="text-center">
       <h1 className="text-lg font-semibold">Choose a username</h1>
@@ -27,8 +40,33 @@ export function UsernameStep({ username, onUsernameChange, error }: Props) {
             autoCorrect="off"
             className="flex-1 bg-transparent pl-1 text-sm outline-none"
           />
+          {checkStatus === "checking" && (
+            <SpinnerGapIcon
+              size={16}
+              className="animate-spin text-foreground/40"
+            />
+          )}
+          {checkStatus === "available" && (
+            <CheckCircleIcon
+              size={16}
+              weight="fill"
+              className="text-green-500"
+            />
+          )}
+          {checkStatus === "taken" && (
+            <XCircleIcon size={16} weight="fill" className="text-red-500" />
+          )}
         </div>
-        {error && <p className="mt-1.5 text-xs text-red-500">{error}</p>}
+
+        {error ? (
+          <p className="mt-1.5 text-xs text-red-500">{error}</p>
+        ) : checkStatus === "taken" ? (
+          <p className="mt-1.5 text-xs text-red-500">
+            That username is already taken.
+          </p>
+        ) : checkStatus === "available" ? (
+          <p className="mt-1.5 text-xs text-green-600">Username available</p>
+        ) : null}
       </div>
     </div>
   );

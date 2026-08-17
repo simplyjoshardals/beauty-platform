@@ -30,6 +30,7 @@ export async function GET(req: NextRequest) {
       username: user.username,
       email: user.email,
       avatarSrc: user.avatarSrc,
+      onboardingCompletedAt: user.onboardingCompletedAt,
     },
   });
 }
