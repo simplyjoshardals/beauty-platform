@@ -28,4 +28,18 @@ export const API_ROUTES = {
     LIST: "/api/posts",
     CREATE: "/api/posts",
   },
+
+  SAVED: {
+    // GET returns the whole bundle (saved post ids + every collection
+    // with its post ids); POST toggles a post's overall saved state.
+    BUNDLE: "/api/saved",
+    TOGGLE_SAVE: "/api/saved",
+    CREATE_COLLECTION: "/api/saved/collections",
+    RENAME_COLLECTION: (collectionId: string) =>
+      `/api/saved/collections/${collectionId}`,
+    DELETE_COLLECTION: (collectionId: string) =>
+      `/api/saved/collections/${collectionId}`,
+    TOGGLE_COLLECTION_POST: (collectionId: string) =>
+      `/api/saved/collections/${collectionId}/posts`,
+  },
 };

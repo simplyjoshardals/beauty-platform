@@ -75,10 +75,14 @@ export async function proxy(req: NextRequest) {
   // /api/posts covers both GET (list) and POST (create) — the whole
   // app is already gated behind RequireAuth on the frontend (see
   // app/page.tsx), so there's no logged-out "browse the feed" case to
-  // carve out an exception for here.
-  const isProtectedRoute = ["/api/user", "/api/upload", "/api/posts"].some(
-    (route) => pathname.startsWith(route),
-  );
+  // carve out an exception for here. /api/saved covers the saved-posts
+  // bundle plus every collection sub-route the same way.
+  const isProtectedRoute = [
+    "/api/user",
+    "/api/upload",
+    "/api/posts",
+    "/api/saved",
+  ].some((route) => pathname.startsWith(route));
 
   if (!isProtectedRoute) {
     return addSecurityHeaders(NextResponse.next());

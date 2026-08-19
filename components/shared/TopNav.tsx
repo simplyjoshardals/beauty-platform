@@ -6,7 +6,7 @@ import Link from "next/link";
 import { PlusIcon, SunIcon, MoonIcon } from "@phosphor-icons/react";
 import { PATHS } from "@/utils/paths";
 
-export default function TopNav() {
+export  function TopNav() {
   const [isDark, setIsDark] = useState(false);
   const [hidden, setHidden] = useState(false);
 

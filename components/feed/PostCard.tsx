@@ -21,7 +21,7 @@ import { ShareMenu } from "./ShareMenu";
 import { PostOptionsSheet } from "./PostOptionsSheet";
 import { SaveToCollectionSheet } from "@/components/saved/SaveToCollectionSheet";
 import { useFollow } from "@/context/FollowProvider";
-import { useSavedPosts } from "@/context/SavedPostsProvider";
+import { useSavedPosts } from "@/hooks/useSavedPosts";
 import { usePosts } from "@/hooks/usePosts";
 import { isMockFollowerOfCurrentUser } from "@/data/mockFollowers";
 import { PATHS } from "@/utils/paths";

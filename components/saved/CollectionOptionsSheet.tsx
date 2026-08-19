@@ -2,7 +2,7 @@
 
 import { useState, type KeyboardEvent } from "react";
 import { XIcon, PencilSimpleIcon, TrashIcon } from "@phosphor-icons/react";
-import { useSavedPosts } from "@/context/SavedPostsProvider";
+import { useSavedPosts } from "@/hooks/useSavedPosts";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 
 type Props = {

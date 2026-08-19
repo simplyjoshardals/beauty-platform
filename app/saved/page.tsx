@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { usePosts } from "@/hooks/usePosts";
-import { useSavedPosts } from "@/context/SavedPostsProvider";
+import { useSavedPosts } from "@/hooks/useSavedPosts";
 import { getPostThumbnail } from "@/utils/postThumbnail";
 import { CollectionTile } from "@/components/saved/CollectionTile";
 import { CreateCollectionTile } from "@/components/saved/CreateCollectionTile";
@@ -10,20 +10,20 @@ import { CreateCollectionSheet } from "@/components/saved/CreateCollectionSheet"
 import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
 import { RequireAuth } from "@/components/auth/RequireAuth";
 
-// Simulated so the skeleton is actually visible — swap for a real pending
-// flag once saved posts/collections come from a real fetch.
-const SIMULATED_LOAD_MS = 800;
-
 export default function SavedPage() {
-  const { posts } = usePosts();
-  const { isSaved, collections, getPostIdsForCollection } = useSavedPosts();
-  const [loading, setLoading] = useState(true);
+  const { posts, isLoading: postsLoading } = usePosts();
+  const {
+    isSaved,
+    collections,
+    getPostIdsForCollection,
+    isLoading: savedLoading,
+  } = useSavedPosts();
   const [createOpen, setCreateOpen] = useState(false);
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => setLoading(false), SIMULATED_LOAD_MS);
-    return () => window.clearTimeout(timer);
-  }, []);
+  // Real pending state now — both the feed (for post thumbnails) and the
+  // saved bundle (for what's actually saved) need to have loaded before
+  // there's anything meaningful to render.
+  const loading = postsLoading || savedLoading;
 
   const allSavedPosts = posts.filter((post) => isSaved(post.id));
   const allSavedCover = allSavedPosts[0]

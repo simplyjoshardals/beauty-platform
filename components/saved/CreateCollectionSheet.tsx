@@ -2,7 +2,7 @@
 
 import { useState, type KeyboardEvent } from "react";
 import { XIcon } from "@phosphor-icons/react";
-import { useSavedPosts } from "@/context/SavedPostsProvider";
+import { useSavedPosts } from "@/hooks/useSavedPosts";
 
 type Props = {
   open: boolean;
@@ -15,12 +15,12 @@ export function CreateCollectionSheet({ open, onClose }: Props) {
 
   if (!open) return null;
 
-  function handleCreate() {
+  async function handleCreate() {
     const trimmed = name.trim();
     if (!trimmed) return;
-    createCollection(trimmed);
     setName("");
     onClose();
+    await createCollection(trimmed);
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {

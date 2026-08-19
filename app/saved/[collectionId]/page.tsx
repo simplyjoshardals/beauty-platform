@@ -1,10 +1,10 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useState } from "react";
 import { notFound, useRouter } from "next/navigation";
 import { DotsThreeIcon } from "@phosphor-icons/react";
 import { usePosts } from "@/hooks/usePosts";
-import { useSavedPosts } from "@/context/SavedPostsProvider";
+import { useSavedPosts } from "@/hooks/useSavedPosts";
 import { PostGrid } from "@/components/profile/PostGrid";
 import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
 import { CollectionOptionsSheet } from "@/components/saved/CollectionOptionsSheet";
@@ -16,36 +16,35 @@ type Props = {
   params: Promise<{ collectionId: string }>;
 };
 
-const SIMULATED_LOAD_MS = 700;
-
 export default function SavedCollectionPage({ params }: Props) {
   const { collectionId } = use(params);
   const router = useRouter();
-  const { posts } = usePosts();
+  const { posts, isLoading: postsLoading } = usePosts();
   const {
     isSaved,
     toggleSave,
     collections,
     getPostIdsForCollection,
     toggleCollectionForPost,
+    isLoading: savedLoading,
   } = useSavedPosts();
-  const [loading, setLoading] = useState(true);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [pendingRemovePostId, setPendingRemovePostId] = useState<string | null>(
     null,
   );
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => setLoading(false), SIMULATED_LOAD_MS);
-    return () => window.clearTimeout(timer);
-  }, []);
+  // Real pending state — same reasoning as app/saved/page.tsx.
+  const loading = postsLoading || savedLoading;
 
   const isAll = collectionId === "all";
   const collection = collections.find((c) => c.id === collectionId);
 
   // "all" is always valid (it's the built-in view) — anything else must
-  // match a real collection, or this is a bad/stale link.
-  if (!isAll && !collection) {
+  // match a real collection, or this is a bad/stale link. Only decide
+  // that once the saved bundle has actually loaded — `collections` is
+  // empty during the initial fetch too, and that's not the same thing
+  // as a real 404.
+  if (!isAll && !collection && !savedLoading) {
     notFound();
   }
 

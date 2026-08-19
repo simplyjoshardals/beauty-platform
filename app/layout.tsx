@@ -2,10 +2,9 @@ import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { BottomNav } from "@/components/shared/BottomNav";
-import TopNav from "@/components/shared/TopNav";
+import { TopNav } from "@/components/shared/TopNav";
 import { FollowProvider } from "@/context/FollowProvider";
 import { NotificationsProvider } from "@/context/NotificationsProvider";
-import { SavedPostsProvider } from "@/context/SavedPostsProvider";
 import { Providers } from "./providers";
 
 const inter = Inter({
@@ -64,13 +63,11 @@ export default function RootLayout({
         <Providers>
           <FollowProvider>
             <NotificationsProvider>
-              <SavedPostsProvider>
-                <TopNav />
-                <main className="mx-auto w-full max-w-lg flex-1 pt-[calc(3.5rem+env(safe-area-inset-top))] pb-[calc(3.5rem+env(safe-area-inset-bottom))]">
-                  {children}
-                </main>
-                <BottomNav />
-              </SavedPostsProvider>
+              <TopNav />
+              <main className="mx-auto w-full max-w-lg flex-1 pt-[calc(3.5rem+env(safe-area-inset-top))] pb-[calc(3.5rem+env(safe-area-inset-bottom))]">
+                {children}
+              </main>
+              <BottomNav />
             </NotificationsProvider>
           </FollowProvider>
         </Providers>
