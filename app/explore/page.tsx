@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { MagnifyingGlassIcon } from "@phosphor-icons/react";
-import { usePosts } from "@/context/PostsProvider";
+import { usePosts } from "@/hooks/usePosts";
 import { CURRENT_USER_ID } from "@/constants/currentUser";
 import { MOCK_USERS } from "@/data/mockUsers";
 import { PostGrid } from "@/components/profile/PostGrid";

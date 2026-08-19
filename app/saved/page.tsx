@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { usePosts } from "@/context/PostsProvider";
+import { usePosts } from "@/hooks/usePosts";
 import { useSavedPosts } from "@/context/SavedPostsProvider";
 import { getPostThumbnail } from "@/utils/postThumbnail";
 import { CollectionTile } from "@/components/saved/CollectionTile";

@@ -3,7 +3,7 @@
 import { use, useEffect, useState } from "react";
 import { notFound, useRouter } from "next/navigation";
 import { DotsThreeIcon } from "@phosphor-icons/react";
-import { usePosts } from "@/context/PostsProvider";
+import { usePosts } from "@/hooks/usePosts";
 import { useSavedPosts } from "@/context/SavedPostsProvider";
 import { PostGrid } from "@/components/profile/PostGrid";
 import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";

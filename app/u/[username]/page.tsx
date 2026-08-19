@@ -3,7 +3,7 @@
 import { use, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { notFound } from "next/navigation";
-import { usePosts } from "@/context/PostsProvider";
+import { usePosts } from "@/hooks/usePosts";
 import { useFollow } from "@/context/FollowProvider";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { getMockUser } from "@/data/mockUsers";
