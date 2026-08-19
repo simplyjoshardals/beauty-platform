@@ -10,12 +10,15 @@ import {
   ArrowsLeftRightIcon,
   PlusIcon,
 } from "@phosphor-icons/react";
-import { usePosts } from "@/context/PostsProvider";
+
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { ProductTagEditor } from "@/components/shared/ProductTagEditor";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { PATHS } from "@/utils/paths";
-import type { Post, PostMedia, ProductTag } from "@/types/post";
+import type { PostMedia, ProductTag } from "@/types/post";
+import { useCreatePost } from "@/hooks/useCreatePost";
+import { useUploadMedia } from "@/hooks/useUploadMedia";
+import type { CreatePostInput } from "@/services/postService";
 
 type PostType = "photo" | "video" | "before_after";
 
@@ -23,17 +26,29 @@ const MAX_CAROUSEL_IMAGES = 10;
 
 export function CreatePostForm() {
   const router = useRouter();
-  const { addPost } = usePosts();
   const { user } = useCurrentUser();
+  const { mutateAsync: uploadMedia, isPending: isUploading } = useUploadMedia();
+  const { mutateAsync: createPost, isPending: isSubmitting } = useCreatePost();
+
+  // Single source of truth for "is anything in flight right now" — every
+  // interactive control in the form reads this, not isSubmitting or
+  // isUploading individually, so nothing can slip through and get
+  // tampered with mid-upload or mid-create.
+  const isBusy = isSubmitting || isUploading;
 
   const [postType, setPostType] = useState<PostType>("photo");
   const [images, setImages] = useState<string[]>([]);
+  const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [videoFile, setVideoFile] = useState<File | null>(null);
   const [beforeUrl, setBeforeUrl] = useState<string | null>(null);
+  const [beforeFile, setBeforeFile] = useState<File | null>(null);
   const [afterUrl, setAfterUrl] = useState<string | null>(null);
+  const [afterFile, setAfterFile] = useState<File | null>(null);
   const [caption, setCaption] = useState("");
   const [products, setProducts] = useState<ProductTag[]>([]);
   const [confirmingDiscard, setConfirmingDiscard] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const imageInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
@@ -44,26 +59,37 @@ export function CreatePostForm() {
     const files = Array.from(e.target.files ?? []);
     const urls = files.map((file) => URL.createObjectURL(file));
     setImages((prev) => [...prev, ...urls].slice(0, MAX_CAROUSEL_IMAGES));
+    setImageFiles((prev) => [...prev, ...files].slice(0, MAX_CAROUSEL_IMAGES));
     e.target.value = ""; // lets the same file be re-picked if removed and re-added
   }
 
   function removeImage(index: number) {
     setImages((prev) => prev.filter((_, i) => i !== index));
+    setImageFiles((prev) => prev.filter((_, i) => i !== index));
   }
 
   function handleVideoSelected(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (file) setVideoUrl(URL.createObjectURL(file));
+    if (file) {
+      setVideoUrl(URL.createObjectURL(file));
+      setVideoFile(file);
+    }
   }
 
   function handleBeforeSelected(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (file) setBeforeUrl(URL.createObjectURL(file));
+    if (file) {
+      setBeforeUrl(URL.createObjectURL(file));
+      setBeforeFile(file);
+    }
   }
 
   function handleAfterSelected(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (file) setAfterUrl(URL.createObjectURL(file));
+    if (file) {
+      setAfterUrl(URL.createObjectURL(file));
+      setAfterFile(file);
+    }
   }
 
   function buildMedia(): PostMedia | null {
@@ -86,9 +112,10 @@ export function CreatePostForm() {
 
     if (postType === "video") {
       if (!videoUrl) return null;
-      // No poster yet — generating a real thumbnail needs a canvas frame
-      // capture from the video, which is a reasonable next step once this
-      // is wired to a real backend that can do it server-side instead.
+      // The real poster is derived server-side from videoSrc once the
+      // upload lands (see app/api/posts/route.ts) — this local preview
+      // object is only ever used to gate canSubmit below, so an empty
+      // poster here is fine.
       return {
         id: crypto.randomUUID(),
         type: "video",
@@ -127,6 +154,7 @@ export function CreatePostForm() {
   }
 
   function handleCancelPress() {
+    if (isBusy) return;
     if (hasDraftContent()) {
       setConfirmingDiscard(true);
     } else {
@@ -134,52 +162,128 @@ export function CreatePostForm() {
     }
   }
 
-  function handleSubmit() {
-    if (!media || !user) return;
+  async function handleSubmit() {
+    if (!media || !user || isBusy) return;
+    setSubmitError(null);
 
-    const newPost: Post = {
-      id: crypto.randomUUID(),
-      author: {
-        id: user.id,
-        username: user.username,
-        avatarSrc: user.avatarSrc,
-        toneTag: user.toneTag || undefined,
-      },
-      media,
-      products: products.length > 0 ? products : undefined,
-      caption,
-      likeCount: 0,
-      commentCount: 0,
-      createdAt: new Date().toISOString(),
-    };
+    try {
+      const productInputs = products.map((p) => ({ label: p.label }));
+      let input: CreatePostInput;
 
-    addPost(newPost);
-    router.push(PATHS.HOME);
+      if (postType === "photo" && images.length === 1) {
+        const result = await uploadMedia({
+          file: imageFiles[0],
+          context: "post-image",
+        });
+        if (!result.success) throw new Error(result.error);
+        input = {
+          mediaType: "IMAGE",
+          caption,
+          products: productInputs,
+          imageSrc: result.url,
+          imageAlt: caption || "Post image",
+        };
+      } else if (postType === "photo") {
+        const results = await Promise.all(
+          imageFiles.map((file) =>
+            uploadMedia({ file, context: "post-image" }),
+          ),
+        );
+        const failed = results.find((r) => !r.success);
+        if (failed && !failed.success) throw new Error(failed.error);
+        const urls = (results as { success: true; url: string }[]).map(
+          (r) => r.url,
+        );
+        input = {
+          mediaType: "CAROUSEL",
+          caption,
+          products: productInputs,
+          carouselItems: urls.map((src) => ({
+            src,
+            alt: caption || "Post image",
+          })),
+        };
+      } else if (postType === "video") {
+        if (!videoFile) return;
+        const result = await uploadMedia({
+          file: videoFile,
+          context: "post-video",
+        });
+        if (!result.success) throw new Error(result.error);
+        input = {
+          mediaType: "VIDEO",
+          caption,
+          products: productInputs,
+          videoSrc: result.url,
+        };
+      } else {
+        if (!beforeFile || !afterFile) return;
+        const [beforeResult, afterResult] = await Promise.all([
+          uploadMedia({ file: beforeFile, context: "post-image" }),
+          uploadMedia({ file: afterFile, context: "post-image" }),
+        ]);
+        if (!beforeResult.success) throw new Error(beforeResult.error);
+        if (!afterResult.success) throw new Error(afterResult.error);
+        input = {
+          mediaType: "BEFORE_AFTER",
+          caption,
+          products: productInputs,
+          beforeSrc: beforeResult.url,
+          beforeAlt: "Before",
+          afterSrc: afterResult.url,
+          afterAlt: "After",
+        };
+      }
+
+      const result = await createPost(input);
+      if (!result?.success) {
+        throw new Error(
+          !result?.success ? result?.error : "Couldn't share your post.",
+        );
+      }
+
+      router.push(PATHS.HOME);
+    } catch (err) {
+      setSubmitError(
+        err instanceof Error ? err.message : "Couldn't share your post.",
+      );
+    }
   }
 
   return (
     <div className="fixed left-1/2 top-0 bottom-0 z-80 w-full max-w-lg -translate-x-1/2 flex flex-col bg-background">
       <header className="flex items-center justify-between border-b border-foreground/10 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))]">
-        <button type="button" onClick={handleCancelPress} aria-label="Cancel">
+        <button
+          type="button"
+          onClick={handleCancelPress}
+          disabled={isBusy}
+          aria-label="Cancel"
+          className="disabled:opacity-30"
+        >
           <XIcon size={22} className="text-foreground" />
         </button>
         <span className="text-sm font-medium">New post</span>
         <button
           type="button"
           onClick={handleSubmit}
-          disabled={!canSubmit}
+          disabled={!canSubmit || isBusy}
           className="text-sm font-medium text-foreground disabled:opacity-30"
         >
-          Share
+          {isBusy ? "Sharing…" : "Share"}
         </button>
       </header>
+
+      {submitError && (
+        <p className="px-4 pt-2 text-xs text-red-500">{submitError}</p>
+      )}
 
       <div className="flex-1 overflow-y-auto px-4 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
         <div className="mb-5 flex gap-2">
           <button
             type="button"
             onClick={() => setPostType("photo")}
-            className={`flex flex-1 flex-col items-center gap-1 rounded-xl border px-3 py-3 text-xs transition-colors ${
+            disabled={isBusy}
+            className={`flex flex-1 flex-col items-center gap-1 rounded-xl border px-3 py-3 text-xs transition-colors disabled:opacity-30 ${
               postType === "photo"
                 ? "border-foreground bg-foreground/5"
                 : "border-foreground/15 text-foreground/60"
@@ -191,7 +295,8 @@ export function CreatePostForm() {
           <button
             type="button"
             onClick={() => setPostType("video")}
-            className={`flex flex-1 flex-col items-center gap-1 rounded-xl border px-3 py-3 text-xs transition-colors ${
+            disabled={isBusy}
+            className={`flex flex-1 flex-col items-center gap-1 rounded-xl border px-3 py-3 text-xs transition-colors disabled:opacity-30 ${
               postType === "video"
                 ? "border-foreground bg-foreground/5"
                 : "border-foreground/15 text-foreground/60"
@@ -203,7 +308,8 @@ export function CreatePostForm() {
           <button
             type="button"
             onClick={() => setPostType("before_after")}
-            className={`flex flex-1 flex-col items-center gap-1 rounded-xl border px-3 py-3 text-xs transition-colors ${
+            disabled={isBusy}
+            className={`flex flex-1 flex-col items-center gap-1 rounded-xl border px-3 py-3 text-xs transition-colors disabled:opacity-30 ${
               postType === "before_after"
                 ? "border-foreground bg-foreground/5"
                 : "border-foreground/15 text-foreground/60"
@@ -232,8 +338,9 @@ export function CreatePostForm() {
                   <button
                     type="button"
                     onClick={() => removeImage(i)}
+                    disabled={isBusy}
                     aria-label="Remove image"
-                    className="absolute right-1 top-1 flex size-5 items-center justify-center rounded-full bg-black/60 text-white"
+                    className="absolute right-1 top-1 flex size-5 items-center justify-center rounded-full bg-black/60 text-white disabled:opacity-30"
                   >
                     <XIcon size={12} />
                   </button>
@@ -244,7 +351,8 @@ export function CreatePostForm() {
                 <button
                   type="button"
                   onClick={() => imageInputRef.current?.click()}
-                  className="flex size-24 shrink-0 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-foreground/20 text-foreground/40"
+                  disabled={isBusy}
+                  className="flex size-24 shrink-0 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-foreground/20 text-foreground/40 disabled:opacity-30"
                 >
                   <PlusIcon size={18} />
                   <span className="text-[10px]">Add</span>
@@ -257,6 +365,7 @@ export function CreatePostForm() {
               accept="image/*"
               multiple
               onChange={handleImagesSelected}
+              disabled={isBusy}
               className="hidden"
             />
             <p className="mt-1.5 text-xs text-foreground/40">
@@ -280,8 +389,9 @@ export function CreatePostForm() {
                 <button
                   type="button"
                   onClick={() => setVideoUrl(null)}
+                  disabled={isBusy}
                   aria-label="Remove video"
-                  className="absolute right-1 top-1 flex size-6 items-center justify-center rounded-full bg-black/60 text-white"
+                  className="absolute right-1 top-1 flex size-6 items-center justify-center rounded-full bg-black/60 text-white disabled:opacity-30"
                 >
                   <XIcon size={14} />
                 </button>
@@ -290,7 +400,8 @@ export function CreatePostForm() {
               <button
                 type="button"
                 onClick={() => videoInputRef.current?.click()}
-                className="flex aspect-9/16 w-40 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-foreground/20 text-foreground/40"
+                disabled={isBusy}
+                className="flex aspect-9/16 w-40 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-foreground/20 text-foreground/40 disabled:opacity-30"
               >
                 <VideoCameraIcon size={22} />
                 <span className="text-xs">Add video</span>
@@ -301,6 +412,7 @@ export function CreatePostForm() {
               type="file"
               accept="video/*"
               onChange={handleVideoSelected}
+              disabled={isBusy}
               className="hidden"
             />
           </div>
@@ -322,8 +434,9 @@ export function CreatePostForm() {
                   <button
                     type="button"
                     onClick={() => setBeforeUrl(null)}
+                    disabled={isBusy}
                     aria-label="Remove before photo"
-                    className="absolute right-1 top-1 flex size-6 items-center justify-center rounded-full bg-black/60 text-white"
+                    className="absolute right-1 top-1 flex size-6 items-center justify-center rounded-full bg-black/60 text-white disabled:opacity-30"
                   >
                     <XIcon size={14} />
                   </button>
@@ -332,7 +445,8 @@ export function CreatePostForm() {
                 <button
                   type="button"
                   onClick={() => beforeInputRef.current?.click()}
-                  className="flex aspect-square w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-foreground/20 text-foreground/40"
+                  disabled={isBusy}
+                  className="flex aspect-square w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-foreground/20 text-foreground/40 disabled:opacity-30"
                 >
                   <PlusIcon size={18} />
                   <span className="text-xs">Add photo</span>
@@ -343,6 +457,7 @@ export function CreatePostForm() {
                 type="file"
                 accept="image/*"
                 onChange={handleBeforeSelected}
+                disabled={isBusy}
                 className="hidden"
               />
             </div>
@@ -361,8 +476,9 @@ export function CreatePostForm() {
                   <button
                     type="button"
                     onClick={() => setAfterUrl(null)}
+                    disabled={isBusy}
                     aria-label="Remove after photo"
-                    className="absolute right-1 top-1 flex size-6 items-center justify-center rounded-full bg-black/60 text-white"
+                    className="absolute right-1 top-1 flex size-6 items-center justify-center rounded-full bg-black/60 text-white disabled:opacity-30"
                   >
                     <XIcon size={14} />
                   </button>
@@ -371,7 +487,8 @@ export function CreatePostForm() {
                 <button
                   type="button"
                   onClick={() => afterInputRef.current?.click()}
-                  className="flex aspect-square w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-foreground/20 text-foreground/40"
+                  disabled={isBusy}
+                  className="flex aspect-square w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-foreground/20 text-foreground/40 disabled:opacity-30"
                 >
                   <PlusIcon size={18} />
                   <span className="text-xs">Add photo</span>
@@ -382,6 +499,7 @@ export function CreatePostForm() {
                 type="file"
                 accept="image/*"
                 onChange={handleAfterSelected}
+                disabled={isBusy}
                 className="hidden"
               />
             </div>
@@ -393,7 +511,8 @@ export function CreatePostForm() {
           onChange={(e) => setCaption(e.target.value)}
           placeholder="Write a caption…"
           rows={3}
-          className="mb-5 w-full resize-none rounded-lg border border-foreground/15 bg-transparent p-3 text-sm outline-none"
+          disabled={isBusy}
+          className="mb-5 w-full resize-none rounded-lg border border-foreground/15 bg-transparent p-3 text-sm outline-none disabled:opacity-50"
         />
 
         <ProductTagEditor
@@ -401,6 +520,7 @@ export function CreatePostForm() {
           placeholder="e.g. Foundation: Fenty Pro Filt'r 240"
           products={products}
           onChange={setProducts}
+          disabled={isBusy}
         />
       </div>
 

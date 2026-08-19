@@ -8,7 +8,7 @@ import { DotsThreeIcon, HeartIcon } from "@phosphor-icons/react";
 import type { Post } from "@/types/post";
 import type { Comment } from "@/types/comment";
 import { getRelativeTime } from "@/utils/time";
-import { CURRENT_USER_ID } from "@/constants/currentUser";
+import { getPostThumbnail } from "@/utils/postThumbnail";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { Carousel } from "./Carousel";
 import { VideoPost } from "./VideoPost";
@@ -22,7 +22,7 @@ import { PostOptionsSheet } from "./PostOptionsSheet";
 import { SaveToCollectionSheet } from "@/components/saved/SaveToCollectionSheet";
 import { useFollow } from "@/context/FollowProvider";
 import { useSavedPosts } from "@/context/SavedPostsProvider";
-import { usePosts } from "@/context/PostsProvider";
+import { usePosts } from "@/hooks/usePosts";
 import { isMockFollowerOfCurrentUser } from "@/data/mockFollowers";
 import { PATHS } from "@/utils/paths";
 import { useAuthGatedAction } from "@/hooks/useAuthGatedAction";
@@ -87,8 +87,11 @@ export function PostCard({ post }: { post: Post }) {
   }
   const [saveToCollectionOpen, setSaveToCollectionOpen] = useState(false);
   // Compares by id, not username — stays correct even if I rename myself
-  // after this post already exists.
-  const isOwnPost = post.author.id === CURRENT_USER_ID;
+  // after this post already exists. Sourced from the real authenticated
+  // session (useCurrentUser) rather than the old hardcoded constant, so
+  // this is correct for whoever is actually logged in, not just a fixed
+  // dev-time user.
+  const isOwnPost = Boolean(user) && post.author.id === user?.id;
 
   function handleDeletePress() {
     deletePost(post.id);
@@ -302,7 +305,10 @@ export function PostCard({ post }: { post: Post }) {
           <Carousel items={post.media.items} />
         )}
         {post.media.type === "video" && (
-          <VideoPost src={post.media.src} poster={post.media.poster} />
+          <VideoPost
+            src={post.media.src}
+            poster={getPostThumbnail(post) ?? ""}
+          />
         )}
         {post.media.type === "before_after" && (
           <BeforeAfterSlider

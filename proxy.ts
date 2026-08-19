@@ -69,10 +69,15 @@ export async function proxy(req: NextRequest) {
   // Vanity-specific protected API routes. Deliberately short — the
   // shared boilerplate's deposits/withdrawals/admin/support routes
   // belonged to a different app entirely and weren't carried over. Add
-  // to this list as real feature API routes (posts, comments, follow,
-  // saved, notifications) get built.
-  const isProtectedRoute = ["/api/user", "/api/upload"].some((route) =>
-    pathname.startsWith(route),
+  // to this list as real feature API routes (comments, follow, saved,
+  // notifications) get built.
+  //
+  // /api/posts covers both GET (list) and POST (create) — the whole
+  // app is already gated behind RequireAuth on the frontend (see
+  // app/page.tsx), so there's no logged-out "browse the feed" case to
+  // carve out an exception for here.
+  const isProtectedRoute = ["/api/user", "/api/upload", "/api/posts"].some(
+    (route) => pathname.startsWith(route),
   );
 
   if (!isProtectedRoute) {

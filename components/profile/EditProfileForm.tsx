@@ -20,6 +20,11 @@ export function EditProfileForm() {
   const { mutateAsync: uploadAvatar, isPending: avatarUploading } =
     useUploadMedia();
 
+  // Single source of truth every field reads, same convention as
+  // CreatePostForm — nothing should be tamperable while a save is in
+  // flight, whether that's the avatar upload leg or the profile PATCH.
+  const isBusy = saving || avatarUploading;
+
   const [username, setUsername] = useState(user?.username ?? "");
   const [usernameError, setUsernameError] = useState<string | null>(null);
   // Doubles as both the preview URL AND the "is this real yet" signal,
@@ -145,6 +150,7 @@ export function EditProfileForm() {
   }
 
   function handleCancelPress() {
+    if (isBusy) return;
     if (hasUnsavedChanges()) {
       setConfirmingDiscard(true);
     } else {
@@ -153,15 +159,18 @@ export function EditProfileForm() {
   }
 
   const saveDisabled =
-    saving ||
-    avatarUploading ||
-    usernameCheckStatus === "checking" ||
-    !hasUnsavedChanges();
+    isBusy || usernameCheckStatus === "checking" || !hasUnsavedChanges();
 
   return (
     <div className="fixed left-1/2 top-0 bottom-0 z-80 w-full max-w-lg -translate-x-1/2 flex flex-col bg-background">
       <header className="flex items-center justify-between border-b border-foreground/10 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))]">
-        <button type="button" onClick={handleCancelPress} aria-label="Cancel">
+        <button
+          type="button"
+          onClick={handleCancelPress}
+          disabled={isBusy}
+          aria-label="Cancel"
+          className="disabled:opacity-30"
+        >
           <XIcon size={22} className="text-foreground" />
         </button>
         <span className="text-sm font-medium">Edit profile</span>
@@ -171,7 +180,7 @@ export function EditProfileForm() {
           disabled={saveDisabled}
           className="text-sm font-medium text-foreground disabled:opacity-50"
         >
-          {avatarUploading || saving ? "Saving…" : "Save"}
+          {isBusy ? "Saving…" : "Save"}
         </button>
       </header>
 
@@ -180,8 +189,9 @@ export function EditProfileForm() {
           <button
             type="button"
             onClick={() => avatarInputRef.current?.click()}
+            disabled={isBusy}
             aria-label="Change profile photo"
-            className="relative size-24 overflow-hidden rounded-full"
+            className="relative size-24 overflow-hidden rounded-full disabled:opacity-50"
           >
             <Image
               src={avatarSrc}
@@ -194,7 +204,8 @@ export function EditProfileForm() {
           <button
             type="button"
             onClick={() => avatarInputRef.current?.click()}
-            className="text-sm font-medium text-foreground"
+            disabled={isBusy}
+            className="text-sm font-medium text-foreground disabled:opacity-50"
           >
             Change photo
           </button>
@@ -203,6 +214,7 @@ export function EditProfileForm() {
             type="file"
             accept="image/*"
             onChange={handleAvatarSelected}
+            disabled={isBusy}
             className="hidden"
           />
           {avatarError && <p className="text-xs text-red-500">{avatarError}</p>}
@@ -222,7 +234,8 @@ export function EditProfileForm() {
               }}
               autoCapitalize="none"
               autoCorrect="off"
-              className="flex-1 bg-transparent pl-1 text-sm outline-none"
+              disabled={isBusy}
+              className="flex-1 bg-transparent pl-1 text-sm outline-none disabled:opacity-50"
             />
           </div>
           {usernameError && (
@@ -238,7 +251,8 @@ export function EditProfileForm() {
             value={toneTag}
             onChange={(e) => setToneTag(e.target.value)}
             placeholder="e.g. Combination skin"
-            className="w-full rounded-lg border border-foreground/15 bg-transparent px-3 py-2 text-sm outline-none"
+            disabled={isBusy}
+            className="w-full rounded-lg border border-foreground/15 bg-transparent px-3 py-2 text-sm outline-none disabled:opacity-50"
           />
         </div>
 
@@ -249,7 +263,8 @@ export function EditProfileForm() {
             onChange={(e) => setBio(e.target.value)}
             rows={3}
             placeholder="Tell people about yourself…"
-            className="w-full resize-none rounded-lg border border-foreground/15 bg-transparent p-3 text-sm outline-none"
+            disabled={isBusy}
+            className="w-full resize-none rounded-lg border border-foreground/15 bg-transparent p-3 text-sm outline-none disabled:opacity-50"
           />
         </div>
 
@@ -258,6 +273,7 @@ export function EditProfileForm() {
           placeholder="e.g. Cleanser: CeraVe Foaming"
           products={pinnedRoutine}
           onChange={setPinnedRoutine}
+          disabled={isBusy}
         />
 
         {submitError && (

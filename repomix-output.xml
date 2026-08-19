@@ -32,7 +32,7 @@ The content is organized as follows:
 <notes>
 - Some files may have been excluded based on .gitignore rules and Repomix's configuration
 - Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
-- Files matching these patterns are excluded: .agents/**, lib/generated/**, node_modules/**, .next/**, coverage/**, dist/**, build/**, public/**, *.lock, *.log, *.map, **/*.test.*, **/*.spec.*, **/__tests__/**, prisma/migrations/**
+- Files matching these patterns are excluded: .agents/**
 - Files matching patterns in .gitignore are excluded
 - Files matching default ignore patterns are excluded
 - Files are sorted by Git change count (files with more changes are at the bottom)
@@ -53,6 +53,8 @@ app/
       verify/
         [token]/
           route.ts
+    posts/
+      route.ts
     upload/
       signature/
         route.ts
@@ -183,8 +185,10 @@ data/
 hooks/
   useAuthGatedAction.ts
   useCompleteOnboarding.ts
+  useCreatePost.ts
   useCurrentUser.ts
   useDebouncedValue.ts
+  usePosts.ts
   useUpdateProfile.ts
   useUploadMedia.ts
   useUsernameAvailability.ts
@@ -193,11 +197,43 @@ lib/
   authCookies.ts
   cloudinary.ts
   mailer.ts
+  posts.ts
   prisma.ts
 prisma/
+  migrations/
+    20260727202204_init/
+      migration.sql
+    20260728182816_init/
+      migration.sql
+    migration_lock.toml
   schema.prisma
+public/
+  mock/
+    after-2.webp
+    avatar-1.webp
+    avatar-2.webp
+    avatar-3.webp
+    avatar-4.webp
+    avatar-5.webp
+    avatar-you.webp
+    before-2.webp
+    carousel-3a.webp
+    carousel-3b.webp
+    carousel-3c.webp
+    grwm-4-poster.webp
+    grwm-4.mp4
+    post-1.webp
+  posts/
+    1.png
+    1.webp
+  default-avatar.png
+  favicon.png
+  wordmark-logo-dark.png
+  wordmark-logo-light.png
+  wordmark-logo.png
 services/
   authService.ts
+  postService.ts
   uploadService.ts
   userService.ts
 types/
@@ -231,27 +267,484 @@ tsconfig.json
 <files>
 This section contains the contents of the repository's files.
 
-<file path="hooks/useUpdateProfile.ts">
+<file path="app/api/posts/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { MediaType as PrismaMediaType } from "@/lib/generated/prisma/client";
+import {
+  serializePost,
+  isValidCloudinaryUrl,
+  POST_IMAGE_FOLDER,
+  POST_VIDEO_FOLDER,
+  MAX_CAPTION_LENGTH,
+  MAX_PRODUCT_LABEL_LENGTH,
+  MAX_PRODUCTS_PER_POST,
+  MAX_CAROUSEL_ITEMS,
+} from "@/lib/posts";
+
+// Shared between GET and POST — a post returned right after creation
+// needs the exact same shape as one that comes back from the list, so
+// PostsProvider's addPost() can drop either straight into the same array.
+const postInclude = {
+  author: true,
+  carouselItems: true,
+  products: true,
+  _count: { select: { likes: true, comments: true } },
+} as const;
+
+// No pagination yet — fine for a feed this size today. Swap this for a
+// cursor (createdAt + id) once there are enough posts for it to matter;
+// the response shape (an array under `posts`) is set up so that swap
+// doesn't force a change on the frontend beyond how it's called.
+const FEED_TAKE = 50;
+
+export async function GET() {
+  const posts = await prisma.post.findMany({
+    include: postInclude,
+    orderBy: { createdAt: "desc" },
+    take: FEED_TAKE,
+  });
+
+  return NextResponse.json({
+    success: true,
+    posts: posts.map(serializePost),
+  });
+}
+
+type ProductInput = { label: string };
+
+function validateProducts(input: unknown): ProductInput[] | { error: string } {
+  if (input === undefined) return [];
+  if (!Array.isArray(input)) return { error: "Invalid products." };
+  if (input.length > MAX_PRODUCTS_PER_POST) {
+    return { error: `You can tag up to ${MAX_PRODUCTS_PER_POST} products.` };
+  }
+
+  const products: ProductInput[] = [];
+  for (const item of input) {
+    if (
+      !item ||
+      typeof item !== "object" ||
+      typeof (item as { label?: unknown }).label !== "string"
+    ) {
+      return { error: "Invalid products." };
+    }
+    const label = (item as { label: string }).label.trim();
+    if (!label || label.length > MAX_PRODUCT_LABEL_LENGTH) {
+      return { error: "Invalid product label." };
+    }
+    products.push({ label });
+  }
+  return products;
+}
+
+// x-user-id is set by proxy.ts, which already validated the session
+// before this route runs — same trust model as every other protected
+// route (/api/user/me, /api/upload/signature, etc).
+export async function POST(req: NextRequest) {
+  try {
+    const userId = req.headers.get("x-user-id");
+    if (!userId) {
+      return NextResponse.json(
+        { success: false, error: "Unauthorized" },
+        { status: 401 },
+      );
+    }
+
+    const body = await req.json();
+    const { mediaType, caption, products: productsInput } = body;
+
+    if (
+      typeof mediaType !== "string" ||
+      !Object.values(PrismaMediaType).includes(mediaType as PrismaMediaType)
+    ) {
+      return NextResponse.json(
+        { success: false, error: "Invalid post type." },
+        { status: 400 },
+      );
+    }
+
+    if (caption !== undefined && typeof caption !== "string") {
+      return NextResponse.json(
+        { success: false, error: "Invalid caption." },
+        { status: 400 },
+      );
+    }
+    const trimmedCaption = (caption ?? "").trim();
+    if (trimmedCaption.length > MAX_CAPTION_LENGTH) {
+      return NextResponse.json(
+        { success: false, error: "Caption is too long." },
+        { status: 400 },
+      );
+    }
+
+    const products = validateProducts(productsInput);
+    if ("error" in products) {
+      return NextResponse.json(
+        { success: false, error: products.error },
+        { status: 400 },
+      );
+    }
+
+    // Media fields are validated per-type below — only the ones for the
+    // submitted mediaType are checked/used, everything else is ignored
+    // even if present in the body.
+    const media = mediaType as PrismaMediaType;
+
+    const mediaData: {
+      imageSrc?: string;
+      imageAlt?: string;
+      videoSrc?: string;
+      videoPoster?: string;
+      beforeSrc?: string;
+      beforeAlt?: string;
+      afterSrc?: string;
+      afterAlt?: string;
+    } = {};
+    let carouselItemsData: { src: string; alt: string; order: number }[] = [];
+
+    if (media === "IMAGE") {
+      const { imageSrc, imageAlt } = body;
+      if (!isValidCloudinaryUrl(imageSrc, POST_IMAGE_FOLDER)) {
+        return NextResponse.json(
+          { success: false, error: "Invalid post image." },
+          { status: 400 },
+        );
+      }
+      mediaData.imageSrc = imageSrc;
+      mediaData.imageAlt = typeof imageAlt === "string" ? imageAlt : "";
+    } else if (media === "CAROUSEL") {
+      const { carouselItems } = body;
+      if (
+        !Array.isArray(carouselItems) ||
+        carouselItems.length < 2 ||
+        carouselItems.length > MAX_CAROUSEL_ITEMS
+      ) {
+        return NextResponse.json(
+          { success: false, error: "A carousel needs 2–10 photos." },
+          { status: 400 },
+        );
+      }
+      for (const item of carouselItems) {
+        if (!isValidCloudinaryUrl(item?.src, POST_IMAGE_FOLDER)) {
+          return NextResponse.json(
+            { success: false, error: "Invalid carousel image." },
+            { status: 400 },
+          );
+        }
+      }
+      carouselItemsData = carouselItems.map(
+        (item: { src: string; alt?: string }, index: number) => ({
+          src: item.src,
+          alt: typeof item.alt === "string" ? item.alt : "",
+          order: index,
+        }),
+      );
+    } else if (media === "VIDEO") {
+      const { videoSrc, videoPoster } = body;
+      if (!isValidCloudinaryUrl(videoSrc, POST_VIDEO_FOLDER)) {
+        return NextResponse.json(
+          { success: false, error: "Invalid post video." },
+          { status: 400 },
+        );
+      }
+      mediaData.videoSrc = videoSrc;
+      mediaData.videoPoster =
+        typeof videoPoster === "string" ? videoPoster : "";
+    } else if (media === "BEFORE_AFTER") {
+      const { beforeSrc, beforeAlt, afterSrc, afterAlt } = body;
+      if (
+        !isValidCloudinaryUrl(beforeSrc, POST_IMAGE_FOLDER) ||
+        !isValidCloudinaryUrl(afterSrc, POST_IMAGE_FOLDER)
+      ) {
+        return NextResponse.json(
+          { success: false, error: "Invalid before/after photos." },
+          { status: 400 },
+        );
+      }
+      mediaData.beforeSrc = beforeSrc;
+      mediaData.beforeAlt =
+        typeof beforeAlt === "string" ? beforeAlt : "Before";
+      mediaData.afterSrc = afterSrc;
+      mediaData.afterAlt = typeof afterAlt === "string" ? afterAlt : "After";
+    }
+
+    const post = await prisma.post.create({
+      data: {
+        authorId: userId,
+        mediaType: media,
+        caption: trimmedCaption,
+        ...mediaData,
+        ...(carouselItemsData.length > 0
+          ? { carouselItems: { create: carouselItemsData } }
+          : {}),
+        ...(products.length > 0 ? { products: { create: products } } : {}),
+      },
+      include: postInclude,
+    });
+
+    return NextResponse.json({ success: true, post: serializePost(post) });
+  } catch (err) {
+    console.error("create post error", err);
+    return NextResponse.json(
+      { success: false, error: "Server error" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="hooks/useCreatePost.ts">
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { updateProfile, type UpdateProfileInput } from "@/services/userService";
+import { createPost, type CreatePostInput } from "@/services/postService";
 
-// Mirrors useCompleteOnboarding: same endpoint family, same
-// invalidate-currentUser-on-success pattern, so every consumer of
-// useCurrentUser() (BottomNav's avatar, PostCard/CreatePostForm's
-// author snapshot, the profile page itself) picks up the edit
-// immediately instead of acting on stale cached data.
-export function useUpdateProfile() {
+// Mirrors useCompleteOnboarding/useUpdateProfile: same
+// mutate-then-invalidate pattern. Invalidates the "posts" query (rather
+// than doing an optimistic local insert here) so PostsProvider's own
+// query — and therefore every consumer reading from usePosts() — picks
+// up the new post from a real refetch instead of two sources of truth
+// drifting apart.
+export function useCreatePost() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (data: UpdateProfileInput) => updateProfile(data),
+    mutationFn: (data: CreatePostInput) => createPost(data),
     onSuccess: (result) => {
       if (result?.success) {
-        queryClient.invalidateQueries({ queryKey: ["currentUser"] });
+        queryClient.invalidateQueries({ queryKey: ["posts"] });
       }
     },
+  });
+}
+</file>
+
+<file path="hooks/usePosts.ts">
+"use client";
+
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type { Post } from "@/types/post";
+import { listPosts } from "@/services/postService";
+
+const POSTS_QUERY_KEY = ["posts"] as const;
+
+// Replaces context/PostsProvider.tsx. Same query key, same shape — react-
+// query already dedupes/shares the cache across every component that
+// calls this, so HomeFeed and PostCard both calling usePosts() does NOT
+// mean two separate fetches. No provider wrapping needed, which also
+// means this only ever runs on pages that actually render one of those
+// two components — not on every page in the app (that was what caused
+// the /auth refresh-token 401 loop: PostsProvider used to sit in
+// app/layout.tsx, so it fired on /auth too, on every logged-out load).
+export function usePosts() {
+  const queryClient = useQueryClient();
+
+  const query = useQuery({
+    queryKey: POSTS_QUERY_KEY,
+    queryFn: async () => {
+      const result = await listPosts();
+      if (!result?.success) return [];
+      return result.posts;
+    },
+  });
+
+  const posts = query.data ?? [];
+
+  // No-op passthrough — real creation goes through useCreatePost, which
+  // already invalidates POSTS_QUERY_KEY on success and lets that refetch
+  // put the new post into `posts`, instead of trusting a client-built
+  // object as the source of truth.
+  function addPost(_post: Post) {}
+
+  // No DELETE /api/posts endpoint yet — this stays a local, client-side-
+  // only removal from the cached list (not persisted, reverts on the
+  // next real refetch). Matches PostsProvider's old behavior exactly.
+  function deletePost(postId: string) {
+    queryClient.setQueryData<Post[]>(POSTS_QUERY_KEY, (prev) =>
+      (prev ?? []).filter((p) => p.id !== postId),
+    );
+  }
+
+  return { posts, isLoading: query.isLoading, addPost, deletePost };
+}
+</file>
+
+<file path="lib/posts.ts">
+import type { Post, PostMedia } from "@/types/post";
+
+// Mirrors the MediaType enum in prisma/schema.prisma exactly — kept as a
+// plain object (not imported from the generated client) so this file has
+// no dependency on `prisma generate` having been run.
+export const MEDIA_TYPES = [
+  "IMAGE",
+  "CAROUSEL",
+  "VIDEO",
+  "BEFORE_AFTER",
+] as const;
+export type MediaType = (typeof MEDIA_TYPES)[number];
+
+// Shape this file needs from a Prisma Post row — deliberately hand-rolled
+// rather than `Prisma.PostGetPayload<...>` so serializePost has no
+// compile-time dependency on the generated client either.
+export type PostRecord = {
+  id: string;
+  authorId: string;
+  mediaType: string;
+  imageSrc: string | null;
+  imageAlt: string | null;
+  videoSrc: string | null;
+  videoPoster: string | null;
+  beforeSrc: string | null;
+  beforeAlt: string | null;
+  afterSrc: string | null;
+  afterAlt: string | null;
+  caption: string;
+  createdAt: Date;
+  author: {
+    id: string;
+    username: string;
+    avatarSrc: string;
+    toneTag: string;
+  };
+  carouselItems: { id: string; src: string; alt: string; order: number }[];
+  products: { id: string; label: string }[];
+  _count: { likes: number; comments: number };
+};
+
+function buildMedia(post: PostRecord): PostMedia {
+  switch (post.mediaType) {
+    case "IMAGE":
+      return {
+        id: post.id,
+        type: "image",
+        src: post.imageSrc ?? "",
+        alt: post.imageAlt ?? "",
+      };
+    case "CAROUSEL":
+      return {
+        id: post.id,
+        type: "carousel",
+        items: [...post.carouselItems]
+          .sort((a, b) => a.order - b.order)
+          .map((item) => ({ src: item.src, alt: item.alt })),
+      };
+    case "VIDEO":
+      return {
+        id: post.id,
+        type: "video",
+        src: post.videoSrc ?? "",
+        poster: post.videoPoster ?? "",
+      };
+    case "BEFORE_AFTER":
+      return {
+        id: post.id,
+        type: "before_after",
+        before: { src: post.beforeSrc ?? "", alt: post.beforeAlt ?? "" },
+        after: { src: post.afterSrc ?? "", alt: post.afterAlt ?? "" },
+      };
+    default:
+      // Shouldn't happen — mediaType is validated on the way in — but
+      // fall back to something renderable rather than throwing mid-list.
+      return { id: post.id, type: "image", src: "", alt: "" };
+  }
+}
+
+// Shared shape for both GET (list) and POST (create) responses — a post
+// a person just created should look identical to one they'd get back
+// from a subsequent list fetch.
+export function serializePost(post: PostRecord): Post {
+  return {
+    id: post.id,
+    author: {
+      id: post.author.id,
+      username: post.author.username,
+      avatarSrc: post.author.avatarSrc,
+      toneTag: post.author.toneTag || undefined,
+    },
+    media: buildMedia(post),
+    products:
+      post.products.length > 0
+        ? post.products.map((p) => ({ id: p.id, label: p.label }))
+        : undefined,
+    caption: post.caption,
+    likeCount: post._count.likes,
+    commentCount: post._count.comments,
+    createdAt: post.createdAt.toISOString(),
+  };
+}
+
+// Same "did this URL actually come from our own signed upload flow"
+// check that /api/user/me and /api/user/onboarding already apply to
+// avatarSrc — a post's media URLs need the same guard, just pointed at
+// the post-media folders instead of vanity/avatars.
+export function isValidCloudinaryUrl(url: unknown, folder: string): boolean {
+  return (
+    typeof url === "string" &&
+    url.length > 0 &&
+    url.includes(`res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}/`) &&
+    url.includes(`/${folder}/`)
+  );
+}
+
+export const POST_IMAGE_FOLDER = "vanity/posts/images";
+export const POST_VIDEO_FOLDER = "vanity/posts/videos";
+
+export const MAX_CAPTION_LENGTH = 2200; // matches Instagram's own limit
+export const MAX_PRODUCT_LABEL_LENGTH = 120;
+export const MAX_PRODUCTS_PER_POST = 20;
+export const MAX_CAROUSEL_ITEMS = 10;
+</file>
+
+<file path="services/postService.ts">
+import { apiFetch } from "@/utils/apiClient";
+import { API_ROUTES } from "@/utils/apiRoutes";
+import type { Post } from "@/types/post";
+
+export type CreatePostProduct = { label: string };
+
+// Mirrors the per-mediaType fields app/api/posts/route.ts actually reads —
+// every field here must already be a real Cloudinary URL from
+// useUploadMedia, never a blob: URL. The route re-validates ownership of
+// each URL server-side regardless, but the caller should never be
+// passing anything else in the first place.
+export type CreatePostInput = {
+  mediaType: "IMAGE" | "CAROUSEL" | "VIDEO" | "BEFORE_AFTER";
+  caption?: string;
+  products?: CreatePostProduct[];
+  // IMAGE
+  imageSrc?: string;
+  imageAlt?: string;
+  // CAROUSEL
+  carouselItems?: { src: string; alt?: string }[];
+  // VIDEO
+  videoSrc?: string;
+  videoPoster?: string;
+  // BEFORE_AFTER
+  beforeSrc?: string;
+  beforeAlt?: string;
+  afterSrc?: string;
+  afterAlt?: string;
+};
+
+export type ListPostsResult =
+  | { success: true; posts: Post[] }
+  | { success: false; error: string };
+
+export async function listPosts(): Promise<ListPostsResult> {
+  return apiFetch(API_ROUTES.POSTS.LIST, { method: "GET" });
+}
+
+export type CreatePostResult =
+  | { success: true; post: Post }
+  | { success: false; error: string };
+
+export async function createPost(
+  data: CreatePostInput,
+): Promise<CreatePostResult> {
+  return apiFetch(API_ROUTES.POSTS.CREATE, {
+    method: "POST",
+    body: JSON.stringify(data),
   });
 }
 </file>
@@ -2413,17 +2906,6 @@ export function useSavedPosts() {
 }
 </file>
 
-<file path="data/currentUserProfile.ts">
-// Placeholder social-stat content for the logged-in user that still has
-// no real backend source. bio/toneTag/pinnedRoutine used to live here
-// too, but those are now real profile fields served by /api/user/me
-// (see useCurrentUser) — only followerCount remains mocked, since
-// there's no real followers system yet.
-export const CURRENT_USER_PROFILE = {
-  followerCount: 1204,
-};
-</file>
-
 <file path="data/mockNotifications.ts">
 import type { Notification } from "@/types/notification";
 
@@ -2516,55 +2998,6 @@ export function useCompleteOnboarding() {
 }
 </file>
 
-<file path="hooks/useCurrentUser.ts">
-"use client";
-
-import { useQuery } from "@tanstack/react-query";
-import { getCurrentUser } from "@/services/authService";
-import type { ProductTag } from "@/types/post";
-
-export type CurrentUser = {
-  id: string;
-  username: string;
-  email: string;
-  avatarSrc: string;
-  bio: string;
-  toneTag: string;
-  pinnedRoutine: ProductTag[];
-  onboardingCompletedAt: string | null;
-};
-
-// Replaces AuthProvider's isAuthenticated boolean entirely. Session
-// state now comes from actually asking the backend "who am I" via the
-// existing session cookies, not a client-only flag that got set once by
-// VerifyContent and then forgotten. This is what fixes the old gap where
-// refreshing the page dropped you back to "logged out" even with valid
-// cookies still present — useQuery refetches on mount automatically.
-export function useCurrentUser() {
-  const query = useQuery({
-    queryKey: ["currentUser"],
-    queryFn: async () => {
-      const result = await getCurrentUser();
-      if (!result?.success) return null;
-      return result.user as CurrentUser;
-    },
-  });
-
-  const user = query.data ?? null;
-
-  return {
-    user,
-    isAuthenticated: Boolean(user),
-    // Only meaningful once actually authenticated — a logged-out visitor
-    // isn't "needing onboarding," they're just logged out, which
-    // RequireAuth already handles as a separate, earlier check.
-    needsOnboarding: Boolean(user) && user?.onboardingCompletedAt == null,
-    isLoading: query.isLoading,
-    refetch: query.refetch,
-  };
-}
-</file>
-
 <file path="hooks/useDebouncedValue.ts">
 "use client";
 
@@ -2582,6 +3015,31 @@ export function useDebouncedValue<T>(value: T, delayMs: number): T {
   }, [value, delayMs]);
 
   return debounced;
+}
+</file>
+
+<file path="hooks/useUpdateProfile.ts">
+"use client";
+
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { updateProfile, type UpdateProfileInput } from "@/services/userService";
+
+// Mirrors useCompleteOnboarding: same endpoint family, same
+// invalidate-currentUser-on-success pattern, so every consumer of
+// useCurrentUser() (BottomNav's avatar, PostCard/CreatePostForm's
+// author snapshot, the profile page itself) picks up the edit
+// immediately instead of acting on stale cached data.
+export function useUpdateProfile() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: UpdateProfileInput) => updateProfile(data),
+    onSuccess: (result) => {
+      if (result?.success) {
+        queryClient.invalidateQueries({ queryKey: ["currentUser"] });
+      }
+    },
+  });
 }
 </file>
 
@@ -2749,6 +3207,355 @@ export const prisma: PrismaClient =
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
 </file>
 
+<file path="prisma/migrations/20260727202204_init/migration.sql">
+-- CreateEnum
+CREATE TYPE "MediaType" AS ENUM ('IMAGE', 'CAROUSEL', 'VIDEO', 'BEFORE_AFTER');
+
+-- CreateEnum
+CREATE TYPE "NotificationType" AS ENUM ('LIKE', 'COMMENT', 'FOLLOW', 'REPLY');
+
+-- CreateTable
+CREATE TABLE "User" (
+    "id" TEXT NOT NULL,
+    "username" VARCHAR(20) NOT NULL,
+    "email" TEXT NOT NULL,
+    "avatarSrc" TEXT NOT NULL,
+    "bio" TEXT NOT NULL DEFAULT '',
+    "toneTag" TEXT NOT NULL DEFAULT '',
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "User_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Follow" (
+    "id" TEXT NOT NULL,
+    "followerId" TEXT NOT NULL,
+    "followingId" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "Follow_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Post" (
+    "id" TEXT NOT NULL,
+    "authorId" TEXT NOT NULL,
+    "mediaType" "MediaType" NOT NULL,
+    "imageSrc" TEXT,
+    "imageAlt" TEXT,
+    "videoSrc" TEXT,
+    "videoPoster" TEXT,
+    "beforeSrc" TEXT,
+    "beforeAlt" TEXT,
+    "afterSrc" TEXT,
+    "afterAlt" TEXT,
+    "caption" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Post_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "CarouselItem" (
+    "id" TEXT NOT NULL,
+    "postId" TEXT NOT NULL,
+    "src" TEXT NOT NULL,
+    "alt" TEXT NOT NULL,
+    "order" INTEGER NOT NULL,
+
+    CONSTRAINT "CarouselItem_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "ProductTag" (
+    "id" TEXT NOT NULL,
+    "postId" TEXT NOT NULL,
+    "label" TEXT NOT NULL,
+
+    CONSTRAINT "ProductTag_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "RoutineItem" (
+    "id" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "label" TEXT NOT NULL,
+    "order" INTEGER NOT NULL DEFAULT 0,
+
+    CONSTRAINT "RoutineItem_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Like" (
+    "id" TEXT NOT NULL,
+    "postId" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "Like_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Comment" (
+    "id" TEXT NOT NULL,
+    "postId" TEXT NOT NULL,
+    "authorId" TEXT NOT NULL,
+    "text" TEXT NOT NULL,
+    "deleted" BOOLEAN NOT NULL DEFAULT false,
+    "parentId" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "Comment_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "CommentLike" (
+    "id" TEXT NOT NULL,
+    "commentId" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "CommentLike_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "SavedPost" (
+    "id" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "postId" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "SavedPost_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Collection" (
+    "id" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "Collection_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "CollectionPost" (
+    "id" TEXT NOT NULL,
+    "collectionId" TEXT NOT NULL,
+    "savedPostId" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "CollectionPost_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Notification" (
+    "id" TEXT NOT NULL,
+    "recipientId" TEXT NOT NULL,
+    "actorId" TEXT NOT NULL,
+    "type" "NotificationType" NOT NULL,
+    "postId" TEXT,
+    "commentText" TEXT,
+    "read" BOOLEAN NOT NULL DEFAULT false,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "Notification_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "MagicLinkToken" (
+    "id" TEXT NOT NULL,
+    "token" TEXT NOT NULL,
+    "email" TEXT NOT NULL,
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "usedAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "MagicLinkToken_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "User_username_key" ON "User"("username");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
+
+-- CreateIndex
+CREATE INDEX "Follow_followingId_idx" ON "Follow"("followingId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Follow_followerId_followingId_key" ON "Follow"("followerId", "followingId");
+
+-- CreateIndex
+CREATE INDEX "Post_authorId_createdAt_idx" ON "Post"("authorId", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "CarouselItem_postId_order_idx" ON "CarouselItem"("postId", "order");
+
+-- CreateIndex
+CREATE INDEX "ProductTag_postId_idx" ON "ProductTag"("postId");
+
+-- CreateIndex
+CREATE INDEX "RoutineItem_userId_order_idx" ON "RoutineItem"("userId", "order");
+
+-- CreateIndex
+CREATE INDEX "Like_userId_idx" ON "Like"("userId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Like_postId_userId_key" ON "Like"("postId", "userId");
+
+-- CreateIndex
+CREATE INDEX "Comment_postId_idx" ON "Comment"("postId");
+
+-- CreateIndex
+CREATE INDEX "Comment_parentId_idx" ON "Comment"("parentId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "CommentLike_commentId_userId_key" ON "CommentLike"("commentId", "userId");
+
+-- CreateIndex
+CREATE INDEX "SavedPost_userId_idx" ON "SavedPost"("userId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "SavedPost_userId_postId_key" ON "SavedPost"("userId", "postId");
+
+-- CreateIndex
+CREATE INDEX "Collection_userId_idx" ON "Collection"("userId");
+
+-- CreateIndex
+CREATE INDEX "CollectionPost_savedPostId_idx" ON "CollectionPost"("savedPostId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "CollectionPost_collectionId_savedPostId_key" ON "CollectionPost"("collectionId", "savedPostId");
+
+-- CreateIndex
+CREATE INDEX "Notification_recipientId_createdAt_idx" ON "Notification"("recipientId", "createdAt");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "MagicLinkToken_token_key" ON "MagicLinkToken"("token");
+
+-- CreateIndex
+CREATE INDEX "MagicLinkToken_email_idx" ON "MagicLinkToken"("email");
+
+-- AddForeignKey
+ALTER TABLE "Follow" ADD CONSTRAINT "Follow_followerId_fkey" FOREIGN KEY ("followerId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Follow" ADD CONSTRAINT "Follow_followingId_fkey" FOREIGN KEY ("followingId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Post" ADD CONSTRAINT "Post_authorId_fkey" FOREIGN KEY ("authorId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "CarouselItem" ADD CONSTRAINT "CarouselItem_postId_fkey" FOREIGN KEY ("postId") REFERENCES "Post"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ProductTag" ADD CONSTRAINT "ProductTag_postId_fkey" FOREIGN KEY ("postId") REFERENCES "Post"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "RoutineItem" ADD CONSTRAINT "RoutineItem_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Like" ADD CONSTRAINT "Like_postId_fkey" FOREIGN KEY ("postId") REFERENCES "Post"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Like" ADD CONSTRAINT "Like_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Comment" ADD CONSTRAINT "Comment_postId_fkey" FOREIGN KEY ("postId") REFERENCES "Post"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Comment" ADD CONSTRAINT "Comment_authorId_fkey" FOREIGN KEY ("authorId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Comment" ADD CONSTRAINT "Comment_parentId_fkey" FOREIGN KEY ("parentId") REFERENCES "Comment"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "CommentLike" ADD CONSTRAINT "CommentLike_commentId_fkey" FOREIGN KEY ("commentId") REFERENCES "Comment"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "CommentLike" ADD CONSTRAINT "CommentLike_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "SavedPost" ADD CONSTRAINT "SavedPost_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "SavedPost" ADD CONSTRAINT "SavedPost_postId_fkey" FOREIGN KEY ("postId") REFERENCES "Post"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Collection" ADD CONSTRAINT "Collection_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "CollectionPost" ADD CONSTRAINT "CollectionPost_collectionId_fkey" FOREIGN KEY ("collectionId") REFERENCES "Collection"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "CollectionPost" ADD CONSTRAINT "CollectionPost_savedPostId_fkey" FOREIGN KEY ("savedPostId") REFERENCES "SavedPost"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Notification" ADD CONSTRAINT "Notification_recipientId_fkey" FOREIGN KEY ("recipientId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Notification" ADD CONSTRAINT "Notification_actorId_fkey" FOREIGN KEY ("actorId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Notification" ADD CONSTRAINT "Notification_postId_fkey" FOREIGN KEY ("postId") REFERENCES "Post"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+</file>
+
+<file path="prisma/migrations/20260728182816_init/migration.sql">
+/*
+  Warnings:
+
+  - You are about to drop the column `email` on the `MagicLinkToken` table. All the data in the column will be lost.
+  - Added the required column `userId` to the `MagicLinkToken` table without a default value. This is not possible if the table is not empty.
+
+*/
+-- DropIndex
+DROP INDEX "MagicLinkToken_email_idx";
+
+-- AlterTable
+ALTER TABLE "MagicLinkToken" DROP COLUMN "email",
+ADD COLUMN     "userId" TEXT NOT NULL;
+
+-- AlterTable
+ALTER TABLE "User" ADD COLUMN     "onboardingCompletedAt" TIMESTAMP(3);
+
+-- CreateTable
+CREATE TABLE "RefreshToken" (
+    "id" TEXT NOT NULL,
+    "token" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "rotatedAt" TIMESTAMP(3),
+
+    CONSTRAINT "RefreshToken_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "RefreshToken_token_key" ON "RefreshToken"("token");
+
+-- CreateIndex
+CREATE INDEX "RefreshToken_userId_idx" ON "RefreshToken"("userId");
+
+-- CreateIndex
+CREATE INDEX "MagicLinkToken_userId_idx" ON "MagicLinkToken"("userId");
+
+-- AddForeignKey
+ALTER TABLE "RefreshToken" ADD CONSTRAINT "RefreshToken_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "MagicLinkToken" ADD CONSTRAINT "MagicLinkToken_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+</file>
+
+<file path="prisma/migrations/migration_lock.toml">
+# Please do not edit this file manually
+# It should be added in your version-control system (e.g., Git)
+provider = "postgresql"
+</file>
+
 <file path="services/uploadService.ts">
 import { apiFetch } from "@/utils/apiClient";
 import { API_ROUTES } from "@/utils/apiRoutes";
@@ -2825,56 +3632,6 @@ export async function uploadMedia(
   } catch {
     return { success: false, error: "Network error during upload." };
   }
-}
-</file>
-
-<file path="services/userService.ts">
-import { apiFetch } from "@/utils/apiClient";
-import { API_ROUTES } from "@/utils/apiRoutes";
-import type { ProductTag } from "@/types/post";
-
-export type CompleteOnboardingInput = {
-  username: string;
-  // Must be a real uploaded URL from useUploadMedia — never a blob:
-  // URL. Onboarding's own submission logic is responsible for only
-  // ever passing a real one through (or omitting it entirely).
-  avatarSrc?: string;
-  toneTag?: string;
-  bio?: string;
-};
-
-export async function completeOnboarding(data: CompleteOnboardingInput) {
-  // authRequired defaults to true here (unlike getCurrentUser, which
-  // explicitly opts out) — this genuinely needs a valid session, and if
-  // the access token happens to be stale, apiFetch's built-in
-  // refresh-and-retry logic is exactly what should handle that.
-  return apiFetch(API_ROUTES.USER.ONBOARDING, {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
-}
-
-export async function checkUsernameAvailability(username: string) {
-  return apiFetch(API_ROUTES.USER.CHECK_USERNAME(username), {
-    method: "GET",
-  });
-}
-
-export type UpdateProfileInput = {
-  username?: string;
-  // Must be a real uploaded URL from useUploadMedia — never a blob:
-  // URL. Same caveat as CompleteOnboardingInput's avatarSrc.
-  avatarSrc?: string;
-  toneTag?: string;
-  bio?: string;
-  pinnedRoutine?: ProductTag[];
-};
-
-export async function updateProfile(data: UpdateProfileInput) {
-  return apiFetch(API_ROUTES.USER.ME, {
-    method: "PATCH",
-    body: JSON.stringify(data),
-  });
 }
 </file>
 
@@ -3509,219 +4266,6 @@ export async function POST(req: NextRequest) {
 }
 </file>
 
-<file path="app/api/user/me/route.ts">
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { USERNAME_PATTERN, USERNAME_FORMAT_ERROR } from "@/constants/username";
-
-// x-user-id is set by proxy.ts, which already validated the access/
-// refresh token cookies before this route ever runs — this handler
-// trusts that header rather than re-verifying anything itself.
-export async function GET(req: NextRequest) {
-  const userId = req.headers.get("x-user-id");
-
-  if (!userId) {
-    return NextResponse.json(
-      { success: false, error: "Unauthorized" },
-      { status: 401 },
-    );
-  }
-
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    include: { routineItems: { orderBy: { order: "asc" } } },
-  });
-
-  if (!user) {
-    return NextResponse.json(
-      { success: false, error: "Unauthorized" },
-      { status: 401 },
-    );
-  }
-
-  return NextResponse.json({
-    success: true,
-    user: {
-      id: user.id,
-      username: user.username,
-      email: user.email,
-      avatarSrc: user.avatarSrc,
-      bio: user.bio,
-      toneTag: user.toneTag,
-      // Shaped as ProductTag[] (id + label) — same shape the rest of the
-      // frontend already expects for pinned routine / post product tags.
-      pinnedRoutine: user.routineItems.map((item) => ({
-        id: item.id,
-        label: item.label,
-      })),
-      onboardingCompletedAt: user.onboardingCompletedAt,
-    },
-  });
-}
-
-// Own-profile edits (Edit Profile screen). Same trust model as GET and
-// as /api/user/onboarding — proxy.ts has already validated the session,
-// this route just trusts x-user-id. Every field is optional here (unlike
-// onboarding's POST, which requires username): a PATCH only touches
-// whatever the client actually sent.
-export async function PATCH(req: NextRequest) {
-  try {
-    const userId = req.headers.get("x-user-id");
-    if (!userId) {
-      return NextResponse.json(
-        { success: false, error: "Unauthorized" },
-        { status: 401 },
-      );
-    }
-
-    const { username, avatarSrc, toneTag, bio, pinnedRoutine } =
-      await req.json();
-
-    const data: {
-      username?: string;
-      avatarSrc?: string;
-      toneTag?: string;
-      bio?: string;
-    } = {};
-
-    if (username !== undefined) {
-      if (
-        typeof username !== "string" ||
-        !USERNAME_PATTERN.test(username.trim().toLowerCase())
-      ) {
-        return NextResponse.json(
-          { success: false, error: USERNAME_FORMAT_ERROR },
-          { status: 400 },
-        );
-      }
-
-      const normalizedUsername = username.trim().toLowerCase();
-
-      const existing = await prisma.user.findUnique({
-        where: { username: normalizedUsername },
-      });
-
-      if (existing && existing.id !== userId) {
-        return NextResponse.json(
-          { success: false, error: "That username is already taken." },
-          { status: 409 },
-        );
-      }
-
-      data.username = normalizedUsername;
-    }
-
-    // Same guard as onboarding: only ever a URL that actually came from
-    // our own Cloudinary avatars folder, via /api/upload/signature —
-    // never an arbitrary external URL submitted directly.
-    if (avatarSrc !== undefined) {
-      const isValidAvatarSrc =
-        typeof avatarSrc === "string" &&
-        avatarSrc.includes(
-          `res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}/`,
-        ) &&
-        avatarSrc.includes("/vanity/avatars/");
-
-      if (!isValidAvatarSrc) {
-        return NextResponse.json(
-          { success: false, error: "Invalid avatar image." },
-          { status: 400 },
-        );
-      }
-
-      data.avatarSrc = avatarSrc;
-    }
-
-    if (toneTag !== undefined) {
-      if (typeof toneTag !== "string") {
-        return NextResponse.json(
-          { success: false, error: "Invalid tone tag." },
-          { status: 400 },
-        );
-      }
-      data.toneTag = toneTag;
-    }
-
-    if (bio !== undefined) {
-      if (typeof bio !== "string") {
-        return NextResponse.json(
-          { success: false, error: "Invalid bio." },
-          { status: 400 },
-        );
-      }
-      data.bio = bio;
-    }
-
-    // pinnedRoutine, if sent, is validated separately since it isn't a
-    // plain scalar column — it's the RoutineItem rows, replaced wholesale
-    // rather than diffed, same as how onboarding treats the rest of the
-    // profile as "just overwrite it with what was submitted."
-    let routineItemsInput: { label: string }[] | null = null;
-    if (pinnedRoutine !== undefined) {
-      if (
-        !Array.isArray(pinnedRoutine) ||
-        !pinnedRoutine.every(
-          (item) =>
-            item && typeof item === "object" && typeof item.label === "string",
-        )
-      ) {
-        return NextResponse.json(
-          { success: false, error: "Invalid pinned routine." },
-          { status: 400 },
-        );
-      }
-      routineItemsInput = pinnedRoutine.map((item: { label: string }) => ({
-        label: item.label,
-      }));
-    }
-
-    const [user] = await prisma.$transaction([
-      prisma.user.update({ where: { id: userId }, data }),
-      ...(routineItemsInput
-        ? [
-            prisma.routineItem.deleteMany({ where: { userId } }),
-            prisma.routineItem.createMany({
-              data: routineItemsInput.map((item, index) => ({
-                userId,
-                label: item.label,
-                order: index,
-              })),
-            }),
-          ]
-        : []),
-    ]);
-
-    const routineItems = await prisma.routineItem.findMany({
-      where: { userId },
-      orderBy: { order: "asc" },
-    });
-
-    return NextResponse.json({
-      success: true,
-      user: {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        avatarSrc: user.avatarSrc,
-        bio: user.bio,
-        toneTag: user.toneTag,
-        pinnedRoutine: routineItems.map((item) => ({
-          id: item.id,
-          label: item.label,
-        })),
-        onboardingCompletedAt: user.onboardingCompletedAt,
-      },
-    });
-  } catch (err) {
-    console.error("update profile error", err);
-    return NextResponse.json(
-      { success: false, error: "Server error" },
-      { status: 500 },
-    );
-  }
-}
-</file>
-
 <file path="app/auth/verify/[token]/page.tsx">
 import { VerifyContent } from "@/components/auth/VerifyContent";
 
@@ -4270,49 +4814,67 @@ export const REFRESH_TOKEN_EXPIRES_DAYS = 30;
 export const ACCESS_TOKEN_EXPIRES_SECONDS = 15 * 60;
 </file>
 
-<file path="constants/currentUser.ts">
-// Stable identity key for the logged-in user — never changes, even if
-// they edit their username later. Every "is this mine" check (isOwnPost,
-// self-mention, self-follow exclusion, etc.) compares against THIS, never
-// against username — username is a mutable display field (see
-// useCurrentUser), so comparing by it would silently break the moment
-// someone renamed themselves. This mirrors how the real schema keys every
-// relation by id, never by username.
-export const CURRENT_USER_ID = "current-user";
-</file>
-
 <file path="context/PostsProvider.tsx">
 "use client";
 
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, useContext, type ReactNode } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Post } from "@/types/post";
-import { mockPosts as initialPosts } from "@/data/mockPosts";
+import { listPosts } from "@/services/postService";
 
 type PostsContextValue = {
   posts: Post[];
+  isLoading: boolean;
+  // Kept for existing consumers (CreatePostForm, PostCard) so neither
+  // needs an unnecessary rewrite. addPost is a no-op passthrough now —
+  // real creation goes through useCreatePost, which invalidates the
+  // "posts" query itself and lets this refetch from the server instead
+  // of trusting a client-built object as if it were the source of truth.
   addPost: (post: Post) => void;
+  // No DELETE /api/posts endpoint exists yet — this stays a local,
+  // client-side-only removal from the cached list (not persisted, and
+  // reverts on the next real refetch). Good enough for the current
+  // PostOptionsSheet flow without inventing a new backend endpoint that
+  // wasn't part of this task.
   deletePost: (postId: string) => void;
 };
 
 const PostsContext = createContext<PostsContextValue | null>(null);
 
-// In-memory only — resets on refresh. This is the seam to swap for a real
-// fetch/mutation once there's an actual API; HomeFeed and the create-post
-// flow both go through this instead of touching mockPosts directly, so
-// neither has to change when that swap happens.
-export function PostsProvider({ children }: { children: ReactNode }) {
-  const [posts, setPosts] = useState<Post[]>(initialPosts);
+const POSTS_QUERY_KEY = ["posts"] as const;
 
-  function addPost(post: Post) {
-    setPosts((prev) => [post, ...prev]);
+export function PostsProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
+
+  const query = useQuery({
+    queryKey: POSTS_QUERY_KEY,
+    queryFn: async () => {
+      const result = await listPosts();
+      if (!result?.success) return [];
+      return result.posts;
+    },
+  });
+
+  const posts = query.data ?? [];
+
+  function addPost() {
+    // Real creation now goes through useCreatePost (services/postService
+    // -> app/api/posts), which already invalidates ["posts"] on success —
+    // that refetch is what actually gets the new post into `posts`. This
+    // is left as a no-op purely so the context shape doesn't change out
+    // from under existing callers.
   }
 
   function deletePost(postId: string) {
-    setPosts((prev) => prev.filter((p) => p.id !== postId));
+    queryClient.setQueryData<Post[]>(POSTS_QUERY_KEY, (prev) =>
+      (prev ?? []).filter((p) => p.id !== postId),
+    );
   }
 
   return (
-    <PostsContext.Provider value={{ posts, addPost, deletePost }}>
+    <PostsContext.Provider
+      value={{ posts, isLoading: query.isLoading, addPost, deletePost }}
+    >
       {children}
     </PostsContext.Provider>
   );
@@ -4325,6 +4887,17 @@ export function usePosts() {
   }
   return ctx;
 }
+</file>
+
+<file path="data/currentUserProfile.ts">
+// Placeholder social-stat content for the logged-in user that still has
+// no real backend source. bio/toneTag/pinnedRoutine used to live here
+// too, but those are now real profile fields served by /api/user/me
+// (see useCurrentUser) — only followerCount remains mocked, since
+// there's no real followers system yet.
+export const CURRENT_USER_PROFILE = {
+  followerCount: 1204,
+};
 </file>
 
 <file path="data/mockPosts.ts">
@@ -4641,6 +5214,55 @@ export function useAuthGatedAction() {
     gateMessage,
     closeGate: () => setGateOpen(false),
     guard,
+  };
+}
+</file>
+
+<file path="hooks/useCurrentUser.ts">
+"use client";
+
+import { useQuery } from "@tanstack/react-query";
+import { getCurrentUser } from "@/services/authService";
+import type { ProductTag } from "@/types/post";
+
+export type CurrentUser = {
+  id: string;
+  username: string;
+  email: string;
+  avatarSrc: string;
+  bio: string;
+  toneTag: string;
+  pinnedRoutine: ProductTag[];
+  onboardingCompletedAt: string | null;
+};
+
+// Replaces AuthProvider's isAuthenticated boolean entirely. Session
+// state now comes from actually asking the backend "who am I" via the
+// existing session cookies, not a client-only flag that got set once by
+// VerifyContent and then forgotten. This is what fixes the old gap where
+// refreshing the page dropped you back to "logged out" even with valid
+// cookies still present — useQuery refetches on mount automatically.
+export function useCurrentUser() {
+  const query = useQuery({
+    queryKey: ["currentUser"],
+    queryFn: async () => {
+      const result = await getCurrentUser();
+      if (!result?.success) return null;
+      return result.user as CurrentUser;
+    },
+  });
+
+  const user = query.data ?? null;
+
+  return {
+    user,
+    isAuthenticated: Boolean(user),
+    // Only meaningful once actually authenticated — a logged-out visitor
+    // isn't "needing onboarding," they're just logged out, which
+    // RequireAuth already handles as a separate, earlier check.
+    needsOnboarding: Boolean(user) && user?.onboardingCompletedAt == null,
+    isLoading: query.isLoading,
+    refetch: query.refetch,
   };
 }
 </file>
@@ -5267,12 +5889,62 @@ export async function logOutUser() {
 }
 </file>
 
+<file path="services/userService.ts">
+import { apiFetch } from "@/utils/apiClient";
+import { API_ROUTES } from "@/utils/apiRoutes";
+import type { ProductTag } from "@/types/post";
+
+export type CompleteOnboardingInput = {
+  username: string;
+  // Must be a real uploaded URL from useUploadMedia — never a blob:
+  // URL. Onboarding's own submission logic is responsible for only
+  // ever passing a real one through (or omitting it entirely).
+  avatarSrc?: string;
+  toneTag?: string;
+  bio?: string;
+};
+
+export async function completeOnboarding(data: CompleteOnboardingInput) {
+  // authRequired defaults to true here (unlike getCurrentUser, which
+  // explicitly opts out) — this genuinely needs a valid session, and if
+  // the access token happens to be stale, apiFetch's built-in
+  // refresh-and-retry logic is exactly what should handle that.
+  return apiFetch(API_ROUTES.USER.ONBOARDING, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function checkUsernameAvailability(username: string) {
+  return apiFetch(API_ROUTES.USER.CHECK_USERNAME(username), {
+    method: "GET",
+  });
+}
+
+export type UpdateProfileInput = {
+  username?: string;
+  // Must be a real uploaded URL from useUploadMedia — never a blob:
+  // URL. Same caveat as CompleteOnboardingInput's avatarSrc.
+  avatarSrc?: string;
+  toneTag?: string;
+  bio?: string;
+  pinnedRoutine?: ProductTag[];
+};
+
+export async function updateProfile(data: UpdateProfileInput) {
+  return apiFetch(API_ROUTES.USER.ME, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+</file>
+
 <file path="utils/apiRoutes.ts">
 // Everything from the shared boilerplate's API_ROUTES that isn't shown
 // here (ADMIN, DEPOSITS, WITHDRAWALS, TRANSACTIONS, SUPPORT, PRICES)
 // belonged to a different app template — not part of Vanity, and not
 // carried over. Add new sections here as real Vanity feature endpoints
-// (posts, comments, follow, saved, notifications) get built.
+// (comments, follow, saved, notifications) get built.
 export const API_ROUTES = {
   AUTH: {
     // Unified signup + login + resend — same call every time, since a
@@ -5292,6 +5964,11 @@ export const API_ROUTES = {
 
   UPLOAD: {
     SIGNATURE: "/api/upload/signature",
+  },
+
+  POSTS: {
+    LIST: "/api/posts",
+    CREATE: "/api/posts",
   },
 };
 </file>
@@ -5377,6 +6054,219 @@ const nextConfig: NextConfig = {
 };
 
 export default nextConfig;
+</file>
+
+<file path="app/api/user/me/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { USERNAME_PATTERN, USERNAME_FORMAT_ERROR } from "@/constants/username";
+
+// x-user-id is set by proxy.ts, which already validated the access/
+// refresh token cookies before this route ever runs — this handler
+// trusts that header rather than re-verifying anything itself.
+export async function GET(req: NextRequest) {
+  const userId = req.headers.get("x-user-id");
+
+  if (!userId) {
+    return NextResponse.json(
+      { success: false, error: "Unauthorized" },
+      { status: 401 },
+    );
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: { routineItems: { orderBy: { order: "asc" } } },
+  });
+
+  if (!user) {
+    return NextResponse.json(
+      { success: false, error: "Unauthorized" },
+      { status: 401 },
+    );
+  }
+
+  return NextResponse.json({
+    success: true,
+    user: {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      avatarSrc: user.avatarSrc,
+      bio: user.bio,
+      toneTag: user.toneTag,
+      // Shaped as ProductTag[] (id + label) — same shape the rest of the
+      // frontend already expects for pinned routine / post product tags.
+      pinnedRoutine: user.routineItems.map((item) => ({
+        id: item.id,
+        label: item.label,
+      })),
+      onboardingCompletedAt: user.onboardingCompletedAt,
+    },
+  });
+}
+
+// Own-profile edits (Edit Profile screen). Same trust model as GET and
+// as /api/user/onboarding — proxy.ts has already validated the session,
+// this route just trusts x-user-id. Every field is optional here (unlike
+// onboarding's POST, which requires username): a PATCH only touches
+// whatever the client actually sent.
+export async function PATCH(req: NextRequest) {
+  try {
+    const userId = req.headers.get("x-user-id");
+    if (!userId) {
+      return NextResponse.json(
+        { success: false, error: "Unauthorized" },
+        { status: 401 },
+      );
+    }
+
+    const { username, avatarSrc, toneTag, bio, pinnedRoutine } =
+      await req.json();
+
+    const data: {
+      username?: string;
+      avatarSrc?: string;
+      toneTag?: string;
+      bio?: string;
+    } = {};
+
+    if (username !== undefined) {
+      if (
+        typeof username !== "string" ||
+        !USERNAME_PATTERN.test(username.trim().toLowerCase())
+      ) {
+        return NextResponse.json(
+          { success: false, error: USERNAME_FORMAT_ERROR },
+          { status: 400 },
+        );
+      }
+
+      const normalizedUsername = username.trim().toLowerCase();
+
+      const existing = await prisma.user.findUnique({
+        where: { username: normalizedUsername },
+      });
+
+      if (existing && existing.id !== userId) {
+        return NextResponse.json(
+          { success: false, error: "That username is already taken." },
+          { status: 409 },
+        );
+      }
+
+      data.username = normalizedUsername;
+    }
+
+    // Same guard as onboarding: only ever a URL that actually came from
+    // our own Cloudinary avatars folder, via /api/upload/signature —
+    // never an arbitrary external URL submitted directly.
+    if (avatarSrc !== undefined) {
+      const isValidAvatarSrc =
+        typeof avatarSrc === "string" &&
+        avatarSrc.includes(
+          `res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}/`,
+        ) &&
+        avatarSrc.includes("/vanity/avatars/");
+
+      if (!isValidAvatarSrc) {
+        return NextResponse.json(
+          { success: false, error: "Invalid avatar image." },
+          { status: 400 },
+        );
+      }
+
+      data.avatarSrc = avatarSrc;
+    }
+
+    if (toneTag !== undefined) {
+      if (typeof toneTag !== "string") {
+        return NextResponse.json(
+          { success: false, error: "Invalid tone tag." },
+          { status: 400 },
+        );
+      }
+      data.toneTag = toneTag;
+    }
+
+    if (bio !== undefined) {
+      if (typeof bio !== "string") {
+        return NextResponse.json(
+          { success: false, error: "Invalid bio." },
+          { status: 400 },
+        );
+      }
+      data.bio = bio;
+    }
+
+    // pinnedRoutine, if sent, is validated separately since it isn't a
+    // plain scalar column — it's the RoutineItem rows, replaced wholesale
+    // rather than diffed, same as how onboarding treats the rest of the
+    // profile as "just overwrite it with what was submitted."
+    let routineItemsInput: { label: string }[] | null = null;
+    if (pinnedRoutine !== undefined) {
+      if (
+        !Array.isArray(pinnedRoutine) ||
+        !pinnedRoutine.every(
+          (item) =>
+            item && typeof item === "object" && typeof item.label === "string",
+        )
+      ) {
+        return NextResponse.json(
+          { success: false, error: "Invalid pinned routine." },
+          { status: 400 },
+        );
+      }
+      routineItemsInput = pinnedRoutine.map((item: { label: string }) => ({
+        label: item.label,
+      }));
+    }
+
+    const [user] = await prisma.$transaction([
+      prisma.user.update({ where: { id: userId }, data }),
+      ...(routineItemsInput
+        ? [
+            prisma.routineItem.deleteMany({ where: { userId } }),
+            prisma.routineItem.createMany({
+              data: routineItemsInput.map((item, index) => ({
+                userId,
+                label: item.label,
+                order: index,
+              })),
+            }),
+          ]
+        : []),
+    ]);
+
+    const routineItems = await prisma.routineItem.findMany({
+      where: { userId },
+      orderBy: { order: "asc" },
+    });
+
+    return NextResponse.json({
+      success: true,
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        avatarSrc: user.avatarSrc,
+        bio: user.bio,
+        toneTag: user.toneTag,
+        pinnedRoutine: routineItems.map((item) => ({
+          id: item.id,
+          label: item.label,
+        })),
+        onboardingCompletedAt: user.onboardingCompletedAt,
+      },
+    });
+  } catch (err) {
+    console.error("update profile error", err);
+    return NextResponse.json(
+      { success: false, error: "Server error" },
+      { status: 500 },
+    );
+  }
+}
 </file>
 
 <file path="app/create/page.tsx">
@@ -6205,247 +7095,6 @@ export function PostOptionsSheet({
 }
 </file>
 
-<file path="components/onboarding/OnboardingFlow.tsx">
-"use client";
-
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { useCompleteOnboarding } from "@/hooks/useCompleteOnboarding";
-import { useUsernameAvailability } from "@/hooks/useUsernameAvailability";
-import { useUploadMedia } from "@/hooks/useUploadMedia";
-import { PATHS } from "@/utils/paths";
-import { validateUsername } from "@/utils/username";
-import { UsernameStep } from "./UsernameStep";
-import { PhotoStep } from "./PhotoStep";
-import { AboutStep } from "./AboutStep";
-
-const TOTAL_STEPS = 3;
-
-export function OnboardingFlow() {
-  const router = useRouter();
-  const { user, needsOnboarding, isLoading: userLoading } = useCurrentUser();
-  const { mutateAsync: submitOnboarding, isPending: submitting } =
-    useCompleteOnboarding();
-  const { mutateAsync: uploadAvatar, isPending: avatarUploading } =
-    useUploadMedia();
-
-  const [step, setStep] = useState<1 | 2 | 3>(1);
-  const [username, setUsername] = useState(""); // never pre-fill the random placeholder
-  const [usernameError, setUsernameError] = useState<string | null>(null);
-  // Doubles as both the preview URL AND the "is this real yet" signal —
-  // a blob: URL means a local pick that hasn't been uploaded yet;
-  // anything else is either the original real placeholder or (after
-  // final submit) a real Cloudinary URL, both safe to submit as-is.
-  const [avatarSrc, setAvatarSrc] = useState("");
-  // The raw File from the most recent pick, held onto until the final
-  // step — we upload once, right before submitting, instead of once per
-  // pick. Picking a different photo just swaps this out; nothing hits
-  // the network until the user actually finishes.
-  const [avatarFile, setAvatarFile] = useState<File | null>(null);
-  const [avatarError, setAvatarError] = useState<string | null>(null);
-  const [toneTag, setToneTag] = useState("");
-  const [bio, setBio] = useState("");
-  const [submitError, setSubmitError] = useState<string | null>(null);
-
-  const { status: usernameCheckStatus } = useUsernameAvailability(username);
-
-  // Seed the preview from the real placeholder avatar created at
-  // account-creation time, once it's actually loaded.
-  useEffect(() => {
-    if (user?.avatarSrc) setAvatarSrc(user.avatarSrc);
-  }, [user?.avatarSrc]);
-
-  // Already finished onboarding, somehow back on this page (typed the
-  // URL, browser back) — nothing left to redo here outside the normal
-  // Edit Profile flow, so bounce to Home instead.
-  useEffect(() => {
-    if (!userLoading && !needsOnboarding) {
-      router.replace(PATHS.HOME);
-    }
-  }, [userLoading, needsOnboarding, router]);
-
-  function handlePhotoSelected(file: File) {
-    setAvatarError(null);
-    // Swapping to a new pick — drop the previous local preview URL so
-    // repeated swaps don't leak blob: URLs, then swap in the new one.
-    // Purely local, no network call, no matter how many times the user
-    // changes their mind before finishing.
-    if (avatarSrc.startsWith("blob:")) URL.revokeObjectURL(avatarSrc);
-    setAvatarSrc(URL.createObjectURL(file));
-    setAvatarFile(file);
-  }
-
-  async function submitAndFinish() {
-    setSubmitError(null);
-
-    // Only the LAST photo the user picked ever actually gets uploaded,
-    // and only once, right here — not once per pick back in step 2.
-    let realAvatarSrc = avatarSrc.startsWith("blob:") ? undefined : avatarSrc;
-
-    if (avatarFile) {
-      const result = await uploadAvatar({
-        file: avatarFile,
-        context: "avatar",
-      });
-
-      if (result.success) {
-        realAvatarSrc = result.url;
-      } else {
-        // Bounce back to the photo step so the error sits next to the
-        // thing it's about; the picked file is still in state, so
-        // hitting Continue again just retries the same upload.
-        setAvatarError(result.error);
-        setStep(2);
-        return;
-      }
-    }
-
-    const result = await submitOnboarding({
-      username,
-      avatarSrc: realAvatarSrc,
-      toneTag,
-      bio,
-    });
-
-    if (!result?.success) {
-      if (result?.error?.toLowerCase().includes("taken")) {
-        setUsernameError(result.error);
-        setStep(1);
-      } else {
-        setSubmitError(
-          result?.error || "Something went wrong. Please try again.",
-        );
-      }
-      return;
-    }
-
-    router.replace(PATHS.HOME);
-  }
-
-  function handleSkip() {
-    // "Skip" only skips the OPTIONAL steps (photo, bio/tone tag) — the
-    // username chosen in step 1 still gets saved for real. Onboarding is
-    // mandatory (see RequireAuth's redirect), so bailing without ever
-    // calling the endpoint would just send the person right back here on
-    // their very next page load.
-    submitAndFinish();
-  }
-
-  function handleContinue() {
-    if (step === 1) {
-      const error = validateUsername(username);
-      if (error) {
-        setUsernameError(error);
-        return;
-      }
-      if (usernameCheckStatus === "taken") {
-        setUsernameError("That username is already taken.");
-        return;
-      }
-      if (usernameCheckStatus === "checking") {
-        return;
-      }
-      setUsernameError(null);
-      setStep(2);
-      return;
-    }
-
-    if (step === 2) {
-      setStep(3);
-      return;
-    }
-
-    submitAndFinish();
-  }
-
-  const continueDisabled =
-    submitting ||
-    avatarUploading ||
-    (step === 1 && usernameCheckStatus === "checking");
-
-  return (
-    <div className="fixed left-1/2 top-0 bottom-0 z-80 flex w-full max-w-lg -translate-x-1/2 flex-col bg-background px-6">
-      <div className="flex items-center justify-between pt-[calc(1.5rem+env(safe-area-inset-top))]">
-        <div className="flex gap-1.5">
-          {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
-            <span
-              key={i}
-              className={`h-1 w-6 rounded-full ${
-                i < step ? "bg-foreground" : "bg-foreground/15"
-              }`}
-            />
-          ))}
-        </div>
-        {/* Skip only appears once past the username step — that one's
-            required, photo/bio genuinely aren't. */}
-        {step > 1 && (
-          <button
-            type="button"
-            onClick={handleSkip}
-            disabled={submitting || avatarUploading}
-            className="text-sm font-medium text-foreground/50 disabled:opacity-50"
-          >
-            Skip
-          </button>
-        )}
-      </div>
-
-      <div className="flex flex-1 items-center justify-center">
-        <div className="w-full max-w-xs">
-          {step === 1 && (
-            <UsernameStep
-              username={username}
-              onUsernameChange={(value) => {
-                setUsername(value);
-                setUsernameError(null);
-              }}
-              error={usernameError}
-              checkStatus={usernameCheckStatus}
-            />
-          )}
-          {step === 2 && (
-            <PhotoStep
-              avatarSrc={avatarSrc}
-              onFileSelected={handlePhotoSelected}
-              uploading={avatarUploading}
-              error={avatarError}
-            />
-          )}
-          {step === 3 && (
-            <AboutStep
-              toneTag={toneTag}
-              onToneTagChange={setToneTag}
-              bio={bio}
-              onBioChange={setBio}
-            />
-          )}
-        </div>
-      </div>
-
-      {submitError && (
-        <p className="mb-2 text-center text-xs text-red-500">{submitError}</p>
-      )}
-
-      <button
-        type="button"
-        onClick={handleContinue}
-        disabled={continueDisabled}
-        className="mb-[calc(1.5rem+env(safe-area-inset-bottom))] w-full rounded-lg bg-foreground py-2.5 text-sm font-medium text-background disabled:opacity-60"
-      >
-        {avatarUploading
-          ? "Uploading…"
-          : submitting
-            ? "Saving…"
-            : step === TOTAL_STEPS
-              ? "Finish"
-              : "Continue"}
-      </button>
-    </div>
-  );
-}
-</file>
-
 <file path="components/profile/PostGrid.tsx">
 import Image from "next/image";
 import Link from "next/link";
@@ -6551,6 +7200,17 @@ export function PostGrid({
     </div>
   );
 }
+</file>
+
+<file path="constants/currentUser.ts">
+// Stable identity key for the logged-in user — never changes, even if
+// they edit their username later. Every "is this mine" check (isOwnPost,
+// self-mention, self-follow exclusion, etc.) compares against THIS, never
+// against username — username is a mutable display field (see
+// useCurrentUser), so comparing by it would silently break the moment
+// someone renamed themselves. This mirrors how the real schema keys every
+// relation by id, never by username.
+export const CURRENT_USER_ID = "current-user";
 </file>
 
 <file path="context/FollowProvider.tsx">
@@ -6824,10 +7484,15 @@ export async function proxy(req: NextRequest) {
   // Vanity-specific protected API routes. Deliberately short — the
   // shared boilerplate's deposits/withdrawals/admin/support routes
   // belonged to a different app entirely and weren't carried over. Add
-  // to this list as real feature API routes (posts, comments, follow,
-  // saved, notifications) get built.
-  const isProtectedRoute = ["/api/user", "/api/upload"].some((route) =>
-    pathname.startsWith(route),
+  // to this list as real feature API routes (comments, follow, saved,
+  // notifications) get built.
+  //
+  // /api/posts covers both GET (list) and POST (create) — the whole
+  // app is already gated behind RequireAuth on the frontend (see
+  // app/page.tsx), so there's no logged-out "browse the feed" case to
+  // carve out an exception for here.
+  const isProtectedRoute = ["/api/user", "/api/upload", "/api/posts"].some(
+    (route) => pathname.startsWith(route),
   );
 
   if (!isProtectedRoute) {
@@ -7032,118 +7697,6 @@ export default function ExplorePage() {
         )}
       </div>
     </RequireAuth>
-  );
-}
-</file>
-
-<file path="app/u/[username]/page.tsx">
-"use client";
-
-import { use, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { notFound } from "next/navigation";
-import { usePosts } from "@/context/PostsProvider";
-import { useFollow } from "@/context/FollowProvider";
-import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { getMockUser } from "@/data/mockUsers";
-import { isMockFollowerOfCurrentUser } from "@/data/mockFollowers";
-import { PATHS } from "@/utils/paths";
-import { ProfileHeader } from "@/components/profile/ProfileHeader";
-import { ProfileHeaderSkeleton } from "@/components/profile/ProfileHeaderSkeleton";
-import { PostGrid } from "@/components/profile/PostGrid";
-import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
-import { ProductChips } from "@/components/feed/ProductChips";
-import { useAuthGatedAction } from "@/hooks/useAuthGatedAction";
-import { AuthGateModal } from "@/components/auth/AuthGateModal";
-
-type Props = {
-  params: Promise<{ username: string }>;
-};
-
-const SIMULATED_LOAD_MS = 900;
-
-export default function UserProfilePage({ params }: Props) {
-  const { username } = use(params);
-  const router = useRouter();
-  const { posts } = usePosts();
-  const { isFollowing, toggleFollow } = useFollow();
-  const { user: currentUser } = useCurrentUser();
-  const [loading, setLoading] = useState(true);
-  const { gateOpen, closeGate, guard } = useAuthGatedAction();
-
-  // This route is for viewing OTHER people. Your own profile — with Edit
-  // Profile instead of a Follow button — lives at /profile. Redirect
-  // rather than rendering a nonsensical "follow yourself" state.
-  // Compared against your LIVE username (not a frozen constant) — since
-  // username is now editable, visiting /u/your-new-handle needs to still
-  // correctly recognize it's you, right after a rename.
-  const isSelf = username === currentUser?.username;
-
-  useEffect(() => {
-    if (isSelf) {
-      router.replace(PATHS.PROFILE);
-    }
-  }, [isSelf, router]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => setLoading(false), SIMULATED_LOAD_MS);
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  if (isSelf) {
-    return null;
-  }
-
-  const user = getMockUser(username);
-
-  // No fabricated fallback profile — if this username isn't real, say so,
-  // don't render a full profile with a working Follow button for nobody.
-  if (!user) {
-    notFound();
-  }
-
-  const userPosts = posts.filter((post) => post.author.username === username);
-
-  if (loading) {
-    return (
-      <div className="flex flex-col">
-        <ProfileHeaderSkeleton />
-        <div className="border-t border-foreground/10">
-          <PostGridSkeleton />
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col">
-      <ProfileHeader
-        isOwnProfile={false}
-        username={user.username}
-        avatarSrc={user.avatarSrc}
-        bio={user.bio}
-        toneTag={user.toneTag}
-        postCount={userPosts.length}
-        followerCount={user.followerCount ?? 0}
-        followingCount={user.followingCount ?? 0}
-        isFollowing={isFollowing(user.username)}
-        followsMe={isMockFollowerOfCurrentUser(user.username)}
-        onToggleFollow={guard(() => toggleFollow(user.username))}
-      />
-
-      {user.pinnedRoutine && user.pinnedRoutine.length > 0 && (
-        <div className="border-t border-foreground/10 px-4 py-4">
-          <p className="mb-2 text-sm font-medium">Routine</p>
-          <ProductChips products={user.pinnedRoutine} />
-        </div>
-      )}
-
-      <div className="border-t border-foreground/10">
-        <PostGrid posts={userPosts} />
-      </div>
-
-      <AuthGateModal open={gateOpen} onClose={closeGate} />
-    </div>
   );
 }
 </file>
@@ -7441,6 +7994,394 @@ export function CommentItem({
 }
 </file>
 
+<file path="components/onboarding/OnboardingFlow.tsx">
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { useCompleteOnboarding } from "@/hooks/useCompleteOnboarding";
+import { useUsernameAvailability } from "@/hooks/useUsernameAvailability";
+import { useUploadMedia } from "@/hooks/useUploadMedia";
+import { PATHS } from "@/utils/paths";
+import { validateUsername } from "@/utils/username";
+import { UsernameStep } from "./UsernameStep";
+import { PhotoStep } from "./PhotoStep";
+import { AboutStep } from "./AboutStep";
+
+const TOTAL_STEPS = 3;
+
+export function OnboardingFlow() {
+  const router = useRouter();
+  const { user, needsOnboarding, isLoading: userLoading } = useCurrentUser();
+  const { mutateAsync: submitOnboarding, isPending: submitting } =
+    useCompleteOnboarding();
+  const { mutateAsync: uploadAvatar, isPending: avatarUploading } =
+    useUploadMedia();
+
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [username, setUsername] = useState(""); // never pre-fill the random placeholder
+  const [usernameError, setUsernameError] = useState<string | null>(null);
+  // Doubles as both the preview URL AND the "is this real yet" signal —
+  // a blob: URL means a local pick that hasn't been uploaded yet;
+  // anything else is either the original real placeholder or (after
+  // final submit) a real Cloudinary URL, both safe to submit as-is.
+  const [avatarSrc, setAvatarSrc] = useState("");
+  // The raw File from the most recent pick, held onto until the final
+  // step — we upload once, right before submitting, instead of once per
+  // pick. Picking a different photo just swaps this out; nothing hits
+  // the network until the user actually finishes.
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
+  const [toneTag, setToneTag] = useState("");
+  const [bio, setBio] = useState("");
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const { status: usernameCheckStatus } = useUsernameAvailability(username);
+
+  // Seed the preview from the real placeholder avatar created at
+  // account-creation time, once it's actually loaded.
+  useEffect(() => {
+    if (user?.avatarSrc) setAvatarSrc(user.avatarSrc);
+  }, [user?.avatarSrc]);
+
+  // Already finished onboarding, somehow back on this page (typed the
+  // URL, browser back) — nothing left to redo here outside the normal
+  // Edit Profile flow, so bounce to Home instead.
+  useEffect(() => {
+    if (!userLoading && !needsOnboarding) {
+      router.replace(PATHS.HOME);
+    }
+  }, [userLoading, needsOnboarding, router]);
+
+  function handlePhotoSelected(file: File) {
+    setAvatarError(null);
+    // Swapping to a new pick — drop the previous local preview URL so
+    // repeated swaps don't leak blob: URLs, then swap in the new one.
+    // Purely local, no network call, no matter how many times the user
+    // changes their mind before finishing.
+    if (avatarSrc.startsWith("blob:")) URL.revokeObjectURL(avatarSrc);
+    setAvatarSrc(URL.createObjectURL(file));
+    setAvatarFile(file);
+  }
+
+  async function submitAndFinish() {
+    setSubmitError(null);
+
+    // Only the LAST photo the user picked ever actually gets uploaded,
+    // and only once, right here — not once per pick back in step 2.
+    let realAvatarSrc = avatarSrc.startsWith("blob:") ? undefined : avatarSrc;
+
+    if (avatarFile) {
+      const result = await uploadAvatar({
+        file: avatarFile,
+        context: "avatar",
+      });
+
+      if (result.success) {
+        realAvatarSrc = result.url;
+      } else {
+        // Bounce back to the photo step so the error sits next to the
+        // thing it's about; the picked file is still in state, so
+        // hitting Continue again just retries the same upload.
+        setAvatarError(result.error);
+        setStep(2);
+        return;
+      }
+    }
+
+    const result = await submitOnboarding({
+      username,
+      avatarSrc: realAvatarSrc,
+      toneTag,
+      bio,
+    });
+
+    if (!result?.success) {
+      if (result?.error?.toLowerCase().includes("taken")) {
+        setUsernameError(result.error);
+        setStep(1);
+      } else {
+        setSubmitError(
+          result?.error || "Something went wrong. Please try again.",
+        );
+      }
+      return;
+    }
+
+    router.replace(PATHS.HOME);
+  }
+
+  function handleSkip() {
+    // "Skip" only skips the OPTIONAL steps (photo, bio/tone tag) — the
+    // username chosen in step 1 still gets saved for real. Onboarding is
+    // mandatory (see RequireAuth's redirect), so bailing without ever
+    // calling the endpoint would just send the person right back here on
+    // their very next page load.
+    submitAndFinish();
+  }
+
+  function handleContinue() {
+    if (step === 1) {
+      const error = validateUsername(username);
+      if (error) {
+        setUsernameError(error);
+        return;
+      }
+      if (usernameCheckStatus === "taken") {
+        setUsernameError("That username is already taken.");
+        return;
+      }
+      if (usernameCheckStatus === "checking") {
+        return;
+      }
+      setUsernameError(null);
+      setStep(2);
+      return;
+    }
+
+    if (step === 2) {
+      setStep(3);
+      return;
+    }
+
+    submitAndFinish();
+  }
+
+  const continueDisabled =
+    submitting ||
+    avatarUploading ||
+    (step === 1 && usernameCheckStatus === "checking");
+
+  return (
+    <div className="fixed left-1/2 top-0 bottom-0 z-80 flex w-full max-w-lg -translate-x-1/2 flex-col bg-background px-6">
+      <div className="flex items-center justify-between pt-[calc(1.5rem+env(safe-area-inset-top))]">
+        <div className="flex gap-1.5">
+          {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
+            <span
+              key={i}
+              className={`h-1 w-6 rounded-full ${
+                i < step ? "bg-foreground" : "bg-foreground/15"
+              }`}
+            />
+          ))}
+        </div>
+        {/* Skip only appears once past the username step — that one's
+            required, photo/bio genuinely aren't. */}
+        {step > 1 && (
+          <button
+            type="button"
+            onClick={handleSkip}
+            disabled={submitting || avatarUploading}
+            className="text-sm font-medium text-foreground/50 disabled:opacity-50"
+          >
+            Skip
+          </button>
+        )}
+      </div>
+
+      <div className="flex flex-1 items-center justify-center">
+        <div className="w-full max-w-xs">
+          {step === 1 && (
+            <UsernameStep
+              username={username}
+              onUsernameChange={(value) => {
+                setUsername(value);
+                setUsernameError(null);
+              }}
+              error={usernameError}
+              checkStatus={usernameCheckStatus}
+            />
+          )}
+          {step === 2 && (
+            <PhotoStep
+              avatarSrc={avatarSrc}
+              onFileSelected={handlePhotoSelected}
+              uploading={avatarUploading}
+              error={avatarError}
+            />
+          )}
+          {step === 3 && (
+            <AboutStep
+              toneTag={toneTag}
+              onToneTagChange={setToneTag}
+              bio={bio}
+              onBioChange={setBio}
+            />
+          )}
+        </div>
+      </div>
+
+      {submitError && (
+        <p className="mb-2 text-center text-xs text-red-500">{submitError}</p>
+      )}
+
+      <button
+        type="button"
+        onClick={handleContinue}
+        disabled={continueDisabled}
+        className="mb-[calc(1.5rem+env(safe-area-inset-bottom))] w-full rounded-lg bg-foreground py-2.5 text-sm font-medium text-background disabled:opacity-60"
+      >
+        {avatarUploading || submitting
+          ? "Saving…"
+          : step === TOTAL_STEPS
+            ? "Finish"
+            : "Continue"}
+      </button>
+    </div>
+  );
+}
+</file>
+
+<file path="app/u/[username]/page.tsx">
+"use client";
+
+import { use, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { notFound } from "next/navigation";
+import { usePosts } from "@/context/PostsProvider";
+import { useFollow } from "@/context/FollowProvider";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { getMockUser } from "@/data/mockUsers";
+import { isMockFollowerOfCurrentUser } from "@/data/mockFollowers";
+import { PATHS } from "@/utils/paths";
+import { ProfileHeader } from "@/components/profile/ProfileHeader";
+import { ProfileHeaderSkeleton } from "@/components/profile/ProfileHeaderSkeleton";
+import { PostGrid } from "@/components/profile/PostGrid";
+import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
+import { ProductChips } from "@/components/feed/ProductChips";
+import { useAuthGatedAction } from "@/hooks/useAuthGatedAction";
+import { AuthGateModal } from "@/components/auth/AuthGateModal";
+
+type Props = {
+  params: Promise<{ username: string }>;
+};
+
+const SIMULATED_LOAD_MS = 900;
+
+export default function UserProfilePage({ params }: Props) {
+  const { username } = use(params);
+  const router = useRouter();
+  const { posts } = usePosts();
+  const { isFollowing, toggleFollow } = useFollow();
+  const { user: currentUser } = useCurrentUser();
+  const [loading, setLoading] = useState(true);
+  const { gateOpen, closeGate, guard } = useAuthGatedAction();
+
+  // This route is for viewing OTHER people. Your own profile — with Edit
+  // Profile instead of a Follow button — lives at /profile. Redirect
+  // rather than rendering a nonsensical "follow yourself" state.
+  // Compared against your LIVE username (not a frozen constant) — since
+  // username is now editable, visiting /u/your-new-handle needs to still
+  // correctly recognize it's you, right after a rename.
+  const isSelf = username === currentUser?.username;
+
+  useEffect(() => {
+    if (isSelf) {
+      router.replace(PATHS.PROFILE);
+    }
+  }, [isSelf, router]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setLoading(false), SIMULATED_LOAD_MS);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  if (isSelf) {
+    return null;
+  }
+
+  const user = getMockUser(username);
+
+  // No fabricated fallback profile — if this username isn't real, say so,
+  // don't render a full profile with a working Follow button for nobody.
+  if (!user) {
+    notFound();
+  }
+
+  const userPosts = posts.filter((post) => post.author.username === username);
+
+  if (loading) {
+    return (
+      <div className="flex flex-col">
+        <ProfileHeaderSkeleton />
+        <div className="border-t border-foreground/10">
+          <PostGridSkeleton />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col">
+      <ProfileHeader
+        isOwnProfile={false}
+        username={user.username}
+        avatarSrc={user.avatarSrc}
+        bio={user.bio}
+        toneTag={user.toneTag}
+        postCount={userPosts.length}
+        followerCount={user.followerCount ?? 0}
+        followingCount={user.followingCount ?? 0}
+        isFollowing={isFollowing(user.username)}
+        followsMe={isMockFollowerOfCurrentUser(user.username)}
+        onToggleFollow={guard(() => toggleFollow(user.username))}
+      />
+
+      {user.pinnedRoutine && user.pinnedRoutine.length > 0 && (
+        <div className="border-t border-foreground/10 px-4 py-4">
+          <p className="mb-2 text-sm font-medium">Routine</p>
+          <ProductChips products={user.pinnedRoutine} />
+        </div>
+      )}
+
+      <div className="border-t border-foreground/10">
+        <PostGrid posts={userPosts} />
+      </div>
+
+      <AuthGateModal open={gateOpen} onClose={closeGate} />
+    </div>
+  );
+}
+</file>
+
+<file path="components/feed/HomeFeed.tsx">
+"use client";
+
+import { usePosts } from "@/hooks/usePosts";
+import { useFollow } from "@/context/FollowProvider";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { PostCard } from "./PostCard";
+import { HomeFeedSkeleton } from "./HomeFeedSkeleton";
+import { EmptyHomeFeed } from "./EmptyHomeFeed";
+
+export function HomeFeed() {
+  const { posts, isLoading } = usePosts();
+  const { isFollowing } = useFollow();
+  const { user } = useCurrentUser();
+
+  if (isLoading) {
+    return <HomeFeedSkeleton />;
+  }
+
+  const followingFeed = posts.filter(
+    (post) => post.author.id === user?.id || isFollowing(post.author.username),
+  );
+
+  if (followingFeed.length === 0) {
+    return <EmptyHomeFeed />;
+  }
+
+  return (
+    <div className="flex flex-col">
+      {followingFeed.map((post) => (
+        <PostCard key={post.id} post={post} />
+      ))}
+    </div>
+  );
+}
+</file>
+
 <file path="components/profile/EditProfileForm.tsx">
 "use client";
 
@@ -7597,7 +8538,10 @@ export function EditProfileForm() {
   }
 
   const saveDisabled =
-    saving || avatarUploading || usernameCheckStatus === "checking";
+    saving ||
+    avatarUploading ||
+    usernameCheckStatus === "checking" ||
+    !hasUnsavedChanges();
 
   return (
     <div className="fixed left-1/2 top-0 bottom-0 z-80 w-full max-w-lg -translate-x-1/2 flex flex-col bg-background">
@@ -7612,7 +8556,7 @@ export function EditProfileForm() {
           disabled={saveDisabled}
           className="text-sm font-medium text-foreground disabled:opacity-50"
         >
-          {avatarUploading ? "Uploading…" : saving ? "Saving…" : "Save"}
+          {avatarUploading || saving ? "Saving…" : "Save"}
         </button>
       </header>
 
@@ -7720,6 +8664,227 @@ export function EditProfileForm() {
 }
 </file>
 
+<file path="components/profile/ProfileHeader.tsx">
+"use client";
+
+import { useState } from "react";
+import Image from "next/image";
+import Link from "next/link";
+import { XIcon } from "@phosphor-icons/react";
+import { PATHS } from "@/utils/paths";
+
+type BaseProps = {
+  username: string;
+  avatarSrc: string;
+  bio?: string;
+  toneTag?: string;
+  postCount: number;
+  followerCount: number;
+  followingCount: number;
+};
+
+// Own profile shows Edit Profile and links its stats to your own
+// followers/following lists (/profile/followers, /profile/following).
+// Someone else's profile shows a Follow toggle instead, and its stats
+// link to their own per-user lists (/u/[username]/followers, etc.) —
+// two different route families, since "your" lists and "their" lists
+// aren't the same data.
+type Props =
+  | (BaseProps & { isOwnProfile: true })
+  | (BaseProps & {
+      isOwnProfile: false;
+      isFollowing: boolean;
+      followsMe: boolean;
+      onToggleFollow: () => void;
+    });
+
+export function ProfileHeader(props: Props) {
+  const [avatarOpen, setAvatarOpen] = useState(false);
+  const {
+    username,
+    avatarSrc,
+    bio,
+    toneTag,
+    postCount,
+    followerCount,
+    followingCount,
+    isOwnProfile,
+  } = props;
+
+  return (
+    <div className="flex flex-col gap-4 px-4 py-5">
+      <div className="flex items-center gap-5">
+        <button
+          type="button"
+          onClick={() => setAvatarOpen(true)}
+          aria-label={`View ${username}'s profile photo`}
+          className="shrink-0 transition-transform active:scale-95"
+        >
+          <Image
+            src={avatarSrc}
+            alt={username}
+            width={80}
+            height={80}
+            className="size-20 rounded-full object-cover"
+          />
+        </button>
+
+        <div className="flex flex-1 justify-around text-center">
+          <div className="flex flex-col">
+            <span className="text-base font-semibold">{postCount}</span>
+            <span className="text-xs text-foreground/50">Posts</span>
+          </div>
+
+          {isOwnProfile ? (
+            <>
+              <Link href={PATHS.FOLLOWERS} className="flex flex-col">
+                <span className="text-base font-semibold">{followerCount}</span>
+                <span className="text-xs text-foreground/50">Followers</span>
+              </Link>
+              <Link href={PATHS.FOLLOWING} className="flex flex-col">
+                <span className="text-base font-semibold">
+                  {followingCount}
+                </span>
+                <span className="text-xs text-foreground/50">Following</span>
+              </Link>
+            </>
+          ) : (
+            <>
+              <Link
+                href={PATHS.USER_FOLLOWERS(username)}
+                className="flex flex-col"
+              >
+                <span className="text-base font-semibold">{followerCount}</span>
+                <span className="text-xs text-foreground/50">Followers</span>
+              </Link>
+              <Link
+                href={PATHS.USER_FOLLOWING(username)}
+                className="flex flex-col"
+              >
+                <span className="text-base font-semibold">
+                  {followingCount}
+                </span>
+                <span className="text-xs text-foreground/50">Following</span>
+              </Link>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold">{username}</span>
+          {toneTag && (
+            <span className="rounded-full bg-foreground/5 px-2 py-0.5 text-[11px] text-foreground/50">
+              {toneTag}
+            </span>
+          )}
+        </div>
+        {bio && <p className="text-sm text-foreground/70">{bio}</p>}
+      </div>
+
+      {isOwnProfile ? (
+        <Link
+          href={PATHS.PROFILE_EDIT}
+          className="w-full rounded-lg border border-foreground/15 py-2 text-center text-sm font-medium"
+        >
+          Edit profile
+        </Link>
+      ) : (
+        <button
+          type="button"
+          onClick={props.onToggleFollow}
+          className={`w-full rounded-lg py-2 text-sm font-medium ${
+            props.isFollowing
+              ? "border border-foreground/15 text-foreground"
+              : "bg-foreground text-background"
+          }`}
+        >
+          {props.isFollowing
+            ? "Following"
+            : props.followsMe
+              ? "Follow back"
+              : "Follow"}
+        </button>
+      )}
+
+      {avatarOpen && (
+        <div
+          className="fixed inset-0 z-90 flex items-center justify-center bg-black/90"
+          onClick={() => setAvatarOpen(false)}
+        >
+          <button
+            type="button"
+            onClick={() => setAvatarOpen(false)}
+            aria-label="Close"
+            className="absolute right-4 top-[calc(1rem+env(safe-area-inset-top))] flex size-9 items-center justify-center rounded-full bg-black/40 text-white"
+          >
+            <XIcon size={20} />
+          </button>
+
+          <div
+            className="relative aspect-square w-[min(80vw,22rem)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Image
+              src={avatarSrc}
+              alt={username}
+              fill
+              unoptimized
+              className="rounded-full object-cover"
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+</file>
+
+<file path="package.json">
+{
+  "name": "beauty-platform",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "prisma generate && next build",
+    "start": "next start",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@phosphor-icons/react": "^2.1.10",
+    "@prisma/adapter-pg": "^7.9.0",
+    "@prisma/client": "^7.9.0",
+    "@tanstack/react-query": "^5.101.4",
+    "@tanstack/react-query-devtools": "^5.101.4",
+    "cloudinary": "^2.10.0",
+    "dotenv": "^17.4.2",
+    "jsonwebtoken": "^9.0.3",
+    "next": "16.2.10",
+    "next-cloudinary": "^6.17.5",
+    "pg": "^8.22.0",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "resend": "^6.18.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/jsonwebtoken": "^9",
+    "@types/node": "^20",
+    "@types/pg": "^8.20.0",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.10",
+    "prisma": "^7.9.0",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.1",
+    "typescript": "^5"
+  }
+}
+</file>
+
 <file path="components/create/CreatePostForm.tsx">
 "use client";
 
@@ -7733,12 +8898,13 @@ import {
   ArrowsLeftRightIcon,
   PlusIcon,
 } from "@phosphor-icons/react";
-import { usePosts } from "@/context/PostsProvider";
+
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { ProductTagEditor } from "@/components/shared/ProductTagEditor";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { PATHS } from "@/utils/paths";
 import type { Post, PostMedia, ProductTag } from "@/types/post";
+import { usePosts } from "@/hooks/usePosts";
 
 type PostType = "photo" | "video" | "before_after";
 
@@ -8141,427 +9307,6 @@ export function CreatePostForm() {
 }
 </file>
 
-<file path="components/feed/HomeFeed.tsx">
-"use client";
-
-import { useEffect, useState } from "react";
-import { usePosts } from "@/context/PostsProvider";
-import { useFollow } from "@/context/FollowProvider";
-import { CURRENT_USER_ID } from "@/constants/currentUser";
-import { PostCard } from "./PostCard";
-import { HomeFeedSkeleton } from "./HomeFeedSkeleton";
-import { EmptyHomeFeed } from "./EmptyHomeFeed";
-
-// Purely so the skeleton is actually visible for you to look at right now —
-// delete this whole loading simulation once posts come from a real fetch
-// with its own real pending state.
-const SIMULATED_LOAD_MS = 1200;
-
-export function HomeFeed() {
-  const { posts } = usePosts();
-  const { isFollowing } = useFollow();
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => setLoading(false), SIMULATED_LOAD_MS);
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  if (loading) {
-    return <HomeFeedSkeleton />;
-  }
-
-  const followingFeed = posts.filter(
-    (post) =>
-      post.author.id === CURRENT_USER_ID || isFollowing(post.author.username),
-  );
-
-  if (followingFeed.length === 0) {
-    return <EmptyHomeFeed />;
-  }
-
-  return (
-    <div className="flex flex-col">
-      {followingFeed.map((post) => (
-        <PostCard key={post.id} post={post} />
-      ))}
-    </div>
-  );
-}
-</file>
-
-<file path="components/profile/ProfileHeader.tsx">
-"use client";
-
-import { useState } from "react";
-import Image from "next/image";
-import Link from "next/link";
-import { XIcon } from "@phosphor-icons/react";
-import { PATHS } from "@/utils/paths";
-
-type BaseProps = {
-  username: string;
-  avatarSrc: string;
-  bio?: string;
-  toneTag?: string;
-  postCount: number;
-  followerCount: number;
-  followingCount: number;
-};
-
-// Own profile shows Edit Profile and links its stats to your own
-// followers/following lists (/profile/followers, /profile/following).
-// Someone else's profile shows a Follow toggle instead, and its stats
-// link to their own per-user lists (/u/[username]/followers, etc.) —
-// two different route families, since "your" lists and "their" lists
-// aren't the same data.
-type Props =
-  | (BaseProps & { isOwnProfile: true })
-  | (BaseProps & {
-      isOwnProfile: false;
-      isFollowing: boolean;
-      followsMe: boolean;
-      onToggleFollow: () => void;
-    });
-
-export function ProfileHeader(props: Props) {
-  const [avatarOpen, setAvatarOpen] = useState(false);
-  const {
-    username,
-    avatarSrc,
-    bio,
-    toneTag,
-    postCount,
-    followerCount,
-    followingCount,
-    isOwnProfile,
-  } = props;
-
-  return (
-    <div className="flex flex-col gap-4 px-4 py-5">
-      <div className="flex items-center gap-5">
-        <button
-          type="button"
-          onClick={() => setAvatarOpen(true)}
-          aria-label={`View ${username}'s profile photo`}
-          className="shrink-0 transition-transform active:scale-95"
-        >
-          <Image
-            src={avatarSrc}
-            alt={username}
-            width={80}
-            height={80}
-            className="size-20 rounded-full object-cover"
-          />
-        </button>
-
-        <div className="flex flex-1 justify-around text-center">
-          <div className="flex flex-col">
-            <span className="text-base font-semibold">{postCount}</span>
-            <span className="text-xs text-foreground/50">Posts</span>
-          </div>
-
-          {isOwnProfile ? (
-            <>
-              <Link href={PATHS.FOLLOWERS} className="flex flex-col">
-                <span className="text-base font-semibold">{followerCount}</span>
-                <span className="text-xs text-foreground/50">Followers</span>
-              </Link>
-              <Link href={PATHS.FOLLOWING} className="flex flex-col">
-                <span className="text-base font-semibold">
-                  {followingCount}
-                </span>
-                <span className="text-xs text-foreground/50">Following</span>
-              </Link>
-            </>
-          ) : (
-            <>
-              <Link
-                href={PATHS.USER_FOLLOWERS(username)}
-                className="flex flex-col"
-              >
-                <span className="text-base font-semibold">{followerCount}</span>
-                <span className="text-xs text-foreground/50">Followers</span>
-              </Link>
-              <Link
-                href={PATHS.USER_FOLLOWING(username)}
-                className="flex flex-col"
-              >
-                <span className="text-base font-semibold">
-                  {followingCount}
-                </span>
-                <span className="text-xs text-foreground/50">Following</span>
-              </Link>
-            </>
-          )}
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-1">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold">{username}</span>
-          {toneTag && (
-            <span className="rounded-full bg-foreground/5 px-2 py-0.5 text-[11px] text-foreground/50">
-              {toneTag}
-            </span>
-          )}
-        </div>
-        {bio && <p className="text-sm text-foreground/70">{bio}</p>}
-      </div>
-
-      {isOwnProfile ? (
-        <Link
-          href={PATHS.PROFILE_EDIT}
-          className="w-full rounded-lg border border-foreground/15 py-2 text-center text-sm font-medium"
-        >
-          Edit profile
-        </Link>
-      ) : (
-        <button
-          type="button"
-          onClick={props.onToggleFollow}
-          className={`w-full rounded-lg py-2 text-sm font-medium ${
-            props.isFollowing
-              ? "border border-foreground/15 text-foreground"
-              : "bg-foreground text-background"
-          }`}
-        >
-          {props.isFollowing
-            ? "Following"
-            : props.followsMe
-              ? "Follow back"
-              : "Follow"}
-        </button>
-      )}
-
-      {avatarOpen && (
-        <div
-          className="fixed inset-0 z-90 flex items-center justify-center bg-black/90"
-          onClick={() => setAvatarOpen(false)}
-        >
-          <button
-            type="button"
-            onClick={() => setAvatarOpen(false)}
-            aria-label="Close"
-            className="absolute right-4 top-[calc(1rem+env(safe-area-inset-top))] flex size-9 items-center justify-center rounded-full bg-black/40 text-white"
-          >
-            <XIcon size={20} />
-          </button>
-
-          <div
-            className="relative aspect-square w-[min(80vw,22rem)]"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <Image
-              src={avatarSrc}
-              alt={username}
-              fill
-              unoptimized
-              className="rounded-full object-cover"
-            />
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-</file>
-
-<file path="components/profile/UserListRow.tsx">
-"use client";
-
-import Image from "next/image";
-import Link from "next/link";
-import { useFollow } from "@/context/FollowProvider";
-import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { isMockFollowerOfCurrentUser } from "@/data/mockFollowers";
-import { PATHS } from "@/utils/paths";
-import { useAuthGatedAction } from "@/hooks/useAuthGatedAction";
-import { AuthGateModal } from "@/components/auth/AuthGateModal";
-import type { MockUser } from "@/data/mockUsers";
-
-// Self-contained gate rather than a prop threaded down from every parent —
-// this row renders on both fully-gated pages (own Followers/Following,
-// Explore search) AND genuinely public ones (/u/[username]/followers,
-// /u/[username]/following), so it can't assume auth was already checked
-// by whatever page happens to be rendering it.
-export function UserListRow({ user }: { user: MockUser }) {
-  const { isFollowing, toggleFollow } = useFollow();
-  const { user: currentUser } = useCurrentUser();
-  const { gateOpen, gateMessage, closeGate, guard } = useAuthGatedAction();
-  const following = isFollowing(user.username);
-  const followsMe = isMockFollowerOfCurrentUser(user.username);
-  // Compared against your LIVE username — MOCK_USERS never actually
-  // includes "you," but if your current handle ever happened to collide
-  // with a listed username, this still correctly recognizes it's you.
-  const isSelf = user.username === currentUser?.username;
-
-  const label = following ? "Following" : followsMe ? "Follow back" : "Follow";
-
-  return (
-    <div className="flex items-center gap-3 px-4 py-2.5">
-      <Link
-        href={PATHS.USER_PROFILE(user.username)}
-        className="flex flex-1 items-center gap-3"
-      >
-        <Image
-          src={user.avatarSrc}
-          alt={user.username}
-          width={44}
-          height={44}
-          className="size-11 shrink-0 rounded-full object-cover"
-        />
-        <div className="flex flex-col leading-tight">
-          <span className="text-sm font-medium">{user.username}</span>
-          {user.toneTag && (
-            <span className="text-xs text-foreground/50">{user.toneTag}</span>
-          )}
-        </div>
-      </Link>
-
-      {/* No self-follow row — this only shows for other people */}
-      {!isSelf && (
-        <button
-          type="button"
-          onClick={guard(() => toggleFollow(user.username))}
-          className={`shrink-0 rounded-lg px-4 py-1.5 text-sm font-medium transition-colors ${
-            following
-              ? "border border-foreground/15 text-foreground"
-              : "bg-foreground text-background"
-          }`}
-        >
-          {label}
-        </button>
-      )}
-
-      <AuthGateModal
-        open={gateOpen}
-        onClose={closeGate}
-        message={gateMessage}
-      />
-    </div>
-  );
-}
-</file>
-
-<file path="package.json">
-{
-  "name": "beauty-platform",
-  "version": "0.1.0",
-  "private": true,
-  "scripts": {
-    "dev": "next dev",
-    "build": "prisma generate && next build",
-    "start": "next start",
-    "lint": "eslint"
-  },
-  "dependencies": {
-    "@phosphor-icons/react": "^2.1.10",
-    "@prisma/adapter-pg": "^7.9.0",
-    "@prisma/client": "^7.9.0",
-    "@tanstack/react-query": "^5.101.4",
-    "@tanstack/react-query-devtools": "^5.101.4",
-    "cloudinary": "^2.10.0",
-    "dotenv": "^17.4.2",
-    "jsonwebtoken": "^9.0.3",
-    "next": "16.2.10",
-    "next-cloudinary": "^6.17.5",
-    "pg": "^8.22.0",
-    "react": "19.2.4",
-    "react-dom": "19.2.4",
-    "resend": "^6.18.1"
-  },
-  "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/jsonwebtoken": "^9",
-    "@types/node": "^20",
-    "@types/pg": "^8.20.0",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.2.10",
-    "prisma": "^7.9.0",
-    "tailwindcss": "^4",
-    "tsx": "^4.23.1",
-    "typescript": "^5"
-  }
-}
-</file>
-
-<file path="app/profile/page.tsx">
-"use client";
-
-import { usePosts } from "@/context/PostsProvider";
-import { useFollow } from "@/context/FollowProvider";
-import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { CURRENT_USER_PROFILE } from "@/data/currentUserProfile";
-import { ProfileHeader } from "@/components/profile/ProfileHeader";
-import { ProfileHeaderSkeleton } from "@/components/profile/ProfileHeaderSkeleton";
-import { PostGrid } from "@/components/profile/PostGrid";
-import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
-import { ProductChips } from "@/components/feed/ProductChips";
-import { RequireAuth } from "@/components/auth/RequireAuth";
-
-export default function ProfilePage() {
-  const { posts } = usePosts();
-  const { followingCount } = useFollow();
-  const { user, isLoading } = useCurrentUser();
-
-  // isLoading reflects the real /api/user/me request now, not a
-  // simulated timeout — RequireAuth (wrapping this whole page) already
-  // blocks on the same query before rendering children, so by the time
-  // this component's own isLoading is false, user is guaranteed non-null.
-  const myPosts = user
-    ? posts.filter((post) => post.author.id === user.id)
-    : [];
-
-  // Computed once, wrapped once — RequireAuth only needs to appear a
-  // single time regardless of which branch below actually renders.
-  const content =
-    isLoading || !user ? (
-      <div className="flex flex-col">
-        <ProfileHeaderSkeleton />
-        <div className="animate-pulse border-t border-foreground/10 px-4 py-4">
-          <div className="mb-2 h-3.5 w-16 rounded bg-foreground/10" />
-          <div className="flex gap-2">
-            <div className="h-7 w-28 shrink-0 rounded-full bg-foreground/10" />
-            <div className="h-7 w-24 shrink-0 rounded-full bg-foreground/10" />
-          </div>
-        </div>
-        <div className="border-t border-foreground/10">
-          <PostGridSkeleton />
-        </div>
-      </div>
-    ) : (
-      <div className="flex flex-col">
-        <ProfileHeader
-          isOwnProfile
-          username={user.username}
-          avatarSrc={user.avatarSrc}
-          bio={user.bio}
-          toneTag={user.toneTag}
-          postCount={myPosts.length}
-          followerCount={CURRENT_USER_PROFILE.followerCount}
-          followingCount={followingCount}
-        />
-
-        {user.pinnedRoutine.length > 0 && (
-          <div className="border-t border-foreground/10 px-4 py-4">
-            <p className="mb-2 text-sm font-medium">Routine</p>
-            <ProductChips products={user.pinnedRoutine} />
-          </div>
-        )}
-
-        <div className="border-t border-foreground/10">
-          <PostGrid posts={myPosts} />
-        </div>
-      </div>
-    );
-
-  return <RequireAuth>{content}</RequireAuth>;
-}
-</file>
-
 <file path="components/feed/CommentSheet.tsx">
 "use client";
 
@@ -8763,6 +9508,157 @@ export function CommentSheet({
 }
 </file>
 
+<file path="components/profile/UserListRow.tsx">
+"use client";
+
+import Image from "next/image";
+import Link from "next/link";
+import { useFollow } from "@/context/FollowProvider";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { isMockFollowerOfCurrentUser } from "@/data/mockFollowers";
+import { PATHS } from "@/utils/paths";
+import { useAuthGatedAction } from "@/hooks/useAuthGatedAction";
+import { AuthGateModal } from "@/components/auth/AuthGateModal";
+import type { MockUser } from "@/data/mockUsers";
+
+// Self-contained gate rather than a prop threaded down from every parent —
+// this row renders on both fully-gated pages (own Followers/Following,
+// Explore search) AND genuinely public ones (/u/[username]/followers,
+// /u/[username]/following), so it can't assume auth was already checked
+// by whatever page happens to be rendering it.
+export function UserListRow({ user }: { user: MockUser }) {
+  const { isFollowing, toggleFollow } = useFollow();
+  const { user: currentUser } = useCurrentUser();
+  const { gateOpen, gateMessage, closeGate, guard } = useAuthGatedAction();
+  const following = isFollowing(user.username);
+  const followsMe = isMockFollowerOfCurrentUser(user.username);
+  // Compared against your LIVE username — MOCK_USERS never actually
+  // includes "you," but if your current handle ever happened to collide
+  // with a listed username, this still correctly recognizes it's you.
+  const isSelf = user.username === currentUser?.username;
+
+  const label = following ? "Following" : followsMe ? "Follow back" : "Follow";
+
+  return (
+    <div className="flex items-center gap-3 px-4 py-2.5">
+      <Link
+        href={PATHS.USER_PROFILE(user.username)}
+        className="flex flex-1 items-center gap-3"
+      >
+        <Image
+          src={user.avatarSrc}
+          alt={user.username}
+          width={44}
+          height={44}
+          className="size-11 shrink-0 rounded-full object-cover"
+        />
+        <div className="flex flex-col leading-tight">
+          <span className="text-sm font-medium">{user.username}</span>
+          {user.toneTag && (
+            <span className="text-xs text-foreground/50">{user.toneTag}</span>
+          )}
+        </div>
+      </Link>
+
+      {/* No self-follow row — this only shows for other people */}
+      {!isSelf && (
+        <button
+          type="button"
+          onClick={guard(() => toggleFollow(user.username))}
+          className={`shrink-0 rounded-lg px-4 py-1.5 text-sm font-medium transition-colors ${
+            following
+              ? "border border-foreground/15 text-foreground"
+              : "bg-foreground text-background"
+          }`}
+        >
+          {label}
+        </button>
+      )}
+
+      <AuthGateModal
+        open={gateOpen}
+        onClose={closeGate}
+        message={gateMessage}
+      />
+    </div>
+  );
+}
+</file>
+
+<file path="app/profile/page.tsx">
+"use client";
+
+import { usePosts } from "@/context/PostsProvider";
+import { useFollow } from "@/context/FollowProvider";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { CURRENT_USER_PROFILE } from "@/data/currentUserProfile";
+import { ProfileHeader } from "@/components/profile/ProfileHeader";
+import { ProfileHeaderSkeleton } from "@/components/profile/ProfileHeaderSkeleton";
+import { PostGrid } from "@/components/profile/PostGrid";
+import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
+import { ProductChips } from "@/components/feed/ProductChips";
+import { RequireAuth } from "@/components/auth/RequireAuth";
+
+export default function ProfilePage() {
+  const { posts } = usePosts();
+  const { followingCount } = useFollow();
+  const { user, isLoading } = useCurrentUser();
+
+  // isLoading reflects the real /api/user/me request now, not a
+  // simulated timeout — RequireAuth (wrapping this whole page) already
+  // blocks on the same query before rendering children, so by the time
+  // this component's own isLoading is false, user is guaranteed non-null.
+  const myPosts = user
+    ? posts.filter((post) => post.author.id === user.id)
+    : [];
+
+  // Computed once, wrapped once — RequireAuth only needs to appear a
+  // single time regardless of which branch below actually renders.
+  const content =
+    isLoading || !user ? (
+      <div className="flex flex-col">
+        <ProfileHeaderSkeleton />
+        <div className="animate-pulse border-t border-foreground/10 px-4 py-4">
+          <div className="mb-2 h-3.5 w-16 rounded bg-foreground/10" />
+          <div className="flex gap-2">
+            <div className="h-7 w-28 shrink-0 rounded-full bg-foreground/10" />
+            <div className="h-7 w-24 shrink-0 rounded-full bg-foreground/10" />
+          </div>
+        </div>
+        <div className="border-t border-foreground/10">
+          <PostGridSkeleton />
+        </div>
+      </div>
+    ) : (
+      <div className="flex flex-col">
+        <ProfileHeader
+          isOwnProfile
+          username={user.username}
+          avatarSrc={user.avatarSrc}
+          bio={user.bio}
+          toneTag={user.toneTag}
+          postCount={myPosts.length}
+          followerCount={CURRENT_USER_PROFILE.followerCount}
+          followingCount={followingCount}
+        />
+
+        {user.pinnedRoutine.length > 0 && (
+          <div className="border-t border-foreground/10 px-4 py-4">
+            <p className="mb-2 text-sm font-medium">Routine</p>
+            <ProductChips products={user.pinnedRoutine} />
+          </div>
+        )}
+
+        <div className="border-t border-foreground/10">
+          <PostGrid posts={myPosts} />
+        </div>
+      </div>
+    );
+
+  return <RequireAuth>{content}</RequireAuth>;
+}
+</file>
+
 <file path="app/page.tsx">
 import { HomeFeed } from "@/components/feed/HomeFeed";
 import { RequireAuth } from "@/components/auth/RequireAuth";
@@ -8929,7 +9825,6 @@ import { DotsThreeIcon, HeartIcon } from "@phosphor-icons/react";
 import type { Post } from "@/types/post";
 import type { Comment } from "@/types/comment";
 import { getRelativeTime } from "@/utils/time";
-import { CURRENT_USER_ID } from "@/constants/currentUser";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { Carousel } from "./Carousel";
 import { VideoPost } from "./VideoPost";
@@ -8943,7 +9838,7 @@ import { PostOptionsSheet } from "./PostOptionsSheet";
 import { SaveToCollectionSheet } from "@/components/saved/SaveToCollectionSheet";
 import { useFollow } from "@/context/FollowProvider";
 import { useSavedPosts } from "@/context/SavedPostsProvider";
-import { usePosts } from "@/context/PostsProvider";
+import { usePosts } from "@/hooks/usePosts";
 import { isMockFollowerOfCurrentUser } from "@/data/mockFollowers";
 import { PATHS } from "@/utils/paths";
 import { useAuthGatedAction } from "@/hooks/useAuthGatedAction";
@@ -9008,8 +9903,11 @@ export function PostCard({ post }: { post: Post }) {
   }
   const [saveToCollectionOpen, setSaveToCollectionOpen] = useState(false);
   // Compares by id, not username — stays correct even if I rename myself
-  // after this post already exists.
-  const isOwnPost = post.author.id === CURRENT_USER_ID;
+  // after this post already exists. Sourced from the real authenticated
+  // session (useCurrentUser) rather than the old hardcoded constant, so
+  // this is correct for whoever is actually logged in, not just a fixed
+  // dev-time user.
+  const isOwnPost = Boolean(user) && post.author.id === user?.id;
 
   function handleDeletePress() {
     deletePost(post.id);
@@ -9434,7 +10332,6 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { BottomNav } from "@/components/shared/BottomNav";
 import TopNav from "@/components/shared/TopNav";
-import { PostsProvider } from "@/context/PostsProvider";
 import { FollowProvider } from "@/context/FollowProvider";
 import { NotificationsProvider } from "@/context/NotificationsProvider";
 import { SavedPostsProvider } from "@/context/SavedPostsProvider";
@@ -9494,19 +10391,17 @@ export default function RootLayout({
       </head>
       <body className="min-h-full flex flex-col">
         <Providers>
-          <PostsProvider>
-            <FollowProvider>
-              <NotificationsProvider>
-                <SavedPostsProvider>
-                  <TopNav />
-                  <main className="mx-auto w-full max-w-lg flex-1 pt-[calc(3.5rem+env(safe-area-inset-top))] pb-[calc(3.5rem+env(safe-area-inset-bottom))]">
-                    {children}
-                  </main>
-                  <BottomNav />
-                </SavedPostsProvider>
-              </NotificationsProvider>
-            </FollowProvider>
-          </PostsProvider>
+          <FollowProvider>
+            <NotificationsProvider>
+              <SavedPostsProvider>
+                <TopNav />
+                <main className="mx-auto w-full max-w-lg flex-1 pt-[calc(3.5rem+env(safe-area-inset-top))] pb-[calc(3.5rem+env(safe-area-inset-bottom))]">
+                  {children}
+                </main>
+                <BottomNav />
+              </SavedPostsProvider>
+            </NotificationsProvider>
+          </FollowProvider>
         </Providers>
       </body>
     </html>

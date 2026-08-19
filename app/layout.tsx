@@ -3,7 +3,6 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { BottomNav } from "@/components/shared/BottomNav";
 import TopNav from "@/components/shared/TopNav";
-import { PostsProvider } from "@/context/PostsProvider";
 import { FollowProvider } from "@/context/FollowProvider";
 import { NotificationsProvider } from "@/context/NotificationsProvider";
 import { SavedPostsProvider } from "@/context/SavedPostsProvider";
@@ -63,19 +62,17 @@ export default function RootLayout({
       </head>
       <body className="min-h-full flex flex-col">
         <Providers>
-          <PostsProvider>
-            <FollowProvider>
-              <NotificationsProvider>
-                <SavedPostsProvider>
-                  <TopNav />
-                  <main className="mx-auto w-full max-w-lg flex-1 pt-[calc(3.5rem+env(safe-area-inset-top))] pb-[calc(3.5rem+env(safe-area-inset-bottom))]">
-                    {children}
-                  </main>
-                  <BottomNav />
-                </SavedPostsProvider>
-              </NotificationsProvider>
-            </FollowProvider>
-          </PostsProvider>
+          <FollowProvider>
+            <NotificationsProvider>
+              <SavedPostsProvider>
+                <TopNav />
+                <main className="mx-auto w-full max-w-lg flex-1 pt-[calc(3.5rem+env(safe-area-inset-top))] pb-[calc(3.5rem+env(safe-area-inset-bottom))]">
+                  {children}
+                </main>
+                <BottomNav />
+              </SavedPostsProvider>
+            </NotificationsProvider>
+          </FollowProvider>
         </Providers>
       </body>
     </html>

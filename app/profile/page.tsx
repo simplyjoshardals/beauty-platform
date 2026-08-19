@@ -1,6 +1,6 @@
 "use client";
 
-import { usePosts } from "@/context/PostsProvider";
+import { usePosts } from "@/hooks/usePosts";
 import { useFollow } from "@/context/FollowProvider";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { CURRENT_USER_PROFILE } from "@/data/currentUserProfile";

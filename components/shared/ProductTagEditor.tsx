@@ -9,6 +9,7 @@ type Props = {
   placeholder: string;
   products: ProductTag[];
   onChange: (products: ProductTag[]) => void;
+  disabled?: boolean;
 };
 
 // Shared between the create-post product-tagging step and the edit-profile
@@ -20,6 +21,7 @@ export function ProductTagEditor({
   placeholder,
   products,
   onChange,
+  disabled = false,
 }: Props) {
   const [draft, setDraft] = useState("");
 
@@ -50,12 +52,13 @@ export function ProductTagEditor({
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
-          className="flex-1 rounded-full border border-foreground/15 bg-transparent px-3 py-2 text-sm outline-none"
+          disabled={disabled}
+          className="flex-1 rounded-full border border-foreground/15 bg-transparent px-3 py-2 text-sm outline-none disabled:opacity-50"
         />
         <button
           type="button"
           onClick={addProduct}
-          disabled={!draft.trim()}
+          disabled={disabled || !draft.trim()}
           aria-label="Add"
           className="flex size-9 shrink-0 items-center justify-center rounded-full border border-foreground/15 disabled:opacity-30"
         >
@@ -74,7 +77,9 @@ export function ProductTagEditor({
               <button
                 type="button"
                 onClick={() => removeProduct(p.id)}
+                disabled={disabled}
                 aria-label={`Remove ${p.label}`}
+                className="disabled:opacity-30"
               >
                 <XIcon size={12} />
               </button>

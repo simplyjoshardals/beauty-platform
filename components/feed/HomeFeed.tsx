@@ -1,35 +1,23 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { usePosts } from "@/context/PostsProvider";
+import { usePosts } from "@/hooks/usePosts";
 import { useFollow } from "@/context/FollowProvider";
-import { CURRENT_USER_ID } from "@/constants/currentUser";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { PostCard } from "./PostCard";
 import { HomeFeedSkeleton } from "./HomeFeedSkeleton";
 import { EmptyHomeFeed } from "./EmptyHomeFeed";
 
-// Purely so the skeleton is actually visible for you to look at right now —
-// delete this whole loading simulation once posts come from a real fetch
-// with its own real pending state.
-const SIMULATED_LOAD_MS = 1200;
-
 export function HomeFeed() {
-  const { posts } = usePosts();
+  const { posts, isLoading } = usePosts();
   const { isFollowing } = useFollow();
-  const [loading, setLoading] = useState(true);
+  const { user } = useCurrentUser();
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => setLoading(false), SIMULATED_LOAD_MS);
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  if (loading) {
+  if (isLoading) {
     return <HomeFeedSkeleton />;
   }
 
   const followingFeed = posts.filter(
-    (post) =>
-      post.author.id === CURRENT_USER_ID || isFollowing(post.author.username),
+    (post) => post.author.id === user?.id || isFollowing(post.author.username),
   );
 
   if (followingFeed.length === 0) {
