@@ -56,6 +56,28 @@ function nextWithRequestHeader(req: NextRequest, name: string, value: string) {
   return NextResponse.next({ request: { headers } });
 }
 
+// Segment names under /api/posts that are NOT a :postId — without this,
+// a literal path like /api/posts/likes would match the same
+// "/api/posts/<something>" shape as a real single-post GET and get
+// waved through as public. Keep in sync with the static (non-dynamic)
+// routes nested directly under /api/posts (see utils/apiRoutes.ts).
+const RESERVED_POST_SEGMENTS = new Set(["likes"]);
+
+// The only two intentionally-public reads under /api/posts:
+//   GET /api/posts/<postId>            — the /p/[postId] permalink page
+//   GET /api/posts/<postId>/comments   — that page's comment list
+// Everything else under /api/posts (the feed list, create, delete,
+// likes, comment create/delete/like, the saved-likes bundle) stays
+// behind the auth gate below. Matches app/api/posts/[postId]/route.ts's
+// GET and app/api/posts/[postId]/comments/route.ts's GET exactly.
+function isPublicPostGet(pathname: string, method: string): boolean {
+  if (method !== "GET") return false;
+  const match = pathname.match(/^\/api\/posts\/([^/]+)(?:\/comments)?$/);
+  if (!match) return false;
+  const [, postId] = match;
+  return !RESERVED_POST_SEGMENTS.has(postId);
+}
+
 export async function proxy(req: NextRequest) {
   const pathname = req.nextUrl.pathname;
 
@@ -77,6 +99,11 @@ export async function proxy(req: NextRequest) {
   // app/page.tsx), so there's no logged-out "browse the feed" case to
   // carve out an exception for here. /api/saved covers the saved-posts
   // bundle plus every collection sub-route the same way.
+  //
+  // Two narrow exceptions carved out of that: the single-post GET and
+  // its comment list, both of which back the public /p/[postId]
+  // permalink page (see isPublicPostGet above). Everything else under
+  // /api/posts still requires a session.
   const isProtectedRoute = [
     "/api/user",
     "/api/upload",
@@ -87,6 +114,13 @@ export async function proxy(req: NextRequest) {
   if (!isProtectedRoute) {
     return addSecurityHeaders(NextResponse.next());
   }
+
+  // A public GET still goes through the same token verification below —
+  // NOT an early bypass — so a logged-in visitor still gets x-user-id
+  // set (e.g. for a comment's likedByMe). The only difference for these
+  // two routes is at the very bottom: no valid session falls through to
+  // an anonymous NextResponse.next() instead of a 401.
+  const isPublicGet = isPublicPostGet(pathname, req.method);
 
   const accessToken = req.cookies.get("accessToken")?.value;
   const refreshToken = req.cookies.get("refreshToken")?.value;
@@ -172,7 +206,15 @@ export async function proxy(req: NextRequest) {
     }
   }
 
-  // Both tokens invalid or missing
+  // Both tokens invalid or missing. For the two public-GET exceptions
+  // this is just "an anonymous visitor" — let the request through with
+  // no x-user-id, and the route handler itself treats that as anonymous
+  // read access. Every other protected route still 401s here exactly as
+  // before.
+  if (isPublicGet) {
+    return addSecurityHeaders(NextResponse.next());
+  }
+
   return addSecurityHeaders(
     NextResponse.json(
       { success: false, error: "Unauthorized" },

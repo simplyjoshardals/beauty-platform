@@ -22,21 +22,16 @@ function commentInclude(userId: string) {
   } as const;
 }
 
-// Top-level comments (parentId: null) with their replies nested one
-// level deep — replies never have their own sub-replies, matching the
-// schema and every frontend consumer (sortComments, CommentItem).
-// Deleted top-level comments are still returned (their `deleted` flag
-// drives the "[deleted]" placeholder client-side) so any replies
-// underneath stay reachable; deleted replies never exist as rows in the
-// first place — see the DELETE route for why.
+// Deliberately public — no x-user-id check. Backs the /p/[postId]
+// permalink page's comment list, same public/authenticated split as
+// GET /api/posts/[postId] (see proxy.ts's isPublicPostGet for the
+// matching carve-out). An anonymous visitor still gets the full comment
+// list, just with likedByMe forced false for every comment (see the
+// empty-string userId passed to commentInclude below — no real user id
+// is ever an empty string, so that filter matches zero rows). POST
+// (creating a comment) stays behind the auth gate below, unchanged.
 export async function GET(req: NextRequest, { params }: Params) {
-  const userId = req.headers.get("x-user-id");
-  if (!userId) {
-    return NextResponse.json(
-      { success: false, error: "Unauthorized" },
-      { status: 401 },
-    );
-  }
+  const userId = req.headers.get("x-user-id") || "";
   const { postId } = await params;
 
   const comments = await prisma.comment.findMany({

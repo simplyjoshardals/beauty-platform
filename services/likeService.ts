@@ -6,7 +6,17 @@ export type LikedBundleResult =
   | { success: false; error: string };
 
 export async function getLikedPostIds(): Promise<LikedBundleResult> {
-  return apiFetch(API_ROUTES.POSTS.LIKES_BUNDLE, { method: "GET" });
+  // authRequired: false — this fires unconditionally from useLikedPosts,
+  // including on the public /p/[postId] page for logged-out visitors.
+  // Without this, apiFetch's default 401 handling kicks in (attempt
+  // refresh, then hard-redirect to /auth via window.location.href),
+  // which would boot an anonymous visitor off an intentionally-public
+  // page just because they have no likes to report. A 401 here just
+  // means "not logged in," which the caller already treats as empty.
+  return apiFetch(API_ROUTES.POSTS.LIKES_BUNDLE, {
+    method: "GET",
+    authRequired: false,
+  });
 }
 
 export type ToggleLikeResult =

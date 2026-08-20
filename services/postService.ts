@@ -32,7 +32,17 @@ export type ListPostsResult =
   | { success: false; error: string };
 
 export async function listPosts(): Promise<ListPostsResult> {
-  return apiFetch(API_ROUTES.POSTS.LIST, { method: "GET" });
+  // authRequired: false — see the identical comment in likeService.ts's
+  // getLikedPostIds. usePosts() is called unconditionally by PostCard
+  // (for deletePost), which also renders on the public /p/[postId] page.
+  // For a logged-out visitor GET /api/posts correctly 401s (the feed
+  // list itself is never public), but that should just resolve to an
+  // empty list here — not trigger apiFetch's refresh-then-hard-redirect
+  // path and boot the visitor off the permalink page.
+  return apiFetch(API_ROUTES.POSTS.LIST, {
+    method: "GET",
+    authRequired: false,
+  });
 }
 
 export type CreatePostResult =

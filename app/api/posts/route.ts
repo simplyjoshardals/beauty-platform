@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { MediaType as PrismaMediaType } from "@/lib/generated/prisma/client";
 import {
   serializePost,
+  postInclude,
   isValidCloudinaryUrl,
   POST_IMAGE_FOLDER,
   POST_VIDEO_FOLDER,
@@ -12,16 +13,6 @@ import {
   MAX_CAROUSEL_ITEMS,
 } from "@/lib/posts";
 import { getCloudinaryVideoThumbnail } from "@/utils/cloudinaryVideoThumbnail";
-
-// Shared between GET and POST — a post returned right after creation
-// needs the exact same shape as one that comes back from the list, so
-// PostsProvider's addPost() can drop either straight into the same array.
-const postInclude = {
-  author: true,
-  carouselItems: true,
-  products: true,
-  _count: { select: { likes: true, comments: true } },
-} as const;
 
 // No pagination yet — fine for a feed this size today. Swap this for a
 // cursor (createdAt + id) once there are enough posts for it to matter;

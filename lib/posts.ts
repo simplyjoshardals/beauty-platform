@@ -114,6 +114,19 @@ export function isValidCloudinaryUrl(url: unknown, folder: string): boolean {
   );
 }
 
+// Shared between GET (list), GET (single post), and POST (create) — a
+// post returned from any of the three needs the exact same shape, so
+// callers can drop any of them into the same cache/array without a
+// reshape. Kept as a plain object (no generated-Prisma-client import)
+// for the same decoupling reason as MEDIA_TYPES above; Prisma's
+// `include` option just needs the right shape, not the actual enum type.
+export const postInclude = {
+  author: true,
+  carouselItems: true,
+  products: true,
+  _count: { select: { likes: true, comments: true } },
+} as const;
+
 export const POST_IMAGE_FOLDER = "vanity/posts/images";
 export const POST_VIDEO_FOLDER = "vanity/posts/videos";
 

@@ -12,7 +12,15 @@ export type SavedBundleResult =
   | { success: false; error: string };
 
 export async function getSavedBundle(): Promise<SavedBundleResult> {
-  return apiFetch(API_ROUTES.SAVED.BUNDLE, { method: "GET" });
+  // authRequired: false — see the identical comment in likeService.ts's
+  // getLikedPostIds. This also fires unconditionally from useSavedPosts
+  // on the public /p/[postId] page for logged-out visitors, and a 401
+  // here just means "not logged in, nothing saved" — not a reason to
+  // hard-redirect them away from a page they're allowed to be on.
+  return apiFetch(API_ROUTES.SAVED.BUNDLE, {
+    method: "GET",
+    authRequired: false,
+  });
 }
 
 export type ToggleSaveResult =
