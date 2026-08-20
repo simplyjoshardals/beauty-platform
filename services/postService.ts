@@ -47,3 +47,11 @@ export async function createPost(
     body: JSON.stringify(data),
   });
 }
+
+export type DeletePostResult =
+  | { success: true }
+  | { success: false; error: string };
+
+export async function deletePost(postId: string): Promise<DeletePostResult> {
+  return apiFetch(API_ROUTES.POSTS.DELETE(postId), { method: "DELETE" });
+}

@@ -27,6 +27,7 @@ export const API_ROUTES = {
   POSTS: {
     LIST: "/api/posts",
     CREATE: "/api/posts",
+    DELETE: (postId: string) => `/api/posts/${postId}`,
   },
 
   SAVED: {

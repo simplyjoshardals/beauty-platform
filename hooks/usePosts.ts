@@ -1,8 +1,11 @@
 "use client";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Post } from "@/types/post";
-import { listPosts } from "@/services/postService";
+import {
+  listPosts,
+  deletePost as deletePostRequest,
+} from "@/services/postService";
 
 const POSTS_QUERY_KEY = ["posts"] as const;
 
@@ -34,13 +37,39 @@ export function usePosts() {
   // object as the source of truth.
   function addPost(_post: Post) {}
 
-  // No DELETE /api/posts endpoint yet — this stays a local, client-side-
-  // only removal from the cached list (not persisted, reverts on the
-  // next real refetch). Matches PostsProvider's old behavior exactly.
+  // apiFetch never throws on a failed request — network errors, timeouts,
+  // and non-2xx responses all resolve to a `{ success: false }` object
+  // rather than rejecting (see utils/apiClient.ts and the same reasoning
+  // in useSavedPosts.ts) — so failure has to be read off the resolved
+  // result inside onSettled, not caught via onError.
+  const deletePostMutation = useMutation({
+    mutationFn: (postId: string) => deletePostRequest(postId),
+    onMutate: async (postId) => {
+      await queryClient.cancelQueries({ queryKey: POSTS_QUERY_KEY });
+      const previous = queryClient.getQueryData<Post[]>(POSTS_QUERY_KEY);
+      queryClient.setQueryData<Post[]>(POSTS_QUERY_KEY, (prev) =>
+        (prev ?? []).filter((p) => p.id !== postId),
+      );
+      return { previous };
+    },
+    onSettled: (result, _error, _postId, context) => {
+      if (result === undefined || !result.success) {
+        // Failed — put the removed post right back where it was rather
+        // than leaving the feed silently short one item.
+        if (context?.previous) {
+          queryClient.setQueryData(POSTS_QUERY_KEY, context.previous);
+        }
+      } else {
+        // Succeeded — the optimistic removal already matches server
+        // state, but refetch anyway so the list is fully in sync (e.g.
+        // with another post that became visible now this one's gone).
+        queryClient.invalidateQueries({ queryKey: POSTS_QUERY_KEY });
+      }
+    },
+  });
+
   function deletePost(postId: string) {
-    queryClient.setQueryData<Post[]>(POSTS_QUERY_KEY, (prev) =>
-      (prev ?? []).filter((p) => p.id !== postId),
-    );
+    deletePostMutation.mutate(postId);
   }
 
   return { posts, isLoading: query.isLoading, addPost, deletePost };
