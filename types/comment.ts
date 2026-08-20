@@ -3,6 +3,7 @@ export type Comment = {
   author: { id: string; username: string; avatarSrc: string };
   text: string;
   likeCount: number;
+  likedByMe?: boolean;
   createdAt: string;
   replies?: Comment[]; // one level deep only — a reply's own `replies` is never read
   // When true, the comment's content is hidden and a minimal "[deleted]"

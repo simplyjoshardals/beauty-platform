@@ -7,7 +7,7 @@ import { HeartIcon } from "@phosphor-icons/react";
 import type { Comment } from "@/types/comment";
 import { getRelativeTime } from "@/utils/time";
 import { sortAuthorFirst } from "@/utils/sortComments";
-import { CURRENT_USER_ID } from "@/constants/currentUser";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { PATHS } from "@/utils/paths";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 
@@ -22,6 +22,10 @@ type Props = {
   // topLevelId param: present when deleting a reply (points at its parent),
   // omitted when deleting a top-level comment directly.
   onDeleteComment: (commentId: string, topLevelId?: string) => void;
+  // Toggles a like on THIS comment specifically — passed down unchanged
+  // through the recursive reply rendering below, same as onDeleteComment,
+  // since a reply is liked/deleted by its own id regardless of nesting.
+  onToggleLike: (commentId: string) => void;
   // Same guard function CommentSheet uses for posting a comment — reused
   // here so liking a comment/reply shares the same auth-gate modal instead
   // of each CommentItem needing its own.
@@ -37,11 +41,13 @@ export function CommentItem({
   postAuthorId,
   onReplyPress,
   onDeleteComment,
+  onToggleLike,
   guard,
   topLevelId,
 }: Props) {
-  const [liked, setLiked] = useState(false);
-  const [count, setCount] = useState(comment.likeCount);
+  const { user } = useCurrentUser();
+  const liked = comment.likedByMe ?? false;
+  const count = comment.likeCount;
   const [repliesExpanded, setRepliesExpanded] = useState(
     (comment.replies?.length ?? 0) > 0,
   );
@@ -56,9 +62,12 @@ export function CommentItem({
 
   // Own comment, or the post's own author moderating their post — either
   // can delete. Nothing to delete twice on an already-deleted comment.
+  // Sourced from the real authenticated session, same reasoning as
+  // PostCard's isOwnPost — correct for whoever is actually logged in.
   const canDelete =
     !comment.deleted &&
-    (comment.author.id === CURRENT_USER_ID || postAuthorId === CURRENT_USER_ID);
+    Boolean(user) &&
+    (comment.author.id === user?.id || postAuthorId === user?.id);
 
   const sortedReplies = useMemo(
     () =>
@@ -67,9 +76,7 @@ export function CommentItem({
   );
 
   function toggleLike() {
-    const nextLiked = !liked;
-    setLiked(nextLiked);
-    setCount((c) => c + (nextLiked ? 1 : -1));
+    onToggleLike(comment.id);
   }
 
   function handleDeleteConfirmed() {
@@ -94,6 +101,7 @@ export function CommentItem({
                   postAuthorId={postAuthorId}
                   onReplyPress={onReplyPress}
                   onDeleteComment={onDeleteComment}
+                  onToggleLike={onToggleLike}
                   guard={guard}
                   topLevelId={comment.id}
                 />

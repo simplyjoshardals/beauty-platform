@@ -7,7 +7,12 @@ import {
   deletePost as deletePostRequest,
 } from "@/services/postService";
 
-const POSTS_QUERY_KEY = ["posts"] as const;
+// Exported so hooks that mutate a post's derived counts from elsewhere
+// (useLikedPosts' toggleLike, useComments' add/delete) can invalidate
+// this cache too — a like/comment changes Post.likeCount/commentCount
+// (both derived via _count, per prisma/schema.prisma) even though those
+// hooks never touch POSTS_QUERY_KEY's data directly.
+export const POSTS_QUERY_KEY = ["posts"] as const;
 
 // Replaces context/PostsProvider.tsx. Same query key, same shape — react-
 // query already dedupes/shares the cache across every component that

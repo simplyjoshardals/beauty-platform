@@ -28,6 +28,20 @@ export const API_ROUTES = {
     LIST: "/api/posts",
     CREATE: "/api/posts",
     DELETE: (postId: string) => `/api/posts/${postId}`,
+    // GET returns every post id the current user has liked; POST toggles
+    // a single post's like state — same BUNDLE/TOGGLE split as SAVED
+    // below.
+    LIKES_BUNDLE: "/api/posts/likes",
+    TOGGLE_LIKE: (postId: string) => `/api/posts/${postId}/like`,
+  },
+
+  COMMENTS: {
+    LIST: (postId: string) => `/api/posts/${postId}/comments`,
+    CREATE: (postId: string) => `/api/posts/${postId}/comments`,
+    DELETE: (postId: string, commentId: string) =>
+      `/api/posts/${postId}/comments/${commentId}`,
+    TOGGLE_LIKE: (postId: string, commentId: string) =>
+      `/api/posts/${postId}/comments/${commentId}/like`,
   },
 
   SAVED: {

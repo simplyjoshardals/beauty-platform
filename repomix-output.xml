@@ -141,6 +141,16 @@ app/
         [token]/
           route.ts
     posts/
+      [postId]/
+        route.ts
+      route.ts
+    saved/
+      collections/
+        [collectionId]/
+          posts/
+            route.ts
+          route.ts
+        route.ts
       route.ts
     upload/
       signature/
@@ -260,7 +270,6 @@ constants/
 context/
   FollowProvider.tsx
   NotificationsProvider.tsx
-  SavedPostsProvider.tsx
 data/
   currentUserProfile.ts
   mockFollowers.ts
@@ -274,6 +283,7 @@ hooks/
   useCurrentUser.ts
   useDebouncedValue.ts
   usePosts.ts
+  useSavedPosts.ts
   useUpdateProfile.ts
   useUploadMedia.ts
   useUsernameAvailability.ts
@@ -284,6 +294,7 @@ lib/
   mailer.ts
   posts.ts
   prisma.ts
+  saved.ts
 prisma/
   migrations/
     20260727202204_init/
@@ -319,6 +330,7 @@ public/
 services/
   authService.ts
   postService.ts
+  savedService.ts
   uploadService.ts
   userService.ts
 types/
@@ -11772,6 +11784,59 @@ export async function GET(_req: NextRequest, { params }: Props) {
 }
 </file>
 
+<file path="app/api/posts/[postId]/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+
+type Params = { params: Promise<{ postId: string }> };
+
+// x-user-id is set by proxy.ts, which already validated the session
+// before this route runs — same trust model as every other protected
+// route (/api/user/me, /api/posts, etc).
+//
+// Everything hanging off a Post — CarouselItem, ProductTag, Like,
+// Comment, SavedPost, Notification — cascades on delete per
+// prisma/schema.prisma, so a plain delete here is enough; there's
+// nothing left over to clean up by hand. Deleting a post never unsaves
+// it for other users in a way that needs separate handling either —
+// SavedPost rows for it just cascade away along with everything else.
+export async function DELETE(req: NextRequest, { params }: Params) {
+  try {
+    const userId = req.headers.get("x-user-id");
+    if (!userId) {
+      return NextResponse.json(
+        { success: false, error: "Unauthorized" },
+        { status: 401 },
+      );
+    }
+    const { postId } = await params;
+
+    // Scoped by authorId as well as id, and deleteMany (not delete) —
+    // so trying to delete someone else's post just matches zero rows
+    // instead of throwing, and `count` is how we tell the difference
+    // between "not yours" and "doesn't exist."
+    const result = await prisma.post.deleteMany({
+      where: { id: postId, authorId: userId },
+    });
+
+    if (result.count === 0) {
+      return NextResponse.json(
+        { success: false, error: "Post not found." },
+        { status: 404 },
+      );
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    console.error("delete post error", err);
+    return NextResponse.json(
+      { success: false, error: "Server error" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
 <file path="app/api/posts/route.ts">
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -11996,6 +12061,308 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, post: serializePost(post) });
   } catch (err) {
     console.error("create post error", err);
+    return NextResponse.json(
+      { success: false, error: "Server error" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="app/api/saved/collections/[collectionId]/posts/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+
+type Params = { params: Promise<{ collectionId: string }> };
+
+// Toggles whether a post sits inside this collection. Mirrors
+// SavedPostsProvider's old toggleCollectionForPost: adding to a
+// collection implies the post is saved overall too (the SavedPost row
+// is upserted here rather than required to already exist); removing
+// from a collection only takes it out of THIS collection — the post
+// stays saved everywhere else it already was.
+export async function POST(req: NextRequest, { params }: Params) {
+  try {
+    const userId = req.headers.get("x-user-id");
+    if (!userId) {
+      return NextResponse.json(
+        { success: false, error: "Unauthorized" },
+        { status: 401 },
+      );
+    }
+    const { collectionId } = await params;
+
+    const { postId } = await req.json();
+    if (typeof postId !== "string" || !postId) {
+      return NextResponse.json(
+        { success: false, error: "Invalid post." },
+        { status: 400 },
+      );
+    }
+
+    const collection = await prisma.collection.findUnique({
+      where: { id: collectionId },
+      select: { userId: true },
+    });
+    if (!collection || collection.userId !== userId) {
+      return NextResponse.json(
+        { success: false, error: "Collection not found." },
+        { status: 404 },
+      );
+    }
+
+    const savedPost = await prisma.savedPost.upsert({
+      where: { userId_postId: { userId, postId } },
+      create: { userId, postId },
+      update: {},
+      select: { id: true },
+    });
+
+    const existingLink = await prisma.collectionPost.findUnique({
+      where: {
+        collectionId_savedPostId: {
+          collectionId,
+          savedPostId: savedPost.id,
+        },
+      },
+      select: { id: true },
+    });
+
+    if (existingLink) {
+      await prisma.collectionPost.delete({ where: { id: existingLink.id } });
+      return NextResponse.json({ success: true, inCollection: false });
+    }
+
+    await prisma.collectionPost.create({
+      data: { collectionId, savedPostId: savedPost.id },
+    });
+    return NextResponse.json({ success: true, inCollection: true });
+  } catch (err) {
+    console.error("toggle collection post error", err);
+    return NextResponse.json(
+      { success: false, error: "Server error" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="app/api/saved/collections/[collectionId]/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { MAX_COLLECTION_NAME_LENGTH } from "@/lib/saved";
+
+type Params = { params: Promise<{ collectionId: string }> };
+
+export async function PATCH(req: NextRequest, { params }: Params) {
+  try {
+    const userId = req.headers.get("x-user-id");
+    if (!userId) {
+      return NextResponse.json(
+        { success: false, error: "Unauthorized" },
+        { status: 401 },
+      );
+    }
+    const { collectionId } = await params;
+
+    const { name } = await req.json();
+    if (typeof name !== "string") {
+      return NextResponse.json(
+        { success: false, error: "Invalid name." },
+        { status: 400 },
+      );
+    }
+    const trimmed = name.trim();
+    if (!trimmed || trimmed.length > MAX_COLLECTION_NAME_LENGTH) {
+      return NextResponse.json(
+        { success: false, error: "Invalid collection name." },
+        { status: 400 },
+      );
+    }
+
+    // Scoped by userId as well as id, and updateMany (not update) — so
+    // trying to rename someone else's collection just matches zero rows
+    // instead of throwing, and `count` is how we tell the difference.
+    const result = await prisma.collection.updateMany({
+      where: { id: collectionId, userId },
+      data: { name: trimmed },
+    });
+
+    if (result.count === 0) {
+      return NextResponse.json(
+        { success: false, error: "Collection not found." },
+        { status: 404 },
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      collection: { id: collectionId, name: trimmed },
+    });
+  } catch (err) {
+    console.error("rename collection error", err);
+    return NextResponse.json(
+      { success: false, error: "Server error" },
+      { status: 500 },
+    );
+  }
+}
+
+export async function DELETE(req: NextRequest, { params }: Params) {
+  try {
+    const userId = req.headers.get("x-user-id");
+    if (!userId) {
+      return NextResponse.json(
+        { success: false, error: "Unauthorized" },
+        { status: 401 },
+      );
+    }
+    const { collectionId } = await params;
+
+    // Only removes the folder/grouping — CollectionPost rows cascade
+    // along with it, but SavedPost never does (Collection has no direct
+    // relation to SavedPost), so the posts inside stay saved overall.
+    const result = await prisma.collection.deleteMany({
+      where: { id: collectionId, userId },
+    });
+
+    if (result.count === 0) {
+      return NextResponse.json(
+        { success: false, error: "Collection not found." },
+        { status: 404 },
+      );
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    console.error("delete collection error", err);
+    return NextResponse.json(
+      { success: false, error: "Server error" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="app/api/saved/collections/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { MAX_COLLECTION_NAME_LENGTH } from "@/lib/saved";
+
+export async function POST(req: NextRequest) {
+  try {
+    const userId = req.headers.get("x-user-id");
+    if (!userId) {
+      return NextResponse.json(
+        { success: false, error: "Unauthorized" },
+        { status: 401 },
+      );
+    }
+
+    const { name } = await req.json();
+    if (typeof name !== "string") {
+      return NextResponse.json(
+        { success: false, error: "Invalid name." },
+        { status: 400 },
+      );
+    }
+    const trimmed = name.trim();
+    if (!trimmed || trimmed.length > MAX_COLLECTION_NAME_LENGTH) {
+      return NextResponse.json(
+        { success: false, error: "Invalid collection name." },
+        { status: 400 },
+      );
+    }
+
+    const collection = await prisma.collection.create({
+      data: { userId, name: trimmed },
+      select: { id: true, name: true },
+    });
+
+    return NextResponse.json({ success: true, collection });
+  } catch (err) {
+    console.error("create collection error", err);
+    return NextResponse.json(
+      { success: false, error: "Server error" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="app/api/saved/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { buildSavedBundle } from "@/lib/saved";
+
+export async function GET(req: NextRequest) {
+  const userId = req.headers.get("x-user-id");
+  if (!userId) {
+    return NextResponse.json(
+      { success: false, error: "Unauthorized" },
+      { status: 401 },
+    );
+  }
+
+  const [savedPosts, collections] = await Promise.all([
+    prisma.savedPost.findMany({
+      where: { userId },
+      select: {
+        postId: true,
+        collections: { select: { collectionId: true } },
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.collection.findMany({
+      where: { userId },
+      select: { id: true, name: true },
+      orderBy: { createdAt: "asc" },
+    }),
+  ]);
+
+  return NextResponse.json({
+    success: true,
+    ...buildSavedBundle(savedPosts, collections),
+  });
+}
+
+// Toggles a post's overall saved state — mirrors SavedPostsProvider's old
+// toggleSave exactly: unsaving cascades to every collection the post was
+// in (CollectionPost rows cascade-delete along with their SavedPost
+// parent, per the schema's onDelete: Cascade), saving just creates the
+// base fact.
+export async function POST(req: NextRequest) {
+  try {
+    const userId = req.headers.get("x-user-id");
+    if (!userId) {
+      return NextResponse.json(
+        { success: false, error: "Unauthorized" },
+        { status: 401 },
+      );
+    }
+
+    const { postId } = await req.json();
+    if (typeof postId !== "string" || !postId) {
+      return NextResponse.json(
+        { success: false, error: "Invalid post." },
+        { status: 400 },
+      );
+    }
+
+    const existing = await prisma.savedPost.findUnique({
+      where: { userId_postId: { userId, postId } },
+      select: { id: true },
+    });
+
+    if (existing) {
+      await prisma.savedPost.delete({ where: { id: existing.id } });
+      return NextResponse.json({ success: true, saved: false });
+    }
+
+    await prisma.savedPost.create({ data: { userId, postId } });
+    return NextResponse.json({ success: true, saved: true });
+  } catch (err) {
+    console.error("toggle saved post error", err);
     return NextResponse.json(
       { success: false, error: "Server error" },
       { status: 500 },
@@ -13096,147 +13463,6 @@ export function UserListSkeleton() {
 }
 </file>
 
-<file path="components/saved/CollectionOptionsSheet.tsx">
-"use client";
-
-import { useState, type KeyboardEvent } from "react";
-import { XIcon, PencilSimpleIcon, TrashIcon } from "@phosphor-icons/react";
-import { useSavedPosts } from "@/context/SavedPostsProvider";
-import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
-
-type Props = {
-  open: boolean;
-  onClose: () => void;
-  collectionId: string;
-  currentName: string;
-  // Caller navigates away after a delete, since the page being viewed no
-  // longer has anything to show.
-  onDeleted: () => void;
-};
-
-export function CollectionOptionsSheet({
-  open,
-  onClose,
-  collectionId,
-  currentName,
-  onDeleted,
-}: Props) {
-  const { renameCollection, deleteCollection } = useSavedPosts();
-  const [mode, setMode] = useState<"menu" | "rename">("menu");
-  const [name, setName] = useState(currentName);
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
-
-  if (!open) return null;
-
-  function handleClose() {
-    setMode("menu");
-    setName(currentName);
-    onClose();
-  }
-
-  function handleSaveRename() {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    renameCollection(collectionId, trimmed);
-    handleClose();
-  }
-
-  function handleDeleteConfirmed() {
-    deleteCollection(collectionId);
-    setConfirmingDelete(false);
-    handleClose();
-    onDeleted();
-  }
-
-  function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      handleSaveRename();
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-60 flex items-end">
-      <div
-        className="absolute inset-0 bg-black/40"
-        onClick={handleClose}
-        aria-hidden
-      />
-
-      <div className="relative mx-auto w-full max-w-lg rounded-t-2xl bg-background pb-[calc(1rem+env(safe-area-inset-bottom))]">
-        <div className="relative flex items-center justify-center border-b border-foreground/10 py-3">
-          <span className="text-sm font-medium">
-            {mode === "menu" ? "Collection options" : "Rename collection"}
-          </span>
-          <button
-            type="button"
-            onClick={handleClose}
-            aria-label="Close"
-            className="absolute right-3 top-1/2 -translate-y-1/2"
-          >
-            <XIcon size={20} className="text-foreground" />
-          </button>
-        </div>
-
-        {mode === "menu" ? (
-          <>
-            <button
-              type="button"
-              onClick={() => setMode("rename")}
-              className="flex w-full items-center gap-3 px-4 py-4 text-sm text-foreground"
-            >
-              <span className="flex size-9 items-center justify-center rounded-full bg-foreground/10">
-                <PencilSimpleIcon size={18} />
-              </span>
-              Rename collection
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setConfirmingDelete(true)}
-              className="flex w-full items-center gap-3 px-4 py-4 text-sm text-red-500"
-            >
-              <span className="flex size-9 items-center justify-center rounded-full bg-foreground/10">
-                <TrashIcon size={18} />
-              </span>
-              Delete collection
-            </button>
-          </>
-        ) : (
-          <div className="flex items-center gap-2 px-4 py-4">
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              onKeyDown={handleKeyDown}
-              autoFocus
-              className="flex-1 rounded-full border border-foreground/15 bg-transparent px-3 py-2 text-sm outline-none"
-            />
-            <button
-              type="button"
-              onClick={handleSaveRename}
-              disabled={!name.trim()}
-              className="shrink-0 rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-30"
-            >
-              Save
-            </button>
-          </div>
-        )}
-      </div>
-
-      <ConfirmDialog
-        open={confirmingDelete}
-        title={`Delete "${currentName}"?`}
-        description="Posts inside will stay saved elsewhere — this collection itself will be gone for good."
-        confirmLabel="Delete"
-        destructive
-        onConfirm={handleDeleteConfirmed}
-        onCancel={() => setConfirmingDelete(false)}
-      />
-    </div>
-  );
-}
-</file>
-
 <file path="components/saved/CollectionTile.tsx">
 import Link from "next/link";
 import Image from "next/image";
@@ -13276,84 +13502,6 @@ export function CollectionTile({ id, name, coverSrc, count }: Props) {
 }
 </file>
 
-<file path="components/saved/CreateCollectionSheet.tsx">
-"use client";
-
-import { useState, type KeyboardEvent } from "react";
-import { XIcon } from "@phosphor-icons/react";
-import { useSavedPosts } from "@/context/SavedPostsProvider";
-
-type Props = {
-  open: boolean;
-  onClose: () => void;
-};
-
-export function CreateCollectionSheet({ open, onClose }: Props) {
-  const { createCollection } = useSavedPosts();
-  const [name, setName] = useState("");
-
-  if (!open) return null;
-
-  function handleCreate() {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    createCollection(trimmed);
-    setName("");
-    onClose();
-  }
-
-  function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      handleCreate();
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-60 flex items-end">
-      <div
-        className="absolute inset-0 bg-black/40"
-        onClick={onClose}
-        aria-hidden
-      />
-
-      <div className="relative mx-auto w-full max-w-lg rounded-t-2xl bg-background pb-[calc(1rem+env(safe-area-inset-bottom))]">
-        <div className="relative flex items-center justify-center border-b border-foreground/10 py-3">
-          <span className="text-sm font-medium">New collection</span>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="absolute right-3 top-1/2 -translate-y-1/2"
-          >
-            <XIcon size={20} className="text-foreground" />
-          </button>
-        </div>
-
-        <div className="flex items-center gap-2 px-4 py-4">
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={handleKeyDown}
-            autoFocus
-            placeholder="Collection name…"
-            className="flex-1 rounded-full border border-foreground/15 bg-transparent px-3 py-2 text-sm outline-none"
-          />
-          <button
-            type="button"
-            onClick={handleCreate}
-            disabled={!name.trim()}
-            className="shrink-0 rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-30"
-          >
-            Create
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-</file>
-
 <file path="components/saved/CreateCollectionTile.tsx">
 "use client";
 
@@ -13369,119 +13517,6 @@ export function CreateCollectionTile({ onPress }: { onPress: () => void }) {
       <PlusIcon size={22} />
       <span className="text-xs font-medium">New collection</span>
     </button>
-  );
-}
-</file>
-
-<file path="components/saved/SaveToCollectionSheet.tsx">
-"use client";
-
-import { useState, type KeyboardEvent } from "react";
-import { XIcon, CheckIcon, PlusIcon } from "@phosphor-icons/react";
-import { useSavedPosts } from "@/context/SavedPostsProvider";
-
-type Props = {
-  open: boolean;
-  onClose: () => void;
-  postId: string;
-};
-
-export function SaveToCollectionSheet({ open, onClose, postId }: Props) {
-  const {
-    collections,
-    createCollection,
-    isPostInCollection,
-    toggleCollectionForPost,
-  } = useSavedPosts();
-  const [newName, setNewName] = useState("");
-
-  if (!open) return null;
-
-  function handleCreate() {
-    const trimmed = newName.trim();
-    if (!trimmed) return;
-    const id = createCollection(trimmed);
-    toggleCollectionForPost(postId, id);
-    setNewName("");
-  }
-
-  function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      handleCreate();
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-60 flex items-end">
-      <div
-        className="absolute inset-0 bg-black/40"
-        onClick={onClose}
-        aria-hidden
-      />
-
-      <div className="relative mx-auto flex max-h-[80dvh] w-full max-w-lg flex-col rounded-t-2xl bg-background pb-[calc(1rem+env(safe-area-inset-bottom))]">
-        <div className="relative flex items-center justify-center border-b border-foreground/10 py-3">
-          <span className="text-sm font-medium">Save to collection</span>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="absolute right-3 top-1/2 -translate-y-1/2"
-          >
-            <XIcon size={20} className="text-foreground" />
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto">
-          {collections.length === 0 ? (
-            <p className="px-4 py-6 text-center text-sm text-foreground/50">
-              No collections yet. Create one below.
-            </p>
-          ) : (
-            collections.map((collection) => {
-              const inCollection = isPostInCollection(postId, collection.id);
-              return (
-                <button
-                  key={collection.id}
-                  type="button"
-                  onClick={() => toggleCollectionForPost(postId, collection.id)}
-                  className="flex w-full items-center justify-between px-4 py-3 text-sm"
-                >
-                  <span>{collection.name}</span>
-                  {inCollection && (
-                    <CheckIcon
-                      size={18}
-                      weight="bold"
-                      className="text-foreground"
-                    />
-                  )}
-                </button>
-              );
-            })
-          )}
-        </div>
-
-        <div className="flex items-center gap-2 border-t border-foreground/10 px-4 py-3">
-          <input
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="New collection name…"
-            className="flex-1 rounded-full border border-foreground/15 bg-transparent px-3 py-2 text-sm outline-none"
-          />
-          <button
-            type="button"
-            onClick={handleCreate}
-            disabled={!newName.trim()}
-            aria-label="Create collection"
-            className="flex size-9 shrink-0 items-center justify-center rounded-full border border-foreground/15 disabled:opacity-30"
-          >
-            <PlusIcon size={16} />
-          </button>
-        </div>
-      </div>
-    </div>
   );
 }
 </file>
@@ -13634,170 +13669,6 @@ export function useNotifications() {
 }
 </file>
 
-<file path="context/SavedPostsProvider.tsx">
-"use client";
-
-import { createContext, useContext, useState, type ReactNode } from "react";
-
-export type Collection = {
-  id: string;
-  name: string;
-};
-
-type SavedPostsContextValue = {
-  isSaved: (postId: string) => boolean;
-  toggleSave: (postId: string) => void;
-
-  collections: Collection[];
-  createCollection: (name: string) => string;
-  renameCollection: (collectionId: string, name: string) => void;
-  deleteCollection: (collectionId: string) => void;
-  isPostInCollection: (postId: string, collectionId: string) => boolean;
-  toggleCollectionForPost: (postId: string, collectionId: string) => void;
-  getPostIdsForCollection: (collectionId: string) => string[];
-
-  savedCount: number;
-};
-
-const SavedPostsContext = createContext<SavedPostsContextValue | null>(null);
-
-// In-memory only, same caveat as every other provider — resets on refresh.
-export function SavedPostsProvider({ children }: { children: ReactNode }) {
-  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
-  const [collections, setCollections] = useState<Collection[]>([]);
-  const [collectionPosts, setCollectionPosts] = useState<
-    Record<string, Set<string>>
-  >({});
-
-  function isSaved(postId: string) {
-    return savedIds.has(postId);
-  }
-
-  function toggleSave(postId: string) {
-    // Read current state from component scope rather than nesting a
-    // second setState call inside this one's updater — React's Strict
-    // Mode double-invokes updater functions in dev to catch exactly that
-    // kind of impurity, which silently double-fires the nested call.
-    const currentlySaved = savedIds.has(postId);
-
-    setSavedIds((prev) => {
-      const next = new Set(prev);
-      if (currentlySaved) {
-        next.delete(postId);
-      } else {
-        next.add(postId);
-      }
-      return next;
-    });
-
-    if (currentlySaved) {
-      // Fully unsaving removes it from every collection too — a post
-      // can't sit in a folder while not being saved at all.
-      setCollectionPosts((prev) => {
-        let changed = false;
-        const updated: Record<string, Set<string>> = {};
-        for (const [colId, postSet] of Object.entries(prev)) {
-          if (postSet.has(postId)) {
-            const s = new Set(postSet);
-            s.delete(postId);
-            updated[colId] = s;
-            changed = true;
-          } else {
-            updated[colId] = postSet;
-          }
-        }
-        return changed ? updated : prev;
-      });
-    }
-  }
-
-  function createCollection(name: string): string {
-    const id = crypto.randomUUID();
-    setCollections((prev) => [...prev, { id, name }]);
-    setCollectionPosts((prev) => ({ ...prev, [id]: new Set() }));
-    return id;
-  }
-
-  function renameCollection(collectionId: string, name: string) {
-    setCollections((prev) =>
-      prev.map((c) => (c.id === collectionId ? { ...c, name } : c)),
-    );
-  }
-
-  function deleteCollection(collectionId: string) {
-    // Only removes the folder/grouping — the posts inside it stay saved
-    // overall (and in any other collection they were also part of).
-    setCollections((prev) => prev.filter((c) => c.id !== collectionId));
-    setCollectionPosts((prev) => {
-      const next = { ...prev };
-      delete next[collectionId];
-      return next;
-    });
-  }
-
-  function isPostInCollection(postId: string, collectionId: string) {
-    return collectionPosts[collectionId]?.has(postId) ?? false;
-  }
-
-  function toggleCollectionForPost(postId: string, collectionId: string) {
-    const currentSet = collectionPosts[collectionId] ?? new Set<string>();
-    const isCurrentlyIn = currentSet.has(postId);
-
-    setCollectionPosts((prev) => {
-      const base = prev[collectionId] ?? new Set<string>();
-      const next = new Set(base);
-      if (isCurrentlyIn) {
-        next.delete(postId);
-      } else {
-        next.add(postId);
-      }
-      return { ...prev, [collectionId]: next };
-    });
-
-    // Adding to a collection implies the post is saved overall too.
-    if (!isCurrentlyIn) {
-      setSavedIds((prev) => {
-        if (prev.has(postId)) return prev;
-        const next = new Set(prev);
-        next.add(postId);
-        return next;
-      });
-    }
-  }
-
-  function getPostIdsForCollection(collectionId: string): string[] {
-    return Array.from(collectionPosts[collectionId] ?? []);
-  }
-
-  return (
-    <SavedPostsContext.Provider
-      value={{
-        isSaved,
-        toggleSave,
-        collections,
-        createCollection,
-        renameCollection,
-        deleteCollection,
-        isPostInCollection,
-        toggleCollectionForPost,
-        getPostIdsForCollection,
-        savedCount: savedIds.size,
-      }}
-    >
-      {children}
-    </SavedPostsContext.Provider>
-  );
-}
-
-export function useSavedPosts() {
-  const ctx = useContext(SavedPostsContext);
-  if (!ctx) {
-    throw new Error("useSavedPosts must be used within a SavedPostsProvider");
-  }
-  return ctx;
-}
-</file>
-
 <file path="data/mockNotifications.ts">
 import type { Notification } from "@/types/notification";
 
@@ -13936,53 +13807,309 @@ export function useDebouncedValue<T>(value: T, delayMs: number): T {
 }
 </file>
 
-<file path="hooks/usePosts.ts">
+<file path="hooks/useSavedPosts.ts">
 "use client";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Post } from "@/types/post";
-import { listPosts } from "@/services/postService";
+import { useMemo } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  getSavedBundle,
+  toggleSavedPost,
+  createCollection as createCollectionRequest,
+  renameCollection as renameCollectionRequest,
+  deleteCollection as deleteCollectionRequest,
+  toggleCollectionPost,
+  type SavedCollection,
+} from "@/services/savedService";
 
-const POSTS_QUERY_KEY = ["posts"] as const;
+export type Collection = { id: string; name: string };
 
-// Replaces context/PostsProvider.tsx. Same query key, same shape — react-
-// query already dedupes/shares the cache across every component that
-// calls this, so HomeFeed and PostCard both calling usePosts() does NOT
-// mean two separate fetches. No provider wrapping needed, which also
-// means this only ever runs on pages that actually render one of those
-// two components — not on every page in the app (that was what caused
-// the /auth refresh-token 401 loop: PostsProvider used to sit in
-// app/layout.tsx, so it fired on /auth too, on every logged-out load).
-export function usePosts() {
+const SAVED_QUERY_KEY = ["saved"] as const;
+
+type SavedData = {
+  savedPostIds: string[];
+  collections: SavedCollection[];
+};
+
+const EMPTY_SAVED_DATA: SavedData = { savedPostIds: [], collections: [] };
+
+// apiFetch never throws on a failed request — network errors, timeouts,
+// and non-2xx responses all resolve to a `{ success: false }` object
+// rather than rejecting (see utils/apiClient.ts). So "did this mutation
+// fail" has to be read off the resolved result, not caught via
+// useMutation's onError — that's why every mutation below checks
+// `result.success` inside onSettled instead.
+function mutationFailed(result: { success: boolean } | undefined) {
+  return result === undefined || !result.success;
+}
+
+// Replaces context/SavedPostsProvider.tsx. Same public shape (isSaved,
+// toggleSave, collections, createCollection, renameCollection,
+// deleteCollection, isPostInCollection, toggleCollectionForPost,
+// getPostIdsForCollection, savedCount) so every existing consumer keeps
+// working with only an import-path change — except createCollection,
+// which is now async (it has to round-trip to the server to get a real
+// id back), so callers that used its return value synchronously need an
+// await. No provider wrapping needed: react-query already dedupes/shares
+// this cache across every component that calls the hook, same as
+// usePosts.
+//
+// Every mutation below updates the cache optimistically in onMutate
+// (so the UI reacts instantly), snapshots the prior cache so it can be
+// restored, and in onSettled either rolls back to that snapshot (on
+// failure) or leaves the optimistic value in place and refetches to
+// reconcile with the server (on success) — same pattern throughout.
+export function useSavedPosts() {
   const queryClient = useQueryClient();
 
   const query = useQuery({
-    queryKey: POSTS_QUERY_KEY,
-    queryFn: async () => {
-      const result = await listPosts();
-      if (!result?.success) return [];
-      return result.posts;
+    queryKey: SAVED_QUERY_KEY,
+    queryFn: async (): Promise<SavedData> => {
+      const result = await getSavedBundle();
+      if (!result?.success) return EMPTY_SAVED_DATA;
+      return {
+        savedPostIds: result.savedPostIds,
+        collections: result.collections,
+      };
     },
   });
 
-  const posts = query.data ?? [];
+  const savedPostIds = useMemo(
+    () => new Set(query.data?.savedPostIds ?? []),
+    [query.data],
+  );
+  const collections: Collection[] = query.data?.collections ?? [];
 
-  // No-op passthrough — real creation goes through useCreatePost, which
-  // already invalidates POSTS_QUERY_KEY on success and lets that refetch
-  // put the new post into `posts`, instead of trusting a client-built
-  // object as the source of truth.
-  function addPost(_post: Post) {}
+  async function snapshotAndCancel() {
+    await queryClient.cancelQueries({ queryKey: SAVED_QUERY_KEY });
+    return queryClient.getQueryData<SavedData>(SAVED_QUERY_KEY);
+  }
 
-  // No DELETE /api/posts endpoint yet — this stays a local, client-side-
-  // only removal from the cached list (not persisted, reverts on the
-  // next real refetch). Matches PostsProvider's old behavior exactly.
-  function deletePost(postId: string) {
-    queryClient.setQueryData<Post[]>(POSTS_QUERY_KEY, (prev) =>
-      (prev ?? []).filter((p) => p.id !== postId),
+  function rollback(previous: SavedData | undefined) {
+    if (previous) {
+      queryClient.setQueryData(SAVED_QUERY_KEY, previous);
+    }
+  }
+
+  function refetch() {
+    return queryClient.invalidateQueries({ queryKey: SAVED_QUERY_KEY });
+  }
+
+  const toggleSaveMutation = useMutation({
+    mutationFn: (postId: string) => toggleSavedPost(postId),
+    onMutate: async (postId) => {
+      const previous = await snapshotAndCancel();
+      queryClient.setQueryData<SavedData>(SAVED_QUERY_KEY, (old) => {
+        const data = old ?? EMPTY_SAVED_DATA;
+        const currentlySaved = data.savedPostIds.includes(postId);
+        if (currentlySaved) {
+          // Fully unsaving removes it from every collection too — a
+          // post can't sit in a folder while not being saved at all,
+          // same cascade the server applies.
+          return {
+            savedPostIds: data.savedPostIds.filter((id) => id !== postId),
+            collections: data.collections.map((c) => ({
+              ...c,
+              postIds: c.postIds.filter((id) => id !== postId),
+            })),
+          };
+        }
+        return { ...data, savedPostIds: [...data.savedPostIds, postId] };
+      });
+      return { previous };
+    },
+    onSettled: (result, _error, _postId, context) => {
+      if (mutationFailed(result)) {
+        rollback(context?.previous);
+      } else {
+        refetch();
+      }
+    },
+  });
+
+  const createCollectionMutation = useMutation({
+    mutationFn: (name: string) => createCollectionRequest(name),
+    onMutate: async (name) => {
+      const previous = await snapshotAndCancel();
+      const tempId = `temp-${crypto.randomUUID()}`;
+      queryClient.setQueryData<SavedData>(SAVED_QUERY_KEY, (old) => {
+        const data = old ?? EMPTY_SAVED_DATA;
+        return {
+          ...data,
+          collections: [...data.collections, { id: tempId, name, postIds: [] }],
+        };
+      });
+      return { previous };
+    },
+    onSettled: (result, _error, _name, context) => {
+      if (mutationFailed(result)) {
+        rollback(context?.previous);
+      } else {
+        // Swaps the temp-id placeholder for the real collection —
+        // mutateAsync's resolved value (used by createCollection below)
+        // already has the real id regardless of this refetch.
+        refetch();
+      }
+    },
+  });
+
+  const renameCollectionMutation = useMutation({
+    mutationFn: ({
+      collectionId,
+      name,
+    }: {
+      collectionId: string;
+      name: string;
+    }) => renameCollectionRequest(collectionId, name),
+    onMutate: async ({ collectionId, name }) => {
+      const previous = await snapshotAndCancel();
+      queryClient.setQueryData<SavedData>(SAVED_QUERY_KEY, (old) => {
+        const data = old ?? EMPTY_SAVED_DATA;
+        return {
+          ...data,
+          collections: data.collections.map((c) =>
+            c.id === collectionId ? { ...c, name } : c,
+          ),
+        };
+      });
+      return { previous };
+    },
+    onSettled: (result, _error, _vars, context) => {
+      if (mutationFailed(result)) {
+        rollback(context?.previous);
+      } else {
+        refetch();
+      }
+    },
+  });
+
+  const deleteCollectionMutation = useMutation({
+    mutationFn: (collectionId: string) => deleteCollectionRequest(collectionId),
+    onMutate: async (collectionId) => {
+      const previous = await snapshotAndCancel();
+      queryClient.setQueryData<SavedData>(SAVED_QUERY_KEY, (old) => {
+        const data = old ?? EMPTY_SAVED_DATA;
+        // Only removes the folder/grouping — savedPostIds is untouched,
+        // matching the server: deleting a collection never unsaves the
+        // posts inside it.
+        return {
+          ...data,
+          collections: data.collections.filter((c) => c.id !== collectionId),
+        };
+      });
+      return { previous };
+    },
+    onSettled: (result, _error, _collectionId, context) => {
+      if (mutationFailed(result)) {
+        rollback(context?.previous);
+      } else {
+        refetch();
+      }
+    },
+  });
+
+  const toggleCollectionPostMutation = useMutation({
+    mutationFn: ({
+      postId,
+      collectionId,
+    }: {
+      postId: string;
+      collectionId: string;
+    }) => toggleCollectionPost(collectionId, postId),
+    onMutate: async ({ postId, collectionId }) => {
+      const previous = await snapshotAndCancel();
+      queryClient.setQueryData<SavedData>(SAVED_QUERY_KEY, (old) => {
+        const data = old ?? EMPTY_SAVED_DATA;
+        const target = data.collections.find((c) => c.id === collectionId);
+        const wasInCollection = target?.postIds.includes(postId) ?? false;
+        return {
+          // Adding to a collection implies the post is saved overall
+          // too — same as toggleSaveMutation, but only in the adding
+          // direction; removing from one collection never unsaves it.
+          savedPostIds:
+            !wasInCollection && !data.savedPostIds.includes(postId)
+              ? [...data.savedPostIds, postId]
+              : data.savedPostIds,
+          collections: data.collections.map((c) =>
+            c.id === collectionId
+              ? {
+                  ...c,
+                  postIds: wasInCollection
+                    ? c.postIds.filter((id) => id !== postId)
+                    : [...c.postIds, postId],
+                }
+              : c,
+          ),
+        };
+      });
+      return { previous };
+    },
+    onSettled: (result, _error, _vars, context) => {
+      if (mutationFailed(result)) {
+        rollback(context?.previous);
+      } else {
+        refetch();
+      }
+    },
+  });
+
+  function isSaved(postId: string) {
+    return savedPostIds.has(postId);
+  }
+
+  function toggleSave(postId: string) {
+    toggleSaveMutation.mutate(postId);
+  }
+
+  // Async, unlike the old context version — resolves to the new
+  // collection's id (or null on failure) once the server round-trip
+  // completes, since there's no client-generated id to hand back
+  // synchronously anymore. Reads off mutateAsync's own resolved value,
+  // not the cache, so it's correct even though the cache briefly holds
+  // a temp-id placeholder (see createCollectionMutation.onMutate above).
+  async function createCollection(name: string): Promise<string | null> {
+    const result = await createCollectionMutation.mutateAsync(name);
+    return result?.success ? result.collection.id : null;
+  }
+
+  function renameCollection(collectionId: string, name: string) {
+    renameCollectionMutation.mutate({ collectionId, name });
+  }
+
+  function deleteCollection(collectionId: string) {
+    deleteCollectionMutation.mutate(collectionId);
+  }
+
+  function isPostInCollection(postId: string, collectionId: string) {
+    const collection = query.data?.collections.find(
+      (c) => c.id === collectionId,
+    );
+    return collection?.postIds.includes(postId) ?? false;
+  }
+
+  function toggleCollectionForPost(postId: string, collectionId: string) {
+    toggleCollectionPostMutation.mutate({ postId, collectionId });
+  }
+
+  function getPostIdsForCollection(collectionId: string): string[] {
+    return (
+      query.data?.collections.find((c) => c.id === collectionId)?.postIds ?? []
     );
   }
 
-  return { posts, isLoading: query.isLoading, addPost, deletePost };
+  return {
+    isSaved,
+    toggleSave,
+    collections,
+    createCollection,
+    renameCollection,
+    deleteCollection,
+    isPostInCollection,
+    toggleCollectionForPost,
+    getPostIdsForCollection,
+    savedCount: savedPostIds.size,
+    isLoading: query.isLoading,
+  };
 }
 </file>
 
@@ -14299,6 +14426,55 @@ export const prisma: PrismaClient =
   });
 
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+</file>
+
+<file path="lib/saved.ts">
+export const MAX_COLLECTION_NAME_LENGTH = 60;
+
+// Shape this file needs from Prisma's SavedPost rows — hand-rolled, same
+// convention as lib/posts.ts's PostRecord, so this has no compile-time
+// dependency on the generated client.
+export type SavedPostRecord = {
+  postId: string;
+  collections: { collectionId: string }[];
+};
+
+export type CollectionRecord = {
+  id: string;
+  name: string;
+};
+
+// The bundle GET /api/saved returns: every saved post id, plus every
+// collection with the post ids it contains. This is the exact shape the
+// old SavedPostsProvider kept in memory — the frontend hook derives
+// isSaved/isPostInCollection/getPostIdsForCollection from it the same
+// way the provider's closures used to, just backed by a real fetch
+// instead of useState.
+export function buildSavedBundle(
+  savedPosts: SavedPostRecord[],
+  collections: CollectionRecord[],
+) {
+  const postIdsByCollection = new Map<string, string[]>();
+  for (const saved of savedPosts) {
+    for (const { collectionId } of saved.collections) {
+      const list = postIdsByCollection.get(collectionId);
+      if (list) {
+        list.push(saved.postId);
+      } else {
+        postIdsByCollection.set(collectionId, [saved.postId]);
+      }
+    }
+  }
+
+  return {
+    savedPostIds: savedPosts.map((s) => s.postId),
+    collections: collections.map((c) => ({
+      id: c.id,
+      name: c.name,
+      postIds: postIdsByCollection.get(c.id) ?? [],
+    })),
+  };
+}
 </file>
 
 <file path="prisma/migrations/20260727202204_init/migration.sql">
@@ -14650,54 +14826,87 @@ ALTER TABLE "MagicLinkToken" ADD CONSTRAINT "MagicLinkToken_userId_fkey" FOREIGN
 provider = "postgresql"
 </file>
 
-<file path="services/postService.ts">
+<file path="services/savedService.ts">
 import { apiFetch } from "@/utils/apiClient";
 import { API_ROUTES } from "@/utils/apiRoutes";
-import type { Post } from "@/types/post";
 
-export type CreatePostProduct = { label: string };
-
-// Mirrors the per-mediaType fields app/api/posts/route.ts actually reads —
-// every field here must already be a real Cloudinary URL from
-// useUploadMedia, never a blob: URL. The route re-validates ownership of
-// each URL server-side regardless, but the caller should never be
-// passing anything else in the first place.
-export type CreatePostInput = {
-  mediaType: "IMAGE" | "CAROUSEL" | "VIDEO" | "BEFORE_AFTER";
-  caption?: string;
-  products?: CreatePostProduct[];
-  // IMAGE
-  imageSrc?: string;
-  imageAlt?: string;
-  // CAROUSEL
-  carouselItems?: { src: string; alt?: string }[];
-  // VIDEO
-  videoSrc?: string;
-  // BEFORE_AFTER
-  beforeSrc?: string;
-  beforeAlt?: string;
-  afterSrc?: string;
-  afterAlt?: string;
+export type SavedCollection = {
+  id: string;
+  name: string;
+  postIds: string[];
 };
 
-export type ListPostsResult =
-  | { success: true; posts: Post[] }
+export type SavedBundleResult =
+  | { success: true; savedPostIds: string[]; collections: SavedCollection[] }
   | { success: false; error: string };
 
-export async function listPosts(): Promise<ListPostsResult> {
-  return apiFetch(API_ROUTES.POSTS.LIST, { method: "GET" });
+export async function getSavedBundle(): Promise<SavedBundleResult> {
+  return apiFetch(API_ROUTES.SAVED.BUNDLE, { method: "GET" });
 }
 
-export type CreatePostResult =
-  | { success: true; post: Post }
+export type ToggleSaveResult =
+  | { success: true; saved: boolean }
   | { success: false; error: string };
 
-export async function createPost(
-  data: CreatePostInput,
-): Promise<CreatePostResult> {
-  return apiFetch(API_ROUTES.POSTS.CREATE, {
+export async function toggleSavedPost(
+  postId: string,
+): Promise<ToggleSaveResult> {
+  return apiFetch(API_ROUTES.SAVED.TOGGLE_SAVE, {
     method: "POST",
-    body: JSON.stringify(data),
+    body: JSON.stringify({ postId }),
+  });
+}
+
+export type CreateCollectionResult =
+  | { success: true; collection: { id: string; name: string } }
+  | { success: false; error: string };
+
+export async function createCollection(
+  name: string,
+): Promise<CreateCollectionResult> {
+  return apiFetch(API_ROUTES.SAVED.CREATE_COLLECTION, {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+}
+
+export type RenameCollectionResult =
+  | { success: true; collection: { id: string; name: string } }
+  | { success: false; error: string };
+
+export async function renameCollection(
+  collectionId: string,
+  name: string,
+): Promise<RenameCollectionResult> {
+  return apiFetch(API_ROUTES.SAVED.RENAME_COLLECTION(collectionId), {
+    method: "PATCH",
+    body: JSON.stringify({ name }),
+  });
+}
+
+export type DeleteCollectionResult =
+  | { success: true }
+  | { success: false; error: string };
+
+export async function deleteCollection(
+  collectionId: string,
+): Promise<DeleteCollectionResult> {
+  return apiFetch(API_ROUTES.SAVED.DELETE_COLLECTION(collectionId), {
+    method: "DELETE",
+  });
+}
+
+export type ToggleCollectionPostResult =
+  | { success: true; inCollection: boolean }
+  | { success: false; error: string };
+
+export async function toggleCollectionPost(
+  collectionId: string,
+  postId: string,
+): Promise<ToggleCollectionPostResult> {
+  return apiFetch(API_ROUTES.SAVED.TOGGLE_COLLECTION_POST(collectionId), {
+    method: "POST",
+    body: JSON.stringify({ postId }),
   });
 }
 </file>
@@ -15820,6 +16029,338 @@ export function UserListWithSearch({ users, emptyLabel }: Props) {
 }
 </file>
 
+<file path="components/saved/CollectionOptionsSheet.tsx">
+"use client";
+
+import { useState, type KeyboardEvent } from "react";
+import { XIcon, PencilSimpleIcon, TrashIcon } from "@phosphor-icons/react";
+import { useSavedPosts } from "@/hooks/useSavedPosts";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+
+type Props = {
+  open: boolean;
+  onClose: () => void;
+  collectionId: string;
+  currentName: string;
+  // Caller navigates away after a delete, since the page being viewed no
+  // longer has anything to show.
+  onDeleted: () => void;
+};
+
+export function CollectionOptionsSheet({
+  open,
+  onClose,
+  collectionId,
+  currentName,
+  onDeleted,
+}: Props) {
+  const { renameCollection, deleteCollection } = useSavedPosts();
+  const [mode, setMode] = useState<"menu" | "rename">("menu");
+  const [name, setName] = useState(currentName);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  if (!open) return null;
+
+  function handleClose() {
+    setMode("menu");
+    setName(currentName);
+    onClose();
+  }
+
+  function handleSaveRename() {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    renameCollection(collectionId, trimmed);
+    handleClose();
+  }
+
+  function handleDeleteConfirmed() {
+    deleteCollection(collectionId);
+    setConfirmingDelete(false);
+    handleClose();
+    onDeleted();
+  }
+
+  function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      handleSaveRename();
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-60 flex items-end">
+      <div
+        className="absolute inset-0 bg-black/40"
+        onClick={handleClose}
+        aria-hidden
+      />
+
+      <div className="relative mx-auto w-full max-w-lg rounded-t-2xl bg-background pb-[calc(1rem+env(safe-area-inset-bottom))]">
+        <div className="relative flex items-center justify-center border-b border-foreground/10 py-3">
+          <span className="text-sm font-medium">
+            {mode === "menu" ? "Collection options" : "Rename collection"}
+          </span>
+          <button
+            type="button"
+            onClick={handleClose}
+            aria-label="Close"
+            className="absolute right-3 top-1/2 -translate-y-1/2"
+          >
+            <XIcon size={20} className="text-foreground" />
+          </button>
+        </div>
+
+        {mode === "menu" ? (
+          <>
+            <button
+              type="button"
+              onClick={() => setMode("rename")}
+              className="flex w-full items-center gap-3 px-4 py-4 text-sm text-foreground"
+            >
+              <span className="flex size-9 items-center justify-center rounded-full bg-foreground/10">
+                <PencilSimpleIcon size={18} />
+              </span>
+              Rename collection
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setConfirmingDelete(true)}
+              className="flex w-full items-center gap-3 px-4 py-4 text-sm text-red-500"
+            >
+              <span className="flex size-9 items-center justify-center rounded-full bg-foreground/10">
+                <TrashIcon size={18} />
+              </span>
+              Delete collection
+            </button>
+          </>
+        ) : (
+          <div className="flex items-center gap-2 px-4 py-4">
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={handleKeyDown}
+              autoFocus
+              className="flex-1 rounded-full border border-foreground/15 bg-transparent px-3 py-2 text-sm outline-none"
+            />
+            <button
+              type="button"
+              onClick={handleSaveRename}
+              disabled={!name.trim()}
+              className="shrink-0 rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-30"
+            >
+              Save
+            </button>
+          </div>
+        )}
+      </div>
+
+      <ConfirmDialog
+        open={confirmingDelete}
+        title={`Delete "${currentName}"?`}
+        description="Posts inside will stay saved elsewhere — this collection itself will be gone for good."
+        confirmLabel="Delete"
+        destructive
+        onConfirm={handleDeleteConfirmed}
+        onCancel={() => setConfirmingDelete(false)}
+      />
+    </div>
+  );
+}
+</file>
+
+<file path="components/saved/CreateCollectionSheet.tsx">
+"use client";
+
+import { useState, type KeyboardEvent } from "react";
+import { XIcon } from "@phosphor-icons/react";
+import { useSavedPosts } from "@/hooks/useSavedPosts";
+
+type Props = {
+  open: boolean;
+  onClose: () => void;
+};
+
+export function CreateCollectionSheet({ open, onClose }: Props) {
+  const { createCollection } = useSavedPosts();
+  const [name, setName] = useState("");
+
+  if (!open) return null;
+
+  async function handleCreate() {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setName("");
+    onClose();
+    await createCollection(trimmed);
+  }
+
+  function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      handleCreate();
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-60 flex items-end">
+      <div
+        className="absolute inset-0 bg-black/40"
+        onClick={onClose}
+        aria-hidden
+      />
+
+      <div className="relative mx-auto w-full max-w-lg rounded-t-2xl bg-background pb-[calc(1rem+env(safe-area-inset-bottom))]">
+        <div className="relative flex items-center justify-center border-b border-foreground/10 py-3">
+          <span className="text-sm font-medium">New collection</span>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="absolute right-3 top-1/2 -translate-y-1/2"
+          >
+            <XIcon size={20} className="text-foreground" />
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2 px-4 py-4">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={handleKeyDown}
+            autoFocus
+            placeholder="Collection name…"
+            className="flex-1 rounded-full border border-foreground/15 bg-transparent px-3 py-2 text-sm outline-none"
+          />
+          <button
+            type="button"
+            onClick={handleCreate}
+            disabled={!name.trim()}
+            className="shrink-0 rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-30"
+          >
+            Create
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+</file>
+
+<file path="components/saved/SaveToCollectionSheet.tsx">
+"use client";
+
+import { useState, type KeyboardEvent } from "react";
+import { XIcon, CheckIcon, PlusIcon } from "@phosphor-icons/react";
+import { useSavedPosts } from "@/hooks/useSavedPosts";
+
+type Props = {
+  open: boolean;
+  onClose: () => void;
+  postId: string;
+};
+
+export function SaveToCollectionSheet({ open, onClose, postId }: Props) {
+  const {
+    collections,
+    createCollection,
+    isPostInCollection,
+    toggleCollectionForPost,
+  } = useSavedPosts();
+  const [newName, setNewName] = useState("");
+
+  if (!open) return null;
+
+  async function handleCreate() {
+    const trimmed = newName.trim();
+    if (!trimmed) return;
+    setNewName("");
+    const id = await createCollection(trimmed);
+    if (id) toggleCollectionForPost(postId, id);
+  }
+
+  function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      handleCreate();
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-60 flex items-end">
+      <div
+        className="absolute inset-0 bg-black/40"
+        onClick={onClose}
+        aria-hidden
+      />
+
+      <div className="relative mx-auto flex max-h-[80dvh] w-full max-w-lg flex-col rounded-t-2xl bg-background pb-[calc(1rem+env(safe-area-inset-bottom))]">
+        <div className="relative flex items-center justify-center border-b border-foreground/10 py-3">
+          <span className="text-sm font-medium">Save to collection</span>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="absolute right-3 top-1/2 -translate-y-1/2"
+          >
+            <XIcon size={20} className="text-foreground" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {collections.length === 0 ? (
+            <p className="px-4 py-6 text-center text-sm text-foreground/50">
+              No collections yet. Create one below.
+            </p>
+          ) : (
+            collections.map((collection) => {
+              const inCollection = isPostInCollection(postId, collection.id);
+              return (
+                <button
+                  key={collection.id}
+                  type="button"
+                  onClick={() => toggleCollectionForPost(postId, collection.id)}
+                  className="flex w-full items-center justify-between px-4 py-3 text-sm"
+                >
+                  <span>{collection.name}</span>
+                  {inCollection && (
+                    <CheckIcon
+                      size={18}
+                      weight="bold"
+                      className="text-foreground"
+                    />
+                  )}
+                </button>
+              );
+            })
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 border-t border-foreground/10 px-4 py-3">
+          <input
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="New collection name…"
+            className="flex-1 rounded-full border border-foreground/15 bg-transparent px-3 py-2 text-sm outline-none"
+          />
+          <button
+            type="button"
+            onClick={handleCreate}
+            disabled={!newName.trim()}
+            aria-label="Create collection"
+            className="flex size-9 shrink-0 items-center justify-center rounded-full border border-foreground/15 disabled:opacity-30"
+          >
+            <PlusIcon size={16} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+</file>
+
 <file path="components/shared/ProductTagEditor.tsx">
 "use client";
 
@@ -16309,6 +16850,85 @@ export function useCurrentUser() {
     isLoading: query.isLoading,
     refetch: query.refetch,
   };
+}
+</file>
+
+<file path="hooks/usePosts.ts">
+"use client";
+
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { Post } from "@/types/post";
+import {
+  listPosts,
+  deletePost as deletePostRequest,
+} from "@/services/postService";
+
+const POSTS_QUERY_KEY = ["posts"] as const;
+
+// Replaces context/PostsProvider.tsx. Same query key, same shape — react-
+// query already dedupes/shares the cache across every component that
+// calls this, so HomeFeed and PostCard both calling usePosts() does NOT
+// mean two separate fetches. No provider wrapping needed, which also
+// means this only ever runs on pages that actually render one of those
+// two components — not on every page in the app (that was what caused
+// the /auth refresh-token 401 loop: PostsProvider used to sit in
+// app/layout.tsx, so it fired on /auth too, on every logged-out load).
+export function usePosts() {
+  const queryClient = useQueryClient();
+
+  const query = useQuery({
+    queryKey: POSTS_QUERY_KEY,
+    queryFn: async () => {
+      const result = await listPosts();
+      if (!result?.success) return [];
+      return result.posts;
+    },
+  });
+
+  const posts = query.data ?? [];
+
+  // No-op passthrough — real creation goes through useCreatePost, which
+  // already invalidates POSTS_QUERY_KEY on success and lets that refetch
+  // put the new post into `posts`, instead of trusting a client-built
+  // object as the source of truth.
+  function addPost(_post: Post) {}
+
+  // apiFetch never throws on a failed request — network errors, timeouts,
+  // and non-2xx responses all resolve to a `{ success: false }` object
+  // rather than rejecting (see utils/apiClient.ts and the same reasoning
+  // in useSavedPosts.ts) — so failure has to be read off the resolved
+  // result inside onSettled, not caught via onError.
+  const deletePostMutation = useMutation({
+    mutationFn: (postId: string) => deletePostRequest(postId),
+    onMutate: async (postId) => {
+      await queryClient.cancelQueries({ queryKey: POSTS_QUERY_KEY });
+      const previous = queryClient.getQueryData<Post[]>(POSTS_QUERY_KEY);
+      queryClient.setQueryData<Post[]>(POSTS_QUERY_KEY, (prev) =>
+        (prev ?? []).filter((p) => p.id !== postId),
+      );
+      return { previous };
+    },
+    onSettled: (result, _error, _postId, context) => {
+      if (result === undefined || !result.success) {
+        // Failed — put the removed post right back where it was rather
+        // than leaving the feed silently short one item.
+        if (context?.previous) {
+          queryClient.setQueryData(POSTS_QUERY_KEY, context.previous);
+        }
+      } else {
+        // Succeeded — the optimistic removal already matches server
+        // state, but refetch anyway so the list is fully in sync (e.g.
+        // with another post that became visible now this one's gone).
+        queryClient.invalidateQueries({ queryKey: POSTS_QUERY_KEY });
+      }
+    },
+  });
+
+  function deletePost(postId: string) {
+    deletePostMutation.mutate(postId);
+  }
+
+  return { posts, isLoading: query.isLoading, addPost, deletePost };
 }
 </file>
 
@@ -16934,6 +17554,66 @@ export async function logOutUser() {
 }
 </file>
 
+<file path="services/postService.ts">
+import { apiFetch } from "@/utils/apiClient";
+import { API_ROUTES } from "@/utils/apiRoutes";
+import type { Post } from "@/types/post";
+
+export type CreatePostProduct = { label: string };
+
+// Mirrors the per-mediaType fields app/api/posts/route.ts actually reads —
+// every field here must already be a real Cloudinary URL from
+// useUploadMedia, never a blob: URL. The route re-validates ownership of
+// each URL server-side regardless, but the caller should never be
+// passing anything else in the first place.
+export type CreatePostInput = {
+  mediaType: "IMAGE" | "CAROUSEL" | "VIDEO" | "BEFORE_AFTER";
+  caption?: string;
+  products?: CreatePostProduct[];
+  // IMAGE
+  imageSrc?: string;
+  imageAlt?: string;
+  // CAROUSEL
+  carouselItems?: { src: string; alt?: string }[];
+  // VIDEO
+  videoSrc?: string;
+  // BEFORE_AFTER
+  beforeSrc?: string;
+  beforeAlt?: string;
+  afterSrc?: string;
+  afterAlt?: string;
+};
+
+export type ListPostsResult =
+  | { success: true; posts: Post[] }
+  | { success: false; error: string };
+
+export async function listPosts(): Promise<ListPostsResult> {
+  return apiFetch(API_ROUTES.POSTS.LIST, { method: "GET" });
+}
+
+export type CreatePostResult =
+  | { success: true; post: Post }
+  | { success: false; error: string };
+
+export async function createPost(
+  data: CreatePostInput,
+): Promise<CreatePostResult> {
+  return apiFetch(API_ROUTES.POSTS.CREATE, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export type DeletePostResult =
+  | { success: true }
+  | { success: false; error: string };
+
+export async function deletePost(postId: string): Promise<DeletePostResult> {
+  return apiFetch(API_ROUTES.POSTS.DELETE(postId), { method: "DELETE" });
+}
+</file>
+
 <file path="services/userService.ts">
 import { apiFetch } from "@/utils/apiClient";
 import { API_ROUTES } from "@/utils/apiRoutes";
@@ -17472,138 +18152,6 @@ export default function FollowingPage() {
           users={following}
           emptyLabel="Not following anyone yet."
         />
-      </div>
-    </RequireAuth>
-  );
-}
-</file>
-
-<file path="app/saved/[collectionId]/page.tsx">
-"use client";
-
-import { use, useEffect, useState } from "react";
-import { notFound, useRouter } from "next/navigation";
-import { DotsThreeIcon } from "@phosphor-icons/react";
-import { usePosts } from "@/hooks/usePosts";
-import { useSavedPosts } from "@/context/SavedPostsProvider";
-import { PostGrid } from "@/components/profile/PostGrid";
-import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
-import { CollectionOptionsSheet } from "@/components/saved/CollectionOptionsSheet";
-import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
-import { PATHS } from "@/utils/paths";
-import { RequireAuth } from "@/components/auth/RequireAuth";
-
-type Props = {
-  params: Promise<{ collectionId: string }>;
-};
-
-const SIMULATED_LOAD_MS = 700;
-
-export default function SavedCollectionPage({ params }: Props) {
-  const { collectionId } = use(params);
-  const router = useRouter();
-  const { posts } = usePosts();
-  const {
-    isSaved,
-    toggleSave,
-    collections,
-    getPostIdsForCollection,
-    toggleCollectionForPost,
-  } = useSavedPosts();
-  const [loading, setLoading] = useState(true);
-  const [optionsOpen, setOptionsOpen] = useState(false);
-  const [pendingRemovePostId, setPendingRemovePostId] = useState<string | null>(
-    null,
-  );
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => setLoading(false), SIMULATED_LOAD_MS);
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  const isAll = collectionId === "all";
-  const collection = collections.find((c) => c.id === collectionId);
-
-  // "all" is always valid (it's the built-in view) — anything else must
-  // match a real collection, or this is a bad/stale link.
-  if (!isAll && !collection) {
-    notFound();
-  }
-
-  const collectionPosts = isAll
-    ? posts.filter((post) => isSaved(post.id))
-    : posts.filter((post) =>
-        getPostIdsForCollection(collectionId).includes(post.id),
-      );
-
-  const title = isAll ? "All Saved" : collection?.name;
-
-  // On "All Saved", removing means fully unsaving — which also cascades
-  // to remove it from every collection, per toggleSave's own logic. On a
-  // specific collection, removing only takes it out of THIS collection —
-  // it stays saved everywhere else it already was.
-  function confirmRemove() {
-    if (!pendingRemovePostId) return;
-    if (isAll) {
-      toggleSave(pendingRemovePostId);
-    } else {
-      toggleCollectionForPost(pendingRemovePostId, collectionId);
-    }
-    setPendingRemovePostId(null);
-  }
-
-  return (
-    <RequireAuth>
-      <div className="flex flex-col">
-        <div className="flex items-center justify-between border-b border-foreground/10 px-4 py-3">
-          <p className="text-sm font-medium">{title}</p>
-          {/* Rename/delete only makes sense on a real collection, not the
-              built-in "All Saved" view */}
-          {!isAll && collection && (
-            <button
-              type="button"
-              onClick={() => setOptionsOpen(true)}
-              aria-label="Collection options"
-            >
-              <DotsThreeIcon size={20} className="text-foreground" />
-            </button>
-          )}
-        </div>
-
-        {loading ? (
-          <PostGridSkeleton />
-        ) : (
-          <PostGrid
-            posts={collectionPosts}
-            emptyTitle="Nothing here yet"
-            emptyDescription="Posts you save to this collection will show up here."
-            onRemove={setPendingRemovePostId}
-          />
-        )}
-
-        <ConfirmDialog
-          open={pendingRemovePostId !== null}
-          title={isAll ? "Remove from Saved?" : `Remove from "${title}"?`}
-          description={
-            isAll
-              ? "This post will no longer be saved."
-              : "This post will stay saved elsewhere, just not in this collection."
-          }
-          confirmLabel="Remove"
-          destructive
-          onConfirm={confirmRemove}
-          onCancel={() => setPendingRemovePostId(null)}
-        />
-
-        {!isAll && collection && (
-          <CollectionOptionsSheet
-            open={optionsOpen}
-            onClose={() => setOptionsOpen(false)}
-            collectionId={collection.id}
-            currentName={collection.name}
-            onDeleted={() => router.replace(PATHS.SAVED)}
-          />
-        )}
       </div>
     </RequireAuth>
   );
@@ -18443,40 +18991,6 @@ export type Post = {
 };
 </file>
 
-<file path="utils/apiRoutes.ts">
-// Everything from the shared boilerplate's API_ROUTES that isn't shown
-// here (ADMIN, DEPOSITS, WITHDRAWALS, TRANSACTIONS, SUPPORT, PRICES)
-// belonged to a different app template — not part of Vanity, and not
-// carried over. Add new sections here as real Vanity feature endpoints
-// (comments, follow, saved, notifications) get built.
-export const API_ROUTES = {
-  AUTH: {
-    // Unified signup + login + resend — same call every time, since a
-    // magic link makes all three the same action.
-    REQUEST_LINK: "/api/auth/request-link",
-    VERIFY_TOKEN: (token: string) => `/api/auth/verify/${token}`,
-    LOGOUT: "/api/auth/logout",
-    REFRESH_TOKEN: "/api/auth/refresh-token",
-  },
-
-  USER: {
-    ME: "/api/user/me",
-    ONBOARDING: "/api/user/onboarding",
-    CHECK_USERNAME: (username: string) =>
-      `/api/user/username-available?username=${encodeURIComponent(username)}`,
-  },
-
-  UPLOAD: {
-    SIGNATURE: "/api/upload/signature",
-  },
-
-  POSTS: {
-    LIST: "/api/posts",
-    CREATE: "/api/posts",
-  },
-};
-</file>
-
 <file path=".gitignore">
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
@@ -18523,88 +19037,131 @@ next-env.d.ts
 /lib/generated/prisma
 </file>
 
-<file path="app/saved/page.tsx">
+<file path="app/saved/[collectionId]/page.tsx">
 "use client";
 
-import { useEffect, useState } from "react";
+import { use, useState } from "react";
+import { notFound, useRouter } from "next/navigation";
+import { DotsThreeIcon } from "@phosphor-icons/react";
 import { usePosts } from "@/hooks/usePosts";
-import { useSavedPosts } from "@/context/SavedPostsProvider";
-import { getPostThumbnail } from "@/utils/postThumbnail";
-import { CollectionTile } from "@/components/saved/CollectionTile";
-import { CreateCollectionTile } from "@/components/saved/CreateCollectionTile";
-import { CreateCollectionSheet } from "@/components/saved/CreateCollectionSheet";
+import { useSavedPosts } from "@/hooks/useSavedPosts";
+import { PostGrid } from "@/components/profile/PostGrid";
 import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
+import { CollectionOptionsSheet } from "@/components/saved/CollectionOptionsSheet";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { PATHS } from "@/utils/paths";
 import { RequireAuth } from "@/components/auth/RequireAuth";
 
-// Simulated so the skeleton is actually visible — swap for a real pending
-// flag once saved posts/collections come from a real fetch.
-const SIMULATED_LOAD_MS = 800;
+type Props = {
+  params: Promise<{ collectionId: string }>;
+};
 
-export default function SavedPage() {
-  const { posts } = usePosts();
-  const { isSaved, collections, getPostIdsForCollection } = useSavedPosts();
-  const [loading, setLoading] = useState(true);
-  const [createOpen, setCreateOpen] = useState(false);
+export default function SavedCollectionPage({ params }: Props) {
+  const { collectionId } = use(params);
+  const router = useRouter();
+  const { posts, isLoading: postsLoading } = usePosts();
+  const {
+    isSaved,
+    toggleSave,
+    collections,
+    getPostIdsForCollection,
+    toggleCollectionForPost,
+    isLoading: savedLoading,
+  } = useSavedPosts();
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  const [pendingRemovePostId, setPendingRemovePostId] = useState<string | null>(
+    null,
+  );
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => setLoading(false), SIMULATED_LOAD_MS);
-    return () => window.clearTimeout(timer);
-  }, []);
+  // Real pending state — same reasoning as app/saved/page.tsx.
+  const loading = postsLoading || savedLoading;
 
-  const allSavedPosts = posts.filter((post) => isSaved(post.id));
-  const allSavedCover = allSavedPosts[0]
-    ? getPostThumbnail(allSavedPosts[0])
-    : undefined;
+  const isAll = collectionId === "all";
+  const collection = collections.find((c) => c.id === collectionId);
+
+  // "all" is always valid (it's the built-in view) — anything else must
+  // match a real collection, or this is a bad/stale link. Only decide
+  // that once the saved bundle has actually loaded — `collections` is
+  // empty during the initial fetch too, and that's not the same thing
+  // as a real 404.
+  if (!isAll && !collection && !savedLoading) {
+    notFound();
+  }
+
+  const collectionPosts = isAll
+    ? posts.filter((post) => isSaved(post.id))
+    : posts.filter((post) =>
+        getPostIdsForCollection(collectionId).includes(post.id),
+      );
+
+  const title = isAll ? "All Saved" : collection?.name;
+
+  // On "All Saved", removing means fully unsaving — which also cascades
+  // to remove it from every collection, per toggleSave's own logic. On a
+  // specific collection, removing only takes it out of THIS collection —
+  // it stays saved everywhere else it already was.
+  function confirmRemove() {
+    if (!pendingRemovePostId) return;
+    if (isAll) {
+      toggleSave(pendingRemovePostId);
+    } else {
+      toggleCollectionForPost(pendingRemovePostId, collectionId);
+    }
+    setPendingRemovePostId(null);
+  }
 
   return (
     <RequireAuth>
       <div className="flex flex-col">
-        <div className="border-b border-foreground/10 px-4 py-3">
-          <p className="text-sm font-medium">Saved</p>
+        <div className="flex items-center justify-between border-b border-foreground/10 px-4 py-3">
+          <p className="text-sm font-medium">{title}</p>
+          {/* Rename/delete only makes sense on a real collection, not the
+              built-in "All Saved" view */}
+          {!isAll && collection && (
+            <button
+              type="button"
+              onClick={() => setOptionsOpen(true)}
+              aria-label="Collection options"
+            >
+              <DotsThreeIcon size={20} className="text-foreground" />
+            </button>
+          )}
         </div>
 
         {loading ? (
           <PostGridSkeleton />
         ) : (
-          <div className="grid grid-cols-2 gap-2 p-3">
-            {/* Always present, same as the create tile — it's the default
-                collection, not something that only exists once it has posts */}
-            <CollectionTile
-              id="all"
-              name="All Saved"
-              coverSrc={allSavedCover}
-              count={allSavedPosts.length}
-            />
-
-            {collections.map((collection) => {
-              const postIds = getPostIdsForCollection(collection.id);
-              const collectionPosts = posts.filter((p) =>
-                postIds.includes(p.id),
-              );
-              const cover = collectionPosts[0]
-                ? getPostThumbnail(collectionPosts[0])
-                : undefined;
-              return (
-                <CollectionTile
-                  key={collection.id}
-                  id={collection.id}
-                  name={collection.name}
-                  coverSrc={cover}
-                  count={collectionPosts.length}
-                />
-              );
-            })}
-
-            {/* Always present, even with nothing saved yet — creating a
-                collection shouldn't require saving something first */}
-            <CreateCollectionTile onPress={() => setCreateOpen(true)} />
-          </div>
+          <PostGrid
+            posts={collectionPosts}
+            emptyTitle="Nothing here yet"
+            emptyDescription="Posts you save to this collection will show up here."
+            onRemove={setPendingRemovePostId}
+          />
         )}
 
-        <CreateCollectionSheet
-          open={createOpen}
-          onClose={() => setCreateOpen(false)}
+        <ConfirmDialog
+          open={pendingRemovePostId !== null}
+          title={isAll ? "Remove from Saved?" : `Remove from "${title}"?`}
+          description={
+            isAll
+              ? "This post will no longer be saved."
+              : "This post will stay saved elsewhere, just not in this collection."
+          }
+          confirmLabel="Remove"
+          destructive
+          onConfirm={confirmRemove}
+          onCancel={() => setPendingRemovePostId(null)}
         />
+
+        {!isAll && collection && (
+          <CollectionOptionsSheet
+            open={optionsOpen}
+            onClose={() => setOptionsOpen(false)}
+            collectionId={collection.id}
+            currentName={collection.name}
+            onDeleted={() => router.replace(PATHS.SAVED)}
+          />
+        )}
       </div>
     </RequireAuth>
   );
@@ -19143,194 +19700,6 @@ export function OnboardingFlow() {
 }
 </file>
 
-<file path="proxy.ts">
-import { NextRequest, NextResponse } from "next/server";
-import {
-  verifyAccessToken,
-  checkRefreshToken,
-  signAccessToken,
-} from "./lib/auth";
-import { prisma } from "./lib/prisma";
-
-function addSecurityHeaders(response: NextResponse) {
-  response.headers.set(
-    "X-Robots-Tag",
-    "noindex, nofollow, noarchive, nosnippet",
-  );
-  response.headers.set("X-Content-Type-Options", "nosniff");
-  response.headers.set("X-Frame-Options", "DENY");
-  response.headers.set("Referrer-Policy", "no-referrer");
-  response.headers.set("Permissions-Policy", "interest-cohort=()");
-  response.headers.set("X-XSS-Protection", "1; mode=block");
-  return response;
-}
-
-function isBot(userAgent: string): boolean {
-  const botPatterns = [
-    "googlebot",
-    "bingbot",
-    "slurp",
-    "duckduckbot",
-    "baiduspider",
-    "yandexbot",
-    "crawler",
-    "spider",
-    "scraper",
-    "bot",
-    "archive.org",
-    "wayback",
-    "ia_archiver",
-    "gptbot",
-    "chatgpt",
-    "ccbot",
-    "anthropic",
-    "claude",
-    "cohere",
-  ];
-  const lowerUA = userAgent.toLowerCase();
-  return botPatterns.some((pattern) => lowerUA.includes(pattern));
-}
-
-// Builds a NextResponse.next() that actually forwards a header to the
-// downstream Route Handler's req.headers — just calling
-// NextResponse.next().headers.set(...) does NOT do this; it only sets a
-// header on the response sent back to the browser. This is the pattern
-// that's actually required for the route handler to see it.
-function nextWithRequestHeader(req: NextRequest, name: string, value: string) {
-  const headers = new Headers(req.headers);
-  headers.set(name, value);
-  return NextResponse.next({ request: { headers } });
-}
-
-export async function proxy(req: NextRequest) {
-  const pathname = req.nextUrl.pathname;
-
-  const userAgent = req.headers.get("user-agent") || "";
-  if (isBot(userAgent)) {
-    return addSecurityHeaders(
-      new NextResponse("Access Denied", { status: 403 }),
-    );
-  }
-
-  // Vanity-specific protected API routes. Deliberately short — the
-  // shared boilerplate's deposits/withdrawals/admin/support routes
-  // belonged to a different app entirely and weren't carried over. Add
-  // to this list as real feature API routes (comments, follow, saved,
-  // notifications) get built.
-  //
-  // /api/posts covers both GET (list) and POST (create) — the whole
-  // app is already gated behind RequireAuth on the frontend (see
-  // app/page.tsx), so there's no logged-out "browse the feed" case to
-  // carve out an exception for here.
-  const isProtectedRoute = ["/api/user", "/api/upload", "/api/posts"].some(
-    (route) => pathname.startsWith(route),
-  );
-
-  if (!isProtectedRoute) {
-    return addSecurityHeaders(NextResponse.next());
-  }
-
-  const accessToken = req.cookies.get("accessToken")?.value;
-  const refreshToken = req.cookies.get("refreshToken")?.value;
-  const uid = req.cookies.get("uid")?.value;
-
-  // Try access token first
-  if (accessToken) {
-    try {
-      const payload = verifyAccessToken(accessToken);
-      const res = nextWithRequestHeader(
-        req,
-        "x-user-id",
-        (payload as { sub: string }).sub,
-      );
-      // No x-user-role header — the schema has no `role` concept.
-      // Add one back here (and to User) if/when an admin tier exists.
-      return addSecurityHeaders(res);
-    } catch {
-      // Access token invalid/expired, fall through to refresh
-    }
-  }
-
-  // Try refresh token if access token failed — a lightweight, silent
-  // reissue only. This does NOT rotate the refresh token itself; that
-  // heavier operation is reserved for the explicit /api/auth/refresh-
-  // token route, so a refresh token isn't rotated on every request. It
-  // still needs to check for reuse, though — a stolen/stale token being
-  // replayed is exactly as dangerous here as it is on the dedicated
-  // refresh route.
-  if (refreshToken && uid) {
-    try {
-      const result = await checkRefreshToken(uid, refreshToken);
-
-      if (result.status === "reused") {
-        console.warn(`Refresh token reuse detected for user ${uid}`);
-        const res = addSecurityHeaders(
-          NextResponse.json(
-            { success: false, error: "Unauthorized" },
-            { status: 401 },
-          ),
-        );
-        // Every session for this user was already revoked inside
-        // checkRefreshToken — clear this device's cookies too, since
-        // they're now pointing at dead tokens either way.
-        for (const name of ["accessToken", "refreshToken", "uid"]) {
-          res.headers.append(
-            "Set-Cookie",
-            `${name}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`,
-          );
-        }
-        return res;
-      }
-
-      if (result.status === "valid") {
-        const user = await prisma.user.findUnique({
-          where: { id: uid },
-          select: { id: true },
-        });
-
-        if (user) {
-          const newAccessToken = signAccessToken({ sub: user.id });
-
-          const res = nextWithRequestHeader(req, "x-user-id", user.id);
-
-          const cookieAccess = [
-            `accessToken=${newAccessToken}`,
-            `Path=/`,
-            `HttpOnly`,
-            `SameSite=Strict`,
-            process.env.NODE_ENV === "production" ? "Secure" : "",
-            `Max-Age=${60 * 15}`,
-          ]
-            .filter(Boolean)
-            .join("; ");
-
-          res.headers.append("Set-Cookie", cookieAccess);
-
-          return addSecurityHeaders(res);
-        }
-      }
-    } catch (err) {
-      console.error("proxy refresh error:", err);
-    }
-  }
-
-  // Both tokens invalid or missing
-  return addSecurityHeaders(
-    NextResponse.json(
-      { success: false, error: "Unauthorized" },
-      { status: 401 },
-    ),
-  );
-}
-
-export const config = {
-  matcher: [
-    "/api/user/:path*",
-    "/((?!_next/static|_next/image|favicon.ico).*)",
-  ],
-};
-</file>
-
 <file path="app/explore/page.tsx">
 "use client";
 
@@ -19426,6 +19795,94 @@ export default function ExplorePage() {
             emptyDescription="New posts from the community will show up here."
           />
         )}
+      </div>
+    </RequireAuth>
+  );
+}
+</file>
+
+<file path="app/saved/page.tsx">
+"use client";
+
+import { useState } from "react";
+import { usePosts } from "@/hooks/usePosts";
+import { useSavedPosts } from "@/hooks/useSavedPosts";
+import { getPostThumbnail } from "@/utils/postThumbnail";
+import { CollectionTile } from "@/components/saved/CollectionTile";
+import { CreateCollectionTile } from "@/components/saved/CreateCollectionTile";
+import { CreateCollectionSheet } from "@/components/saved/CreateCollectionSheet";
+import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
+import { RequireAuth } from "@/components/auth/RequireAuth";
+
+export default function SavedPage() {
+  const { posts, isLoading: postsLoading } = usePosts();
+  const {
+    isSaved,
+    collections,
+    getPostIdsForCollection,
+    isLoading: savedLoading,
+  } = useSavedPosts();
+  const [createOpen, setCreateOpen] = useState(false);
+
+  // Real pending state now — both the feed (for post thumbnails) and the
+  // saved bundle (for what's actually saved) need to have loaded before
+  // there's anything meaningful to render.
+  const loading = postsLoading || savedLoading;
+
+  const allSavedPosts = posts.filter((post) => isSaved(post.id));
+  const allSavedCover = allSavedPosts[0]
+    ? getPostThumbnail(allSavedPosts[0])
+    : undefined;
+
+  return (
+    <RequireAuth>
+      <div className="flex flex-col">
+        <div className="border-b border-foreground/10 px-4 py-3">
+          <p className="text-sm font-medium">Saved</p>
+        </div>
+
+        {loading ? (
+          <PostGridSkeleton />
+        ) : (
+          <div className="grid grid-cols-2 gap-2 p-3">
+            {/* Always present, same as the create tile — it's the default
+                collection, not something that only exists once it has posts */}
+            <CollectionTile
+              id="all"
+              name="All Saved"
+              coverSrc={allSavedCover}
+              count={allSavedPosts.length}
+            />
+
+            {collections.map((collection) => {
+              const postIds = getPostIdsForCollection(collection.id);
+              const collectionPosts = posts.filter((p) =>
+                postIds.includes(p.id),
+              );
+              const cover = collectionPosts[0]
+                ? getPostThumbnail(collectionPosts[0])
+                : undefined;
+              return (
+                <CollectionTile
+                  key={collection.id}
+                  id={collection.id}
+                  name={collection.name}
+                  coverSrc={cover}
+                  count={collectionPosts.length}
+                />
+              );
+            })}
+
+            {/* Always present, even with nothing saved yet — creating a
+                collection shouldn't require saving something first */}
+            <CreateCollectionTile onPress={() => setCreateOpen(true)} />
+          </div>
+        )}
+
+        <CreateCollectionSheet
+          open={createOpen}
+          onClose={() => setCreateOpen(false)}
+        />
       </div>
     </RequireAuth>
   );
@@ -19609,6 +20066,55 @@ export function ProfileHeader(props: Props) {
 }
 </file>
 
+<file path="utils/apiRoutes.ts">
+// Everything from the shared boilerplate's API_ROUTES that isn't shown
+// here (ADMIN, DEPOSITS, WITHDRAWALS, TRANSACTIONS, SUPPORT, PRICES)
+// belonged to a different app template — not part of Vanity, and not
+// carried over. Add new sections here as real Vanity feature endpoints
+// (comments, follow, saved, notifications) get built.
+export const API_ROUTES = {
+  AUTH: {
+    // Unified signup + login + resend — same call every time, since a
+    // magic link makes all three the same action.
+    REQUEST_LINK: "/api/auth/request-link",
+    VERIFY_TOKEN: (token: string) => `/api/auth/verify/${token}`,
+    LOGOUT: "/api/auth/logout",
+    REFRESH_TOKEN: "/api/auth/refresh-token",
+  },
+
+  USER: {
+    ME: "/api/user/me",
+    ONBOARDING: "/api/user/onboarding",
+    CHECK_USERNAME: (username: string) =>
+      `/api/user/username-available?username=${encodeURIComponent(username)}`,
+  },
+
+  UPLOAD: {
+    SIGNATURE: "/api/upload/signature",
+  },
+
+  POSTS: {
+    LIST: "/api/posts",
+    CREATE: "/api/posts",
+    DELETE: (postId: string) => `/api/posts/${postId}`,
+  },
+
+  SAVED: {
+    // GET returns the whole bundle (saved post ids + every collection
+    // with its post ids); POST toggles a post's overall saved state.
+    BUNDLE: "/api/saved",
+    TOGGLE_SAVE: "/api/saved",
+    CREATE_COLLECTION: "/api/saved/collections",
+    RENAME_COLLECTION: (collectionId: string) =>
+      `/api/saved/collections/${collectionId}`,
+    DELETE_COLLECTION: (collectionId: string) =>
+      `/api/saved/collections/${collectionId}`,
+    TOGGLE_COLLECTION_POST: (collectionId: string) =>
+      `/api/saved/collections/${collectionId}/posts`,
+  },
+};
+</file>
+
 <file path="package.json">
 {
   "name": "beauty-platform",
@@ -19651,6 +20157,198 @@ export function ProfileHeader(props: Props) {
     "typescript": "^5"
   }
 }
+</file>
+
+<file path="proxy.ts">
+import { NextRequest, NextResponse } from "next/server";
+import {
+  verifyAccessToken,
+  checkRefreshToken,
+  signAccessToken,
+} from "./lib/auth";
+import { prisma } from "./lib/prisma";
+
+function addSecurityHeaders(response: NextResponse) {
+  response.headers.set(
+    "X-Robots-Tag",
+    "noindex, nofollow, noarchive, nosnippet",
+  );
+  response.headers.set("X-Content-Type-Options", "nosniff");
+  response.headers.set("X-Frame-Options", "DENY");
+  response.headers.set("Referrer-Policy", "no-referrer");
+  response.headers.set("Permissions-Policy", "interest-cohort=()");
+  response.headers.set("X-XSS-Protection", "1; mode=block");
+  return response;
+}
+
+function isBot(userAgent: string): boolean {
+  const botPatterns = [
+    "googlebot",
+    "bingbot",
+    "slurp",
+    "duckduckbot",
+    "baiduspider",
+    "yandexbot",
+    "crawler",
+    "spider",
+    "scraper",
+    "bot",
+    "archive.org",
+    "wayback",
+    "ia_archiver",
+    "gptbot",
+    "chatgpt",
+    "ccbot",
+    "anthropic",
+    "claude",
+    "cohere",
+  ];
+  const lowerUA = userAgent.toLowerCase();
+  return botPatterns.some((pattern) => lowerUA.includes(pattern));
+}
+
+// Builds a NextResponse.next() that actually forwards a header to the
+// downstream Route Handler's req.headers — just calling
+// NextResponse.next().headers.set(...) does NOT do this; it only sets a
+// header on the response sent back to the browser. This is the pattern
+// that's actually required for the route handler to see it.
+function nextWithRequestHeader(req: NextRequest, name: string, value: string) {
+  const headers = new Headers(req.headers);
+  headers.set(name, value);
+  return NextResponse.next({ request: { headers } });
+}
+
+export async function proxy(req: NextRequest) {
+  const pathname = req.nextUrl.pathname;
+
+  const userAgent = req.headers.get("user-agent") || "";
+  if (isBot(userAgent)) {
+    return addSecurityHeaders(
+      new NextResponse("Access Denied", { status: 403 }),
+    );
+  }
+
+  // Vanity-specific protected API routes. Deliberately short — the
+  // shared boilerplate's deposits/withdrawals/admin/support routes
+  // belonged to a different app entirely and weren't carried over. Add
+  // to this list as real feature API routes (comments, follow, saved,
+  // notifications) get built.
+  //
+  // /api/posts covers both GET (list) and POST (create) — the whole
+  // app is already gated behind RequireAuth on the frontend (see
+  // app/page.tsx), so there's no logged-out "browse the feed" case to
+  // carve out an exception for here. /api/saved covers the saved-posts
+  // bundle plus every collection sub-route the same way.
+  const isProtectedRoute = [
+    "/api/user",
+    "/api/upload",
+    "/api/posts",
+    "/api/saved",
+  ].some((route) => pathname.startsWith(route));
+
+  if (!isProtectedRoute) {
+    return addSecurityHeaders(NextResponse.next());
+  }
+
+  const accessToken = req.cookies.get("accessToken")?.value;
+  const refreshToken = req.cookies.get("refreshToken")?.value;
+  const uid = req.cookies.get("uid")?.value;
+
+  // Try access token first
+  if (accessToken) {
+    try {
+      const payload = verifyAccessToken(accessToken);
+      const res = nextWithRequestHeader(
+        req,
+        "x-user-id",
+        (payload as { sub: string }).sub,
+      );
+      // No x-user-role header — the schema has no `role` concept.
+      // Add one back here (and to User) if/when an admin tier exists.
+      return addSecurityHeaders(res);
+    } catch {
+      // Access token invalid/expired, fall through to refresh
+    }
+  }
+
+  // Try refresh token if access token failed — a lightweight, silent
+  // reissue only. This does NOT rotate the refresh token itself; that
+  // heavier operation is reserved for the explicit /api/auth/refresh-
+  // token route, so a refresh token isn't rotated on every request. It
+  // still needs to check for reuse, though — a stolen/stale token being
+  // replayed is exactly as dangerous here as it is on the dedicated
+  // refresh route.
+  if (refreshToken && uid) {
+    try {
+      const result = await checkRefreshToken(uid, refreshToken);
+
+      if (result.status === "reused") {
+        console.warn(`Refresh token reuse detected for user ${uid}`);
+        const res = addSecurityHeaders(
+          NextResponse.json(
+            { success: false, error: "Unauthorized" },
+            { status: 401 },
+          ),
+        );
+        // Every session for this user was already revoked inside
+        // checkRefreshToken — clear this device's cookies too, since
+        // they're now pointing at dead tokens either way.
+        for (const name of ["accessToken", "refreshToken", "uid"]) {
+          res.headers.append(
+            "Set-Cookie",
+            `${name}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`,
+          );
+        }
+        return res;
+      }
+
+      if (result.status === "valid") {
+        const user = await prisma.user.findUnique({
+          where: { id: uid },
+          select: { id: true },
+        });
+
+        if (user) {
+          const newAccessToken = signAccessToken({ sub: user.id });
+
+          const res = nextWithRequestHeader(req, "x-user-id", user.id);
+
+          const cookieAccess = [
+            `accessToken=${newAccessToken}`,
+            `Path=/`,
+            `HttpOnly`,
+            `SameSite=Strict`,
+            process.env.NODE_ENV === "production" ? "Secure" : "",
+            `Max-Age=${60 * 15}`,
+          ]
+            .filter(Boolean)
+            .join("; ");
+
+          res.headers.append("Set-Cookie", cookieAccess);
+
+          return addSecurityHeaders(res);
+        }
+      }
+    } catch (err) {
+      console.error("proxy refresh error:", err);
+    }
+  }
+
+  // Both tokens invalid or missing
+  return addSecurityHeaders(
+    NextResponse.json(
+      { success: false, error: "Unauthorized" },
+      { status: 401 },
+    ),
+  );
+}
+
+export const config = {
+  matcher: [
+    "/api/user/:path*",
+    "/((?!_next/static|_next/image|favicon.ico).*)",
+  ],
+};
 </file>
 
 <file path="app/u/[username]/page.tsx">
@@ -20934,6 +21632,102 @@ export function CreatePostForm() {
 }
 </file>
 
+<file path="utils/paths.ts">
+export const PATHS = {
+  HOME: "/",
+  EXPLORE: "/explore",
+  SAVED: "/saved",
+  NOTIFICATIONS: "/notifications",
+  PROFILE: "/profile",
+  PROFILE_EDIT: "/profile/edit",
+  FOLLOWERS: "/profile/followers",
+  FOLLOWING: "/profile/following",
+  CREATE_POST: "/create",
+  POST: (postId: string) => `/p/${postId}`,
+  USER_PROFILE: (username: string) => `/u/${username}`,
+  USER_FOLLOWERS: (username: string) => `/u/${username}/followers`,
+  USER_FOLLOWING: (username: string) => `/u/${username}/following`,
+  SAVED_COLLECTION: (collectionId: string) => `/saved/${collectionId}`,
+  AUTH: "/auth",
+  AUTH_VERIFY: (token: string) => `/auth/verify/${token}`,
+  ONBOARDING: "/onboarding",
+};
+</file>
+
+<file path="app/profile/page.tsx">
+"use client";
+
+import { usePosts } from "@/hooks/usePosts";
+import { useFollow } from "@/context/FollowProvider";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { CURRENT_USER_PROFILE } from "@/data/currentUserProfile";
+import { ProfileHeader } from "@/components/profile/ProfileHeader";
+import { ProfileHeaderSkeleton } from "@/components/profile/ProfileHeaderSkeleton";
+import { PostGrid } from "@/components/profile/PostGrid";
+import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
+import { ProductChips } from "@/components/feed/ProductChips";
+import { RequireAuth } from "@/components/auth/RequireAuth";
+
+export default function ProfilePage() {
+  const { posts } = usePosts();
+  const { followingCount } = useFollow();
+  const { user, isLoading } = useCurrentUser();
+
+  // isLoading reflects the real /api/user/me request now, not a
+  // simulated timeout — RequireAuth (wrapping this whole page) already
+  // blocks on the same query before rendering children, so by the time
+  // this component's own isLoading is false, user is guaranteed non-null.
+  const myPosts = user
+    ? posts.filter((post) => post.author.id === user.id)
+    : [];
+
+  // Computed once, wrapped once — RequireAuth only needs to appear a
+  // single time regardless of which branch below actually renders.
+  const content =
+    isLoading || !user ? (
+      <div className="flex flex-col">
+        <ProfileHeaderSkeleton />
+        <div className="animate-pulse border-t border-foreground/10 px-4 py-4">
+          <div className="mb-2 h-3.5 w-16 rounded bg-foreground/10" />
+          <div className="flex gap-2">
+            <div className="h-7 w-28 shrink-0 rounded-full bg-foreground/10" />
+            <div className="h-7 w-24 shrink-0 rounded-full bg-foreground/10" />
+          </div>
+        </div>
+        <div className="border-t border-foreground/10">
+          <PostGridSkeleton />
+        </div>
+      </div>
+    ) : (
+      <div className="flex flex-col">
+        <ProfileHeader
+          isOwnProfile
+          username={user.username}
+          avatarSrc={user.avatarSrc}
+          bio={user.bio}
+          toneTag={user.toneTag}
+          postCount={myPosts.length}
+          followerCount={CURRENT_USER_PROFILE.followerCount}
+          followingCount={followingCount}
+        />
+
+        {user.pinnedRoutine.length > 0 && (
+          <div className="border-t border-foreground/10 px-4 py-4">
+            <p className="mb-2 text-sm font-medium">Routine</p>
+            <ProductChips products={user.pinnedRoutine} />
+          </div>
+        )}
+
+        <div className="border-t border-foreground/10">
+          <PostGrid posts={myPosts} />
+        </div>
+      </div>
+    );
+
+  return <RequireAuth>{content}</RequireAuth>;
+}
+</file>
+
 <file path="components/shared/TopNav.tsx">
 "use client";
 
@@ -20943,7 +21737,7 @@ import Link from "next/link";
 import { PlusIcon, SunIcon, MoonIcon } from "@phosphor-icons/react";
 import { PATHS } from "@/utils/paths";
 
-export default function TopNav() {
+export  function TopNav() {
   const [isDark, setIsDark] = useState(false);
   const [hidden, setHidden] = useState(false);
 
@@ -21052,102 +21846,6 @@ export default function TopNav() {
 }
 </file>
 
-<file path="utils/paths.ts">
-export const PATHS = {
-  HOME: "/",
-  EXPLORE: "/explore",
-  SAVED: "/saved",
-  NOTIFICATIONS: "/notifications",
-  PROFILE: "/profile",
-  PROFILE_EDIT: "/profile/edit",
-  FOLLOWERS: "/profile/followers",
-  FOLLOWING: "/profile/following",
-  CREATE_POST: "/create",
-  POST: (postId: string) => `/p/${postId}`,
-  USER_PROFILE: (username: string) => `/u/${username}`,
-  USER_FOLLOWERS: (username: string) => `/u/${username}/followers`,
-  USER_FOLLOWING: (username: string) => `/u/${username}/following`,
-  SAVED_COLLECTION: (collectionId: string) => `/saved/${collectionId}`,
-  AUTH: "/auth",
-  AUTH_VERIFY: (token: string) => `/auth/verify/${token}`,
-  ONBOARDING: "/onboarding",
-};
-</file>
-
-<file path="app/profile/page.tsx">
-"use client";
-
-import { usePosts } from "@/hooks/usePosts";
-import { useFollow } from "@/context/FollowProvider";
-import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { CURRENT_USER_PROFILE } from "@/data/currentUserProfile";
-import { ProfileHeader } from "@/components/profile/ProfileHeader";
-import { ProfileHeaderSkeleton } from "@/components/profile/ProfileHeaderSkeleton";
-import { PostGrid } from "@/components/profile/PostGrid";
-import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
-import { ProductChips } from "@/components/feed/ProductChips";
-import { RequireAuth } from "@/components/auth/RequireAuth";
-
-export default function ProfilePage() {
-  const { posts } = usePosts();
-  const { followingCount } = useFollow();
-  const { user, isLoading } = useCurrentUser();
-
-  // isLoading reflects the real /api/user/me request now, not a
-  // simulated timeout — RequireAuth (wrapping this whole page) already
-  // blocks on the same query before rendering children, so by the time
-  // this component's own isLoading is false, user is guaranteed non-null.
-  const myPosts = user
-    ? posts.filter((post) => post.author.id === user.id)
-    : [];
-
-  // Computed once, wrapped once — RequireAuth only needs to appear a
-  // single time regardless of which branch below actually renders.
-  const content =
-    isLoading || !user ? (
-      <div className="flex flex-col">
-        <ProfileHeaderSkeleton />
-        <div className="animate-pulse border-t border-foreground/10 px-4 py-4">
-          <div className="mb-2 h-3.5 w-16 rounded bg-foreground/10" />
-          <div className="flex gap-2">
-            <div className="h-7 w-28 shrink-0 rounded-full bg-foreground/10" />
-            <div className="h-7 w-24 shrink-0 rounded-full bg-foreground/10" />
-          </div>
-        </div>
-        <div className="border-t border-foreground/10">
-          <PostGridSkeleton />
-        </div>
-      </div>
-    ) : (
-      <div className="flex flex-col">
-        <ProfileHeader
-          isOwnProfile
-          username={user.username}
-          avatarSrc={user.avatarSrc}
-          bio={user.bio}
-          toneTag={user.toneTag}
-          postCount={myPosts.length}
-          followerCount={CURRENT_USER_PROFILE.followerCount}
-          followingCount={followingCount}
-        />
-
-        {user.pinnedRoutine.length > 0 && (
-          <div className="border-t border-foreground/10 px-4 py-4">
-            <p className="mb-2 text-sm font-medium">Routine</p>
-            <ProductChips products={user.pinnedRoutine} />
-          </div>
-        )}
-
-        <div className="border-t border-foreground/10">
-          <PostGrid posts={myPosts} />
-        </div>
-      </div>
-    );
-
-  return <RequireAuth>{content}</RequireAuth>;
-}
-</file>
-
 <file path="components/feed/PostCard.tsx">
 "use client";
 
@@ -21172,7 +21870,7 @@ import { ShareMenu } from "./ShareMenu";
 import { PostOptionsSheet } from "./PostOptionsSheet";
 import { SaveToCollectionSheet } from "@/components/saved/SaveToCollectionSheet";
 import { useFollow } from "@/context/FollowProvider";
-import { useSavedPosts } from "@/context/SavedPostsProvider";
+import { useSavedPosts } from "@/hooks/useSavedPosts";
 import { usePosts } from "@/hooks/usePosts";
 import { isMockFollowerOfCurrentUser } from "@/data/mockFollowers";
 import { PATHS } from "@/utils/paths";
@@ -21669,10 +22367,9 @@ import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { BottomNav } from "@/components/shared/BottomNav";
-import TopNav from "@/components/shared/TopNav";
+import { TopNav } from "@/components/shared/TopNav";
 import { FollowProvider } from "@/context/FollowProvider";
 import { NotificationsProvider } from "@/context/NotificationsProvider";
-import { SavedPostsProvider } from "@/context/SavedPostsProvider";
 import { Providers } from "./providers";
 
 const inter = Inter({
@@ -21731,13 +22428,11 @@ export default function RootLayout({
         <Providers>
           <FollowProvider>
             <NotificationsProvider>
-              <SavedPostsProvider>
-                <TopNav />
-                <main className="mx-auto w-full max-w-lg flex-1 pt-[calc(3.5rem+env(safe-area-inset-top))] pb-[calc(3.5rem+env(safe-area-inset-bottom))]">
-                  {children}
-                </main>
-                <BottomNav />
-              </SavedPostsProvider>
+              <TopNav />
+              <main className="mx-auto w-full max-w-lg flex-1 pt-[calc(3.5rem+env(safe-area-inset-top))] pb-[calc(3.5rem+env(safe-area-inset-bottom))]">
+                {children}
+              </main>
+              <BottomNav />
             </NotificationsProvider>
           </FollowProvider>
         </Providers>

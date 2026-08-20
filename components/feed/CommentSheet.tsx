@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { XIcon, PaperPlaneRightIcon } from "@phosphor-icons/react";
 import type { Comment } from "@/types/comment";
-import { CURRENT_USER_ID } from "@/constants/currentUser";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { sortByAuthorEngagement } from "@/utils/sortComments";
 import { CommentItem } from "./CommentItem";
 import { CommentSheetSkeleton } from "./CommentSheetSkeleton";
@@ -14,8 +14,13 @@ type Props = {
   open: boolean;
   onClose: () => void;
   comments: Comment[];
+  // Real "comments are being fetched" state from useComments now, not a
+  // simulated timeout — see PostCard, which wires this to its query's
+  // isLoading.
+  loading: boolean;
   onAddComment: (text: string, parentId?: string) => void;
   onDeleteComment: (commentId: string, topLevelId?: string) => void;
+  onToggleCommentLike: (commentId: string) => void;
   postAuthorId: string;
 };
 
@@ -28,10 +33,13 @@ export function CommentSheet({
   open,
   onClose,
   comments,
+  loading,
   onAddComment,
   onDeleteComment,
+  onToggleCommentLike,
   postAuthorId,
 }: Props) {
+  const { user } = useCurrentUser();
   const [draft, setDraft] = useState("");
   // authorId drives the "is this a self-reply" check (stays correct even
   // if either person renames later); username is kept only for what's
@@ -43,18 +51,6 @@ export function CommentSheet({
   } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { gateOpen, gateMessage, closeGate, guard } = useAuthGatedAction();
-
-  // Simulated so the skeleton is actually visible — swap this whole effect
-  // for a real "comments are being fetched" flag once there's a real API.
-  // Resets each time the sheet opens since the component doesn't unmount
-  // between opens (it just returns null), so state would otherwise persist.
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    if (!open) return;
-    setLoading(true);
-    const timer = window.setTimeout(() => setLoading(false), 800);
-    return () => window.clearTimeout(timer);
-  }, [open]);
 
   // Author's own comments lead, then threads they've replied to, then
   // untouched comments — see sortByAuthorEngagement for the tier logic.
@@ -87,7 +83,7 @@ export function CommentSheet({
     // that's what makes it impossible for the user to backspace out.
     // Skipped entirely when replying to your own comment — mentioning
     // yourself is just noise.
-    const isReplyingToSelf = replyingTo?.authorId === CURRENT_USER_ID;
+    const isReplyingToSelf = Boolean(user) && replyingTo?.authorId === user?.id;
     const finalText =
       replyingTo && !isReplyingToSelf
         ? `@${replyingTo.username} ${trimmed}`
@@ -133,6 +129,7 @@ export function CommentSheet({
                 postAuthorId={postAuthorId}
                 onReplyPress={handleReplyPress}
                 onDeleteComment={onDeleteComment}
+                onToggleLike={onToggleCommentLike}
                 guard={guard}
               />
             ))
@@ -142,7 +139,7 @@ export function CommentSheet({
         {replyingTo && (
           <div className="flex items-center justify-between border-t border-foreground/10 px-3 py-1.5 text-xs text-foreground/50">
             <span>
-              {replyingTo.authorId === CURRENT_USER_ID ? (
+              {user && replyingTo.authorId === user.id ? (
                 "Replying to your comment"
               ) : (
                 <>
@@ -169,7 +166,7 @@ export function CommentSheet({
             onKeyDown={(e) => e.key === "Enter" && guard(handleSubmit)()}
             placeholder={
               replyingTo
-                ? replyingTo.authorId === CURRENT_USER_ID
+                ? user && replyingTo.authorId === user.id
                   ? "Add to your comment…"
                   : `Reply to @${replyingTo.username}…`
                 : "Add a comment…"

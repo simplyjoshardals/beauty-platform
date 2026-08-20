@@ -6,7 +6,6 @@ import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import { DotsThreeIcon, HeartIcon } from "@phosphor-icons/react";
 import type { Post } from "@/types/post";
-import type { Comment } from "@/types/comment";
 import { getRelativeTime } from "@/utils/time";
 import { getPostThumbnail } from "@/utils/postThumbnail";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
@@ -23,13 +22,14 @@ import { SaveToCollectionSheet } from "@/components/saved/SaveToCollectionSheet"
 import { useFollow } from "@/context/FollowProvider";
 import { useSavedPosts } from "@/hooks/useSavedPosts";
 import { usePosts } from "@/hooks/usePosts";
+import { useLikedPosts } from "@/hooks/useLikedPosts";
+import { useComments } from "@/hooks/useComments";
 import { isMockFollowerOfCurrentUser } from "@/data/mockFollowers";
 import { PATHS } from "@/utils/paths";
 import { useAuthGatedAction } from "@/hooks/useAuthGatedAction";
 import { AuthGateModal } from "@/components/auth/AuthGateModal";
 
 export function PostCard({ post }: { post: Post }) {
-  const [liked, setLiked] = useState(false);
   const { isFollowing, toggleFollow } = useFollow();
   const { deletePost } = usePosts();
   const router = useRouter();
@@ -39,11 +39,26 @@ export function PostCard({ post }: { post: Post }) {
   const { isAuthenticated } = useCurrentUser();
   const { user } = useCurrentUser();
   const { isSaved, toggleSave } = useSavedPosts();
+  const { isLiked, toggleLike: toggleLikeMutation } = useLikedPosts();
+  const liked = isLiked(post.id);
+  // Post.likeCount/commentCount are derived server-side via _count (see
+  // prisma/schema.prisma), so they only catch up to a like/comment once
+  // useLikedPosts/useComments invalidate the posts query and this prop
+  // updates — these local mirrors give instant feedback in between,
+  // synced back to the real value whenever it changes.
   const [likeCount, setLikeCount] = useState(post.likeCount);
+  useEffect(() => setLikeCount(post.likeCount), [post.likeCount]);
   const [showHeartPop, setShowHeartPop] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
-  const [comments, setComments] = useState<Comment[]>(post.comments ?? []);
+  const {
+    comments,
+    addComment,
+    deleteComment,
+    toggleCommentLike,
+    isLoading: commentsLoading,
+  } = useComments(post.id, { enabled: commentsOpen, currentUser: user });
   const [commentCount, setCommentCount] = useState(post.commentCount);
+  useEffect(() => setCommentCount(post.commentCount), [post.commentCount]);
   const [shareMenuOpen, setShareMenuOpen] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [showCopiedToast, setShowCopiedToast] = useState(false);
@@ -138,89 +153,43 @@ export function PostCard({ post }: { post: Post }) {
     }
   }
 
+  // Thin wrappers around useComments — the actual add/delete logic (incl.
+  // the placeholder-vs-full-removal rule) now lives server-side in
+  // app/api/posts/[postId]/comments/**, mirrored optimistically inside
+  // the hook itself. commentCount is bumped/dropped here to match, and
+  // resyncs to the real Post.commentCount once that mutation settles
+  // (see the useEffect above).
   function handleAddComment(text: string, parentId?: string) {
     if (!user) return;
-
-    const newComment: Comment = {
-      id: crypto.randomUUID(),
-      // Live profile data, not the old static constant — this also means
-      // a comment you post right after changing your avatar/username
-      // actually shows the new one, instead of whatever was baked in at
-      // build time.
-      author: {
-        id: user.id,
-        username: user.username,
-        avatarSrc: user.avatarSrc,
-      },
-      text,
-      likeCount: 0,
-      createdAt: new Date().toISOString(),
-    };
-
-    if (!parentId) {
-      setComments((prev) => [...prev, newComment]);
-    } else {
-      setComments((prev) =>
-        prev.map((c) =>
-          c.id === parentId
-            ? { ...c, replies: [...(c.replies ?? []), newComment] }
-            : c,
-        ),
-      );
-    }
+    addComment(text, parentId);
     setCommentCount((c) => c + 1);
   }
 
-  // Reading `comments` from component scope (not nested inside a setState
-  // updater) rather than computing hasReplies inside the updater itself —
-  // same reasoning as the earlier like-count bug: don't nest one setState
-  // call's logic inside another's functional updater.
   function handleDeleteComment(commentId: string, topLevelId?: string) {
     if (topLevelId) {
-      // Deleting a reply — always a full silent removal. Replies never
-      // have their own sub-replies to preserve, so there's nothing to
-      // keep a placeholder for.
-      setComments((prev) =>
-        prev.map((c) =>
-          c.id === topLevelId
-            ? {
-                ...c,
-                replies: (c.replies ?? []).filter((r) => r.id !== commentId),
-              }
-            : c,
-        ),
-      );
+      deleteComment(commentId, topLevelId);
       setCommentCount((count) => Math.max(0, count - 1));
       return;
     }
 
     const target = comments.find((c) => c.id === commentId);
     const hasReplies = (target?.replies?.length ?? 0) > 0;
-
-    if (hasReplies) {
-      // Structural placeholder — replies stay fully intact underneath.
-      // Not decremented: the placeholder still occupies a real slot in
-      // the thread, unlike a fully-removed leaf comment.
-      setComments((prev) =>
-        prev.map((c) => (c.id === commentId ? { ...c, deleted: true } : c)),
-      );
-    } else {
-      // No replies — true silent removal, no trace left behind.
-      setComments((prev) => prev.filter((c) => c.id !== commentId));
+    deleteComment(commentId);
+    if (!hasReplies) {
       setCommentCount((count) => Math.max(0, count - 1));
     }
   }
 
   function toggleLike() {
     const nextLiked = !liked;
-    setLiked(nextLiked);
+    toggleLikeMutation(post.id);
     setLikeCount((c) => c + (nextLiked ? 1 : -1));
   }
 
   // Double tap always likes — it never unlikes, matching the IG primitive.
   function handleDoubleTap() {
     if (!liked) {
-      setLiked(true);
+      toggleLikeMutation(post.id);
       setLikeCount((c) => c + 1);
     }
     setShowHeartPop(true);
@@ -353,8 +322,10 @@ export function PostCard({ post }: { post: Post }) {
         open={commentsOpen}
         onClose={closeComments}
         comments={comments}
+        loading={commentsLoading}
         onAddComment={handleAddComment}
         onDeleteComment={handleDeleteComment}
+        onToggleCommentLike={toggleCommentLike}
         postAuthorId={post.author.id}
       />
 
