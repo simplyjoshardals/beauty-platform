@@ -212,40 +212,39 @@ export function PostCard({ post }: { post: Post }) {
           />
         </Link>
 
-        <div className="flex flex-1 flex-col leading-tight">
-          <div className="flex items-center gap-1.5">
-            <Link
-              href={PATHS.USER_PROFILE(post.author.username)}
-              className="text-sm font-medium"
-            >
-              {post.author.username}
-            </Link>
-            {/* Sibling of the username Link, not nested inside it — a
-                button inside an anchor is invalid HTML and would also
-                fire the profile-navigation on every follow tap. */}
-            {!isOwnPost && (
-              <>
-                <span className="text-foreground/30">·</span>
-                <button
-                  type="button"
-                  onClick={guard(() => toggleFollow(post.author.username))}
-                  className="text-xs font-medium text-foreground/60"
-                >
-                  {isFollowing(post.author.username)
-                    ? "Following"
-                    : followsMe
-                      ? "Follow back"
-                      : "Follow"}
-                </button>
-              </>
-            )}
-          </div>
+        <Link
+          href={PATHS.USER_PROFILE(post.author.username)}
+          className="flex flex-1 flex-col leading-tight"
+        >
+          <span className="text-sm font-medium">{post.author.username}</span>
           {post.author.toneTag && (
             <span className="text-xs text-foreground/50">
               {post.author.toneTag}
             </span>
           )}
-        </div>
+        </Link>
+
+        {/* Same solid/outline pill used for Follow everywhere else in the
+            app (UserListRow, ProfileHeader) — a real tappable button
+            instead of text buried in the username row. Sibling of the
+            username Link above, not nested inside it. */}
+        {!isOwnPost && (
+          <button
+            type="button"
+            onClick={guard(() => toggleFollow(post.author.username))}
+            className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+              isFollowing(post.author.username)
+                ? "border border-foreground/15 text-foreground"
+                : "bg-foreground text-background"
+            }`}
+          >
+            {isFollowing(post.author.username)
+              ? "Following"
+              : followsMe
+                ? "Follow back"
+                : "Follow"}
+          </button>
+        )}
 
         {isAuthenticated && (
           <button
