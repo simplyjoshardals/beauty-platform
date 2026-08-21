@@ -13,6 +13,12 @@ export type CurrentUser = {
   toneTag: string;
   pinnedRoutine: ProductTag[];
   onboardingCompletedAt: string | null;
+  // Real counts off the Follow table now (see app/api/user/me/route.ts),
+  // same _count pattern GET /api/user/[username] already used for
+  // someone else's profile — not the CURRENT_USER_PROFILE mock /
+  // FollowProvider's local state this used to read.
+  followerCount: number;
+  followingCount: number;
 };
 
 // Replaces AuthProvider's isAuthenticated boolean entirely. Session

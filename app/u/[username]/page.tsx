@@ -1,13 +1,10 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { notFound } from "next/navigation";
-import { usePosts } from "@/hooks/usePosts";
-import { useFollow } from "@/context/FollowProvider";
+import { use, useEffect } from "react";
+import { useRouter, notFound } from "next/navigation";
+import { useUserPosts } from "@/hooks/useUserPosts";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { getMockUser } from "@/data/mockUsers";
-import { isMockFollowerOfCurrentUser } from "@/data/mockFollowers";
+import { useUserProfile } from "@/hooks/useUserProfile";
 import { PATHS } from "@/utils/paths";
 import { ProfileHeader } from "@/components/profile/ProfileHeader";
 import { ProfileHeaderSkeleton } from "@/components/profile/ProfileHeaderSkeleton";
@@ -21,15 +18,16 @@ type Props = {
   params: Promise<{ username: string }>;
 };
 
-const SIMULATED_LOAD_MS = 900;
-
 export default function UserProfilePage({ params }: Props) {
   const { username } = use(params);
   const router = useRouter();
-  const { posts } = usePosts();
-  const { isFollowing, toggleFollow } = useFollow();
   const { user: currentUser } = useCurrentUser();
-  const [loading, setLoading] = useState(true);
+  const {
+    user,
+    isLoading: profileLoading,
+    toggleFollow,
+  } = useUserProfile(username);
+  const { posts: userPosts, isLoading: postsLoading } = useUserPosts(username);
   const { gateOpen, closeGate, guard } = useAuthGatedAction();
 
   // This route is for viewing OTHER people. Your own profile — with Edit
@@ -46,26 +44,20 @@ export default function UserProfilePage({ params }: Props) {
     }
   }, [isSelf, router]);
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => setLoading(false), SIMULATED_LOAD_MS);
-    return () => window.clearTimeout(timer);
-  }, []);
-
   if (isSelf) {
     return null;
   }
 
-  const user = getMockUser(username);
-
-  // No fabricated fallback profile — if this username isn't real, say so,
-  // don't render a full profile with a working Follow button for nobody.
-  if (!user) {
-    notFound();
-  }
-
-  const userPosts = posts.filter((post) => post.author.username === username);
-
-  if (loading) {
+  // profileLoading reflects the real GET /api/user/[username] request,
+  // not a simulated timeout — once it resolves, user === null means the
+  // fetch didn't succeed (nonexistent username, or a network failure),
+  // so there's no fabricated fallback profile rendered with a working
+  // Follow button for nobody. This is the only thing the full-page
+  // skeleton waits on now: postsLoading (GET /api/user/[username]/posts,
+  // via useUserPosts) is a separate, independent request, so it no
+  // longer holds up the header too — it just gates the grid further
+  // down, whichever of the two finishes first.
+  if (profileLoading) {
     return (
       <div className="flex flex-col">
         <ProfileHeaderSkeleton />
@@ -76,6 +68,10 @@ export default function UserProfilePage({ params }: Props) {
     );
   }
 
+  if (!user) {
+    notFound();
+  }
+
   return (
     <div className="flex flex-col">
       <ProfileHeader
@@ -84,15 +80,17 @@ export default function UserProfilePage({ params }: Props) {
         avatarSrc={user.avatarSrc}
         bio={user.bio}
         toneTag={user.toneTag}
-        postCount={userPosts.length}
-        followerCount={user.followerCount ?? 0}
-        followingCount={user.followingCount ?? 0}
-        isFollowing={isFollowing(user.username)}
-        followsMe={isMockFollowerOfCurrentUser(user.username)}
-        onToggleFollow={guard(() => toggleFollow(user.username))}
+        // Falls back to 0 while the posts request is still in flight
+        // rather than holding up the header render for a count.
+        postCount={postsLoading ? 0 : userPosts.length}
+        followerCount={user.followerCount}
+        followingCount={user.followingCount}
+        isFollowing={user.isFollowing}
+        followsMe={user.followsMe}
+        onToggleFollow={guard(toggleFollow)}
       />
 
-      {user.pinnedRoutine && user.pinnedRoutine.length > 0 && (
+      {user.pinnedRoutine.length > 0 && (
         <div className="border-t border-foreground/10 px-4 py-4">
           <p className="mb-2 text-sm font-medium">Routine</p>
           <ProductChips products={user.pinnedRoutine} />
@@ -100,7 +98,7 @@ export default function UserProfilePage({ params }: Props) {
       )}
 
       <div className="border-t border-foreground/10">
-        <PostGrid posts={userPosts} />
+        {postsLoading ? <PostGridSkeleton /> : <PostGrid posts={userPosts} />}
       </div>
 
       <AuthGateModal open={gateOpen} onClose={closeGate} />

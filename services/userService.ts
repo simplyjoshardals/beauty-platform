@@ -45,3 +45,22 @@ export async function updateProfile(data: UpdateProfileInput) {
     body: JSON.stringify(data),
   });
 }
+
+// Backs /u/[username] — that page renders logged out too (same as
+// /p/[postId]), so authRequired: false here for the same reason it's
+// false on getCurrentUser/getLikedPostIds: a 401 just means "anonymous
+// visitor," not a real failure, and apiFetch's default 401 handling
+// (refresh-then-redirect) would otherwise boot a logged-out visitor off
+// an intentionally-public page.
+export async function getUserProfile(username: string) {
+  return apiFetch(API_ROUTES.USER.PROFILE(username), {
+    method: "GET",
+    authRequired: false,
+  });
+}
+
+export async function toggleFollowUser(username: string) {
+  return apiFetch(API_ROUTES.USER.TOGGLE_FOLLOW(username), {
+    method: "POST",
+  });
+}

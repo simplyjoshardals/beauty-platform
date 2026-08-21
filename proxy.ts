@@ -78,6 +78,32 @@ function isPublicPostGet(pathname: string, method: string): boolean {
   return !RESERVED_POST_SEGMENTS.has(postId);
 }
 
+// Segment names directly under /api/user that are NOT a :username — same
+// reasoning as RESERVED_POST_SEGMENTS above. Keep in sync with the
+// static (non-dynamic) routes nested directly under /api/user (see
+// utils/apiRoutes.ts).
+const RESERVED_USER_SEGMENTS = new Set([
+  "me",
+  "onboarding",
+  "username-available",
+]);
+
+// The one intentionally-public read under /api/user: GET /api/user/<username>
+// backs the /u/[username] page, which (like /p/[postId]) is browsable
+// while logged out — only the follow action itself is auth-gated on the
+// frontend (useAuthGatedAction) and enforced again here on the backend
+// (POST /api/user/[username]/follow is NOT matched by this and stays
+// behind the normal auth gate below). The optional /posts suffix covers
+// GET /api/user/[username]/posts, the per-user post grid fetch — same
+// public posture, matching isPublicPostGet's own /comments suffix below.
+function isPublicUserGet(pathname: string, method: string): boolean {
+  if (method !== "GET") return false;
+  const match = pathname.match(/^\/api\/user\/([^/]+)(?:\/posts)?$/);
+  if (!match) return false;
+  const [, username] = match;
+  return !RESERVED_USER_SEGMENTS.has(username);
+}
+
 export async function proxy(req: NextRequest) {
   const pathname = req.nextUrl.pathname;
 
@@ -100,10 +126,12 @@ export async function proxy(req: NextRequest) {
   // carve out an exception for here. /api/saved covers the saved-posts
   // bundle plus every collection sub-route the same way.
   //
-  // Two narrow exceptions carved out of that: the single-post GET and
-  // its comment list, both of which back the public /p/[postId]
-  // permalink page (see isPublicPostGet above). Everything else under
-  // /api/posts still requires a session.
+  // Narrow exceptions carved out of that: the single-post GET and its
+  // comment list (both of which back the public /p/[postId] permalink
+  // page — see isPublicPostGet above), plus the single-user profile GET
+  // that backs the public /u/[username] page (see isPublicUserGet
+  // above). Everything else under /api/posts and /api/user still
+  // requires a session.
   const isProtectedRoute = [
     "/api/user",
     "/api/upload",
@@ -120,7 +148,9 @@ export async function proxy(req: NextRequest) {
   // set (e.g. for a comment's likedByMe). The only difference for these
   // two routes is at the very bottom: no valid session falls through to
   // an anonymous NextResponse.next() instead of a 401.
-  const isPublicGet = isPublicPostGet(pathname, req.method);
+  const isPublicGet =
+    isPublicPostGet(pathname, req.method) ||
+    isPublicUserGet(pathname, req.method);
 
   const accessToken = req.cookies.get("accessToken")?.value;
   const refreshToken = req.cookies.get("refreshToken")?.value;

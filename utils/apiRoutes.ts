@@ -18,6 +18,17 @@ export const API_ROUTES = {
     ONBOARDING: "/api/user/onboarding",
     CHECK_USERNAME: (username: string) =>
       `/api/user/username-available?username=${encodeURIComponent(username)}`,
+    // Public profile lookup + follow toggle for viewing someone ELSE's
+    // profile (/u/[username]) — distinct from ME above, which is only
+    // ever the logged-in caller's own record.
+    PROFILE: (username: string) => `/api/user/${encodeURIComponent(username)}`,
+    TOGGLE_FOLLOW: (username: string) =>
+      `/api/user/${encodeURIComponent(username)}/follow`,
+    // Dedicated per-user posts route (GET /api/user/[username]/posts) —
+    // backs useUserPosts, used by both /u/[username] and /profile instead
+    // of filtering the full feed client-side. Public, same as PROFILE.
+    POSTS: (username: string) =>
+      `/api/user/${encodeURIComponent(username)}/posts`,
   },
 
   UPLOAD: {

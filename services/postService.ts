@@ -45,6 +45,19 @@ export async function listPosts(): Promise<ListPostsResult> {
   });
 }
 
+// Backs useUserPosts — GET /api/user/[username]/posts, a dedicated route
+// that queries Post by authorId directly rather than pulling the whole
+// feed and filtering client-side. Public, same as GET /api/user/[username]
+// itself (see the route's own comment): /u/[username] is browsable
+// logged out, so this can't require auth the way listPosts() effectively
+// does.
+export async function getUserPosts(username: string): Promise<ListPostsResult> {
+  return apiFetch(API_ROUTES.USER.POSTS(username), {
+    method: "GET",
+    authRequired: false,
+  });
+}
+
 export type CreatePostResult =
   | { success: true; post: Post }
   | { success: false; error: string };

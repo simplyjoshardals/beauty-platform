@@ -17,7 +17,16 @@ export async function GET(req: NextRequest) {
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    include: { routineItems: { orderBy: { order: "asc" } } },
+    include: {
+      routineItems: { orderBy: { order: "asc" } },
+      // Same _count pattern as GET /api/user/[username] — real counts
+      // off the Follow table instead of the CURRENT_USER_PROFILE mock /
+      // FollowProvider's local state the frontend used to read for its
+      // own profile page. Own-profile is just the one-user case of
+      // "how many people follow this user," so it reuses the same
+      // relations rather than a separate query.
+      _count: { select: { followers: true, following: true } },
+    },
   });
 
   if (!user) {
@@ -43,6 +52,8 @@ export async function GET(req: NextRequest) {
         label: item.label,
       })),
       onboardingCompletedAt: user.onboardingCompletedAt,
+      followerCount: user._count.followers,
+      followingCount: user._count.following,
     },
   });
 }

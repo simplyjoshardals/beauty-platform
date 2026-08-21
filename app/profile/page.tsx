@@ -1,9 +1,7 @@
 "use client";
 
-import { usePosts } from "@/hooks/usePosts";
-import { useFollow } from "@/context/FollowProvider";
+import { useUserPosts } from "@/hooks/useUserPosts";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { CURRENT_USER_PROFILE } from "@/data/currentUserProfile";
 import { ProfileHeader } from "@/components/profile/ProfileHeader";
 import { ProfileHeaderSkeleton } from "@/components/profile/ProfileHeaderSkeleton";
 import { PostGrid } from "@/components/profile/PostGrid";
@@ -12,20 +10,16 @@ import { ProductChips } from "@/components/feed/ProductChips";
 import { RequireAuth } from "@/components/auth/RequireAuth";
 
 export default function ProfilePage() {
-  const { posts } = usePosts();
-  const { followingCount } = useFollow();
   const { user, isLoading } = useCurrentUser();
+  // Fetched directly for just this user (GET /api/user/[username]/posts)
+  // rather than pulled out of the whole feed via usePosts() and filtered
+  // client-side — same per-user endpoint /u/[username] uses (see
+  // hooks/useUserPosts.ts). Undefined username while user is still
+  // loading just holds the query off via `enabled`.
+  const { posts: myPosts, isLoading: postsLoading } = useUserPosts(
+    user?.username,
+  );
 
-  // isLoading reflects the real /api/user/me request now, not a
-  // simulated timeout — RequireAuth (wrapping this whole page) already
-  // blocks on the same query before rendering children, so by the time
-  // this component's own isLoading is false, user is guaranteed non-null.
-  const myPosts = user
-    ? posts.filter((post) => post.author.id === user.id)
-    : [];
-
-  // Computed once, wrapped once — RequireAuth only needs to appear a
-  // single time regardless of which branch below actually renders.
   const content =
     isLoading || !user ? (
       <div className="flex flex-col">
@@ -49,9 +43,12 @@ export default function ProfilePage() {
           avatarSrc={user.avatarSrc}
           bio={user.bio}
           toneTag={user.toneTag}
-          postCount={myPosts.length}
-          followerCount={CURRENT_USER_PROFILE.followerCount}
-          followingCount={followingCount}
+          // Falls back to 0 while posts are still loading rather than
+          // holding up the whole header for a count — matches the grid
+          // below, which shows its own skeleton in the meantime.
+          postCount={postsLoading ? 0 : myPosts.length}
+          followerCount={user.followerCount}
+          followingCount={user.followingCount}
         />
 
         {user.pinnedRoutine.length > 0 && (
@@ -62,7 +59,7 @@ export default function ProfilePage() {
         )}
 
         <div className="border-t border-foreground/10">
-          <PostGrid posts={myPosts} />
+          {postsLoading ? <PostGridSkeleton /> : <PostGrid posts={myPosts} />}
         </div>
       </div>
     );
