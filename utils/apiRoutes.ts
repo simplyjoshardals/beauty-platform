@@ -29,6 +29,24 @@ export const API_ROUTES = {
     // of filtering the full feed client-side. Public, same as PROFILE.
     POSTS: (username: string) =>
       `/api/user/${encodeURIComponent(username)}/posts`,
+    // Who :username follows — backs useFollowingList, used by both
+    // /profile/following and /u/[username]/following. Unlike PROFILE and
+    // POSTS above, this one requires auth (see proxy.ts's
+    // isPublicUserGet, which deliberately does NOT carve out /following)
+    // — there's no logged-out "browse someone's following list" case.
+    // Optional search is accepted now for server-side filtering later;
+    // both Following pages still filter client-side for now.
+    FOLLOWING: (username: string, search?: string) => {
+      const base = `/api/user/${encodeURIComponent(username)}/following`;
+      return search ? `${base}?search=${encodeURIComponent(search)}` : base;
+    },
+    // Who follows :username — same auth/shape/search contract as
+    // FOLLOWING above, just the reverse Follow direction. Backs
+    // useFollowersList / /profile/followers.
+    FOLLOWERS: (username: string, search?: string) => {
+      const base = `/api/user/${encodeURIComponent(username)}/followers`;
+      return search ? `${base}?search=${encodeURIComponent(search)}` : base;
+    },
   },
 
   UPLOAD: {

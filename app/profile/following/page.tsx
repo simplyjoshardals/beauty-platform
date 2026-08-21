@@ -1,19 +1,18 @@
 "use client";
 
-import { useFollow } from "@/context/FollowProvider";
-import { getMockUser, type MockUser } from "@/data/mockUsers";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { useFollowingList } from "@/hooks/useFollowingList";
 import { UserListWithSearch } from "@/components/profile/UserListWithSearch";
 import { RequireAuth } from "@/components/auth/RequireAuth";
 
 export default function FollowingPage() {
-  const { followingUsernames } = useFollow();
-  // Guards against a username in followingUsernames that has no matching
-  // entry in MOCK_USERS — shouldn't happen given how usernames get added
-  // to that set today, but this keeps the list honest either way rather
-  // than crashing or fabricating a placeholder row.
-  const following = followingUsernames
-    .map(getMockUser)
-    .filter((u): u is MockUser => u !== undefined);
+  const { user: currentUser } = useCurrentUser();
+  // undefined until useCurrentUser resolves — same `enabled` pattern
+  // useUserPosts uses for "own profile before auth is known" — so this
+  // never fires as a request for a username that doesn't exist yet.
+  const { users: following, isLoading } = useFollowingList(
+    currentUser?.username,
+  );
 
   return (
     <RequireAuth>
@@ -25,6 +24,7 @@ export default function FollowingPage() {
         <UserListWithSearch
           users={following}
           emptyLabel="Not following anyone yet."
+          isLoading={isLoading}
         />
       </div>
     </RequireAuth>

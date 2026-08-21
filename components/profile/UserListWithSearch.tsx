@@ -9,12 +9,17 @@ import type { MockUser } from "@/data/mockUsers";
 type Props = {
   users: MockUser[];
   emptyLabel: string; // shown when the list itself has nobody in it at all
+  // Real backend loading state (from useFollowingList) — when supplied,
+  // this replaces the simulated timer below entirely instead of racing
+  // it. Omitted (undefined) on the still-mock Followers pages, which
+  // keep the original simulated behavior unchanged.
+  isLoading?: boolean;
 };
 
-// Simulated so the skeleton is actually visible — swap for a real pending
-// flag once these lists come from a real fetch. Runs once per mount, which
-// is fine here since Followers/Following are separate pages that fully
-// unmount on navigation, unlike CommentSheet which stays mounted.
+// Simulated so the skeleton is actually visible on the still-mock
+// Followers pages, which don't pass isLoading. Runs once per mount,
+// which is fine here since Followers/Following are separate pages that
+// fully unmount on navigation, unlike CommentSheet which stays mounted.
 const SIMULATED_LOAD_MS = 700;
 
 // Debounce + simulated per-search delay — stands in for a real search API
@@ -22,16 +27,25 @@ const SIMULATED_LOAD_MS = 700;
 // skeleton up until typing actually pauses, instead of flashing per letter.
 const SEARCH_DELAY_MS = 500;
 
-export function UserListWithSearch({ users, emptyLabel }: Props) {
+export function UserListWithSearch({ users, emptyLabel, isLoading }: Props) {
   const [query, setQuery] = useState("");
-  const [loading, setLoading] = useState(true);
+  // isLoading === undefined means "no real loading state was supplied" —
+  // fall back to the original simulated timer in that case only.
+  const usesSimulatedLoad = isLoading === undefined;
+  const [simulatedLoading, setSimulatedLoading] = useState(usesSimulatedLoad);
   const [searching, setSearching] = useState(false);
   const isFirstRender = useRef(true);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setLoading(false), SIMULATED_LOAD_MS);
+    if (!usesSimulatedLoad) return;
+    const timer = window.setTimeout(
+      () => setSimulatedLoading(false),
+      SIMULATED_LOAD_MS,
+    );
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [usesSimulatedLoad]);
+
+  const loading = usesSimulatedLoad ? simulatedLoading : isLoading;
 
   // Skipped on mount — only real query changes (typing, clearing) should
   // trigger the search skeleton, not the initial empty query.

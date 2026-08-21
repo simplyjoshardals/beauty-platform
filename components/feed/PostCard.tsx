@@ -19,22 +19,33 @@ import { CommentSheet } from "./CommentSheet";
 import { ShareMenu } from "./ShareMenu";
 import { PostOptionsSheet } from "./PostOptionsSheet";
 import { SaveToCollectionSheet } from "@/components/saved/SaveToCollectionSheet";
-import { useFollow } from "@/context/FollowProvider";
+import { useUserProfile } from "@/hooks/useUserProfile";
 import { useSavedPosts } from "@/hooks/useSavedPosts";
 import { usePosts } from "@/hooks/usePosts";
 import { useLikedPosts } from "@/hooks/useLikedPosts";
 import { useComments } from "@/hooks/useComments";
-import { isMockFollowerOfCurrentUser } from "@/data/mockFollowers";
 import { PATHS } from "@/utils/paths";
 import { useAuthGatedAction } from "@/hooks/useAuthGatedAction";
 import { AuthGateModal } from "@/components/auth/AuthGateModal";
 
 export function PostCard({ post }: { post: Post }) {
-  const { isFollowing, toggleFollow } = useFollow();
+  // Same real backend the profile header now uses (see
+  // hooks/useUserProfile.ts and app/u/[username]/page.tsx) — isFollowing
+  // and followsMe come off the Follow table, and toggleFollow does the
+  // same optimistic update/rollback via React Query. Multiple PostCards
+  // for the same author share one cached query (React Query dedupes by
+  // queryKey), so a repeat author in the feed doesn't mean a repeat
+  // request. This is still the FIRST of PostCard/NotificationRow/
+  // UserListRow to move off context/FollowProvider's local Set — the
+  // other two are a separate pass, so following someone from a post
+  // card here won't yet be reflected on their row in, say, the
+  // Following list until that migration happens too.
+  const { user: authorProfile, toggleFollow } = useUserProfile(
+    post.author.username,
+  );
   const { deletePost } = usePosts();
   const router = useRouter();
   const pathname = usePathname();
-  const followsMe = isMockFollowerOfCurrentUser(post.author.username);
   const { gateOpen, gateMessage, closeGate, guard } = useAuthGatedAction();
   const { isAuthenticated } = useCurrentUser();
   const { user } = useCurrentUser();
@@ -231,16 +242,16 @@ export function PostCard({ post }: { post: Post }) {
         {!isOwnPost && (
           <button
             type="button"
-            onClick={guard(() => toggleFollow(post.author.username))}
+            onClick={guard(toggleFollow)}
             className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-              isFollowing(post.author.username)
+              authorProfile?.isFollowing
                 ? "border border-foreground/15 text-foreground"
                 : "bg-foreground text-background"
             }`}
           >
-            {isFollowing(post.author.username)
+            {authorProfile?.isFollowing
               ? "Following"
-              : followsMe
+              : authorProfile?.followsMe
                 ? "Follow back"
                 : "Follow"}
           </button>

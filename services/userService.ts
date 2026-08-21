@@ -64,3 +64,21 @@ export async function toggleFollowUser(username: string) {
     method: "POST",
   });
 }
+
+// Backs /profile/following and /u/[username]/following. Unlike
+// getUserProfile above, authRequired is left at its default (true) —
+// the endpoint itself requires a session (see the route handler), so
+// there's no "anonymous visitor" case to opt out of apiFetch's normal
+// 401 handling for here.
+export async function getFollowing(username: string, search?: string) {
+  return apiFetch(API_ROUTES.USER.FOLLOWING(username, search), {
+    method: "GET",
+  });
+}
+
+// Backs /profile/followers. Same contract as getFollowing above.
+export async function getFollowers(username: string, search?: string) {
+  return apiFetch(API_ROUTES.USER.FOLLOWERS(username, search), {
+    method: "GET",
+  });
+}

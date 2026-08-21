@@ -1,15 +1,18 @@
-import { mockFollowerUsernames } from "@/data/mockFollowers";
-import { getMockUser, type MockUser } from "@/data/mockUsers";
+"use client";
+
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { useFollowersList } from "@/hooks/useFollowersList";
 import { UserListWithSearch } from "@/components/profile/UserListWithSearch";
 import { RequireAuth } from "@/components/auth/RequireAuth";
 
 export default function FollowersPage() {
-  // mockFollowerUsernames is derived directly from MOCK_USERS, so every
-  // lookup here is guaranteed to resolve — the filter is defensive, not
-  // expected to ever actually drop anything.
-  const followers = mockFollowerUsernames
-    .map(getMockUser)
-    .filter((u): u is MockUser => u !== undefined);
+  const { user: currentUser } = useCurrentUser();
+  // undefined until useCurrentUser resolves — same pattern
+  // /profile/following uses, so this never fires as a request for a
+  // username that doesn't exist yet.
+  const { users: followers, isLoading } = useFollowersList(
+    currentUser?.username,
+  );
 
   return (
     <RequireAuth>
@@ -18,7 +21,11 @@ export default function FollowersPage() {
           <p className="text-sm font-medium">Followers</p>
         </div>
 
-        <UserListWithSearch users={followers} emptyLabel="No followers yet." />
+        <UserListWithSearch
+          users={followers}
+          emptyLabel="No followers yet."
+          isLoading={isLoading}
+        />
       </div>
     </RequireAuth>
   );

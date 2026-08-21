@@ -300,351 +300,6 @@ tsconfig.json
 <files>
 This section contains the contents of the repository's files.
 
-<file path="app/api/user/[username]/follow/route.ts">
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-
-type Params = { params: Promise<{ username: string }> };
-
-// x-user-id is set by proxy.ts, which already validated the session
-// before this route runs — same trust model as every other protected
-// route. Mirrors app/api/posts/[postId]/like/route.ts's toggle exactly:
-// check-then-create/delete against the Follow join table rather than a
-// boolean, so "am I following them" stays a real per-pair fact and
-// followerCount/followingCount (Follow._count in the GET above) can
-// never drift out of sync with it.
-export async function POST(req: NextRequest, { params }: Params) {
-  try {
-    const userId = req.headers.get("x-user-id");
-    if (!userId) {
-      return NextResponse.json(
-        { success: false, error: "Unauthorized" },
-        { status: 401 },
-      );
-    }
-
-    const { username } = await params;
-
-    const target = await prisma.user.findUnique({
-      where: { username },
-      select: { id: true },
-    });
-    if (!target) {
-      return NextResponse.json(
-        { success: false, error: "User not found." },
-        { status: 404 },
-      );
-    }
-
-    if (target.id === userId) {
-      return NextResponse.json(
-        { success: false, error: "You can't follow yourself." },
-        { status: 400 },
-      );
-    }
-
-    const existing = await prisma.follow.findUnique({
-      where: {
-        followerId_followingId: { followerId: userId, followingId: target.id },
-      },
-      select: { id: true },
-    });
-
-    if (existing) {
-      await prisma.follow.delete({ where: { id: existing.id } });
-      return NextResponse.json({ success: true, following: false });
-    }
-
-    await prisma.follow.create({
-      data: { followerId: userId, followingId: target.id },
-    });
-    return NextResponse.json({ success: true, following: true });
-  } catch (err) {
-    console.error("toggle follow error", err);
-    return NextResponse.json(
-      { success: false, error: "Server error" },
-      { status: 500 },
-    );
-  }
-}
-</file>
-
-<file path="app/api/user/[username]/posts/route.ts">
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { serializePost, postInclude } from "@/lib/posts";
-
-type Params = { params: Promise<{ username: string }> };
-
-// Same take-50-no-pagination-yet posture as GET /api/posts (see
-// app/api/posts/route.ts) — fine for a profile grid this size today,
-// swap for real cursor pagination once it matters.
-const PROFILE_POSTS_TAKE = 50;
-
-// Public read, same as GET /api/user/[username] itself — this is what
-// both /u/[username] and /profile now call for the post grid, instead
-// of pulling the whole 50-post feed via usePosts() and filtering it down
-// to one author client-side. Public rather than gated on x-user-id
-// because /u/[username] is browsable logged out (see the comment on
-// RequireAuth); /profile is behind RequireAuth on the frontend, but
-// there's no reason for this route itself to care who's asking — a
-// user's posts are the same list either way.
-export async function GET(req: NextRequest, { params }: Params) {
-  const { username } = await params;
-
-  const user = await prisma.user.findUnique({
-    where: { username },
-    select: { id: true },
-  });
-
-  if (!user) {
-    return NextResponse.json(
-      { success: false, error: "User not found." },
-      { status: 404 },
-    );
-  }
-
-  const posts = await prisma.post.findMany({
-    where: { authorId: user.id },
-    include: postInclude,
-    orderBy: { createdAt: "desc" },
-    take: PROFILE_POSTS_TAKE,
-  });
-
-  return NextResponse.json({
-    success: true,
-    posts: posts.map(serializePost),
-  });
-}
-</file>
-
-<file path="app/api/user/[username]/route.ts">
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-
-type Params = { params: Promise<{ username: string }> };
-
-// Public read — this is the /u/[username] page's data source, and that
-// page is intentionally browsable while logged out (see the comment on
-// RequireAuth about /p/[postId] and /u/[username] being the two
-// action-gated-not-page-gated routes). proxy.ts carves this route out as
-// a public GET the same way it already does for /api/posts/[postId], but
-// still runs it through token verification first — so a logged-in
-// visitor still gets x-user-id set below, which is what lets
-// isFollowing/followsMe be computed for them even though the route
-// itself doesn't require auth.
-//
-// followerCount/followingCount are real counts off the Follow table
-// (unlike CURRENT_USER_PROFILE.followerCount in data/currentUserProfile.ts,
-// which is still a hardcoded placeholder — there's just no consumer of
-// "who follows me" for your OWN profile yet). isFollowing/followsMe are
-// real too. The one thing still owed to a real backend here is the
-// follow *action* everywhere else in the app (PostCard, NotificationRow,
-// UserListRow all still read/write context/FollowProvider's local
-// Set) — this route and its sibling follow/route.ts are the first real
-// piece of that; wiring the rest through is a separate pass.
-export async function GET(req: NextRequest, { params }: Params) {
-  const { username } = await params;
-
-  const user = await prisma.user.findUnique({
-    where: { username },
-    include: {
-      routineItems: { orderBy: { order: "asc" } },
-      _count: { select: { followers: true, following: true } },
-    },
-  });
-
-  if (!user) {
-    return NextResponse.json(
-      { success: false, error: "User not found." },
-      { status: 404 },
-    );
-  }
-
-  const viewerId = req.headers.get("x-user-id");
-
-  let isFollowing = false;
-  let followsMe = false;
-
-  if (viewerId && viewerId !== user.id) {
-    const [followingRow, followerRow] = await Promise.all([
-      prisma.follow.findUnique({
-        where: {
-          followerId_followingId: {
-            followerId: viewerId,
-            followingId: user.id,
-          },
-        },
-        select: { id: true },
-      }),
-      prisma.follow.findUnique({
-        where: {
-          followerId_followingId: {
-            followerId: user.id,
-            followingId: viewerId,
-          },
-        },
-        select: { id: true },
-      }),
-    ]);
-    isFollowing = Boolean(followingRow);
-    followsMe = Boolean(followerRow);
-  }
-
-  return NextResponse.json({
-    success: true,
-    user: {
-      id: user.id,
-      username: user.username,
-      avatarSrc: user.avatarSrc,
-      bio: user.bio,
-      toneTag: user.toneTag,
-      pinnedRoutine: user.routineItems.map((item) => ({
-        id: item.id,
-        label: item.label,
-      })),
-      followerCount: user._count.followers,
-      followingCount: user._count.following,
-      isFollowing,
-      followsMe,
-    },
-  });
-}
-</file>
-
-<file path="hooks/useUserPosts.ts">
-"use client";
-
-import { useQuery } from "@tanstack/react-query";
-import { getUserPosts } from "@/services/postService";
-
-// Shared prefix so a post mutation elsewhere (create, delete, like,
-// comment — see usePosts/useCreatePost/useLikedPosts/useComments) can
-// invalidate every per-user posts query at once without knowing which
-// usernames are actually cached. React Query's invalidateQueries matches
-// by prefix, so passing this alone (no username) hits every
-// ["userPosts", username] entry in the cache.
-export const USER_POSTS_QUERY_KEY_PREFIX = ["userPosts"] as const;
-
-// Backs the post grid on both /profile and /u/[username] — a direct
-// fetch of just this user's posts (see app/api/user/[username]/posts/route.ts)
-// instead of pulling the whole feed via usePosts() and filtering it down
-// to one author client-side. Undefined username (e.g. own profile before
-// useCurrentUser resolves) just holds the query off via `enabled` rather
-// than firing a request for "undefined".
-export function useUserPosts(username: string | undefined) {
-  const query = useQuery({
-    queryKey: [...USER_POSTS_QUERY_KEY_PREFIX, username],
-    queryFn: async () => {
-      const result = await getUserPosts(username as string);
-      if (!result?.success) return [];
-      return result.posts;
-    },
-    enabled: Boolean(username),
-  });
-
-  return {
-    posts: query.data ?? [],
-    isLoading: query.isLoading,
-  };
-}
-</file>
-
-<file path="hooks/useUserProfile.ts">
-"use client";
-
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getUserProfile, toggleFollowUser } from "@/services/userService";
-import type { ProductTag } from "@/types/post";
-
-export type PublicUserProfile = {
-  id: string;
-  username: string;
-  avatarSrc: string;
-  bio: string;
-  toneTag: string;
-  pinnedRoutine: ProductTag[];
-  followerCount: number;
-  followingCount: number;
-  isFollowing: boolean;
-  followsMe: boolean;
-};
-
-function profileQueryKey(username: string) {
-  return ["userProfile", username] as const;
-}
-
-// Backs /u/[username] — the one "view someone else's profile" page in
-// the app. Real backend end to end: profile fields, follower/following
-// counts, and the follow relationship itself all come from the Follow
-// table now (see app/api/user/[username]/route.ts and its sibling
-// follow/route.ts), unlike context/FollowProvider's local Set, which is
-// still what every OTHER follow button in the app (PostCard,
-// NotificationRow, UserListRow) reads and writes. Migrating those is a
-// separate pass — until then, following someone from their profile page
-// here won't be reflected on their post cards elsewhere in the feed.
-export function useUserProfile(username: string) {
-  const queryClient = useQueryClient();
-  const queryKey = profileQueryKey(username);
-
-  const query = useQuery({
-    queryKey,
-    queryFn: async () => {
-      const result = await getUserProfile(username);
-      if (!result?.success) return null;
-      return result.user as PublicUserProfile;
-    },
-    enabled: Boolean(username),
-  });
-
-  // apiFetch never throws on a failed request (see utils/apiClient.ts) —
-  // same optimistic-update / snapshot / rollback-or-refetch pattern as
-  // useLikedPosts.toggleLike and useSavedPosts.
-  const toggleFollowMutation = useMutation({
-    mutationFn: () => toggleFollowUser(username),
-    onMutate: async () => {
-      await queryClient.cancelQueries({ queryKey });
-      const previous = queryClient.getQueryData<PublicUserProfile | null>(
-        queryKey,
-      );
-      queryClient.setQueryData<PublicUserProfile | null>(queryKey, (old) => {
-        if (!old) return old;
-        const nowFollowing = !old.isFollowing;
-        return {
-          ...old,
-          isFollowing: nowFollowing,
-          followerCount: old.followerCount + (nowFollowing ? 1 : -1),
-        };
-      });
-      return { previous };
-    },
-    onSettled: (result, _error, _vars, context) => {
-      if (result === undefined || !result.success) {
-        if (context?.previous !== undefined) {
-          queryClient.setQueryData(queryKey, context.previous);
-        }
-      } else {
-        queryClient.invalidateQueries({ queryKey });
-      }
-    },
-  });
-
-  function toggleFollow() {
-    toggleFollowMutation.mutate();
-  }
-
-  return {
-    user: query.data ?? null,
-    // True only while the request is in flight — once it resolves,
-    // `user === null` means the fetch didn't succeed (not found, or a
-    // network failure), same "no separate error state" simplicity
-    // usePosts/useLikedPosts already use elsewhere in this app.
-    isLoading: query.isLoading,
-    toggleFollow,
-  };
-}
-</file>
-
 <file path="app/api/auth/logout/route.ts">
 import { NextRequest, NextResponse } from "next/server";
 import { revokeRefreshToken, revokeAllRefreshTokens } from "@/lib/auth";
@@ -1473,6 +1128,218 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
+}
+</file>
+
+<file path="app/api/user/[username]/follow/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+
+type Params = { params: Promise<{ username: string }> };
+
+// x-user-id is set by proxy.ts, which already validated the session
+// before this route runs — same trust model as every other protected
+// route. Mirrors app/api/posts/[postId]/like/route.ts's toggle exactly:
+// check-then-create/delete against the Follow join table rather than a
+// boolean, so "am I following them" stays a real per-pair fact and
+// followerCount/followingCount (Follow._count in the GET above) can
+// never drift out of sync with it.
+export async function POST(req: NextRequest, { params }: Params) {
+  try {
+    const userId = req.headers.get("x-user-id");
+    if (!userId) {
+      return NextResponse.json(
+        { success: false, error: "Unauthorized" },
+        { status: 401 },
+      );
+    }
+
+    const { username } = await params;
+
+    const target = await prisma.user.findUnique({
+      where: { username },
+      select: { id: true },
+    });
+    if (!target) {
+      return NextResponse.json(
+        { success: false, error: "User not found." },
+        { status: 404 },
+      );
+    }
+
+    if (target.id === userId) {
+      return NextResponse.json(
+        { success: false, error: "You can't follow yourself." },
+        { status: 400 },
+      );
+    }
+
+    const existing = await prisma.follow.findUnique({
+      where: {
+        followerId_followingId: { followerId: userId, followingId: target.id },
+      },
+      select: { id: true },
+    });
+
+    if (existing) {
+      await prisma.follow.delete({ where: { id: existing.id } });
+      return NextResponse.json({ success: true, following: false });
+    }
+
+    await prisma.follow.create({
+      data: { followerId: userId, followingId: target.id },
+    });
+    return NextResponse.json({ success: true, following: true });
+  } catch (err) {
+    console.error("toggle follow error", err);
+    return NextResponse.json(
+      { success: false, error: "Server error" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="app/api/user/[username]/posts/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { serializePost, postInclude } from "@/lib/posts";
+
+type Params = { params: Promise<{ username: string }> };
+
+// Same take-50-no-pagination-yet posture as GET /api/posts (see
+// app/api/posts/route.ts) — fine for a profile grid this size today,
+// swap for real cursor pagination once it matters.
+const PROFILE_POSTS_TAKE = 50;
+
+// Public read, same as GET /api/user/[username] itself — this is what
+// both /u/[username] and /profile now call for the post grid, instead
+// of pulling the whole 50-post feed via usePosts() and filtering it down
+// to one author client-side. Public rather than gated on x-user-id
+// because /u/[username] is browsable logged out (see the comment on
+// RequireAuth); /profile is behind RequireAuth on the frontend, but
+// there's no reason for this route itself to care who's asking — a
+// user's posts are the same list either way.
+export async function GET(req: NextRequest, { params }: Params) {
+  const { username } = await params;
+
+  const user = await prisma.user.findUnique({
+    where: { username },
+    select: { id: true },
+  });
+
+  if (!user) {
+    return NextResponse.json(
+      { success: false, error: "User not found." },
+      { status: 404 },
+    );
+  }
+
+  const posts = await prisma.post.findMany({
+    where: { authorId: user.id },
+    include: postInclude,
+    orderBy: { createdAt: "desc" },
+    take: PROFILE_POSTS_TAKE,
+  });
+
+  return NextResponse.json({
+    success: true,
+    posts: posts.map(serializePost),
+  });
+}
+</file>
+
+<file path="app/api/user/[username]/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+
+type Params = { params: Promise<{ username: string }> };
+
+// Public read — this is the /u/[username] page's data source, and that
+// page is intentionally browsable while logged out (see the comment on
+// RequireAuth about /p/[postId] and /u/[username] being the two
+// action-gated-not-page-gated routes). proxy.ts carves this route out as
+// a public GET the same way it already does for /api/posts/[postId], but
+// still runs it through token verification first — so a logged-in
+// visitor still gets x-user-id set below, which is what lets
+// isFollowing/followsMe be computed for them even though the route
+// itself doesn't require auth.
+//
+// followerCount/followingCount are real counts off the Follow table
+// (unlike CURRENT_USER_PROFILE.followerCount in data/currentUserProfile.ts,
+// which is still a hardcoded placeholder — there's just no consumer of
+// "who follows me" for your OWN profile yet). isFollowing/followsMe are
+// real too. The one thing still owed to a real backend here is the
+// follow *action* everywhere else in the app (PostCard, NotificationRow,
+// UserListRow all still read/write context/FollowProvider's local
+// Set) — this route and its sibling follow/route.ts are the first real
+// piece of that; wiring the rest through is a separate pass.
+export async function GET(req: NextRequest, { params }: Params) {
+  const { username } = await params;
+
+  const user = await prisma.user.findUnique({
+    where: { username },
+    include: {
+      routineItems: { orderBy: { order: "asc" } },
+      _count: { select: { followers: true, following: true } },
+    },
+  });
+
+  if (!user) {
+    return NextResponse.json(
+      { success: false, error: "User not found." },
+      { status: 404 },
+    );
+  }
+
+  const viewerId = req.headers.get("x-user-id");
+
+  let isFollowing = false;
+  let followsMe = false;
+
+  if (viewerId && viewerId !== user.id) {
+    const [followingRow, followerRow] = await Promise.all([
+      prisma.follow.findUnique({
+        where: {
+          followerId_followingId: {
+            followerId: viewerId,
+            followingId: user.id,
+          },
+        },
+        select: { id: true },
+      }),
+      prisma.follow.findUnique({
+        where: {
+          followerId_followingId: {
+            followerId: user.id,
+            followingId: viewerId,
+          },
+        },
+        select: { id: true },
+      }),
+    ]);
+    isFollowing = Boolean(followingRow);
+    followsMe = Boolean(followerRow);
+  }
+
+  return NextResponse.json({
+    success: true,
+    user: {
+      id: user.id,
+      username: user.username,
+      avatarSrc: user.avatarSrc,
+      bio: user.bio,
+      toneTag: user.toneTag,
+      pinnedRoutine: user.routineItems.map((item) => ({
+        id: item.id,
+        label: item.label,
+      })),
+      followerCount: user._count.followers,
+      followingCount: user._count.following,
+      isFollowing,
+      followsMe,
+    },
+  });
 }
 </file>
 
@@ -3506,6 +3373,139 @@ export function useUsernameAvailability(
   }
 
   return { status };
+}
+</file>
+
+<file path="hooks/useUserPosts.ts">
+"use client";
+
+import { useQuery } from "@tanstack/react-query";
+import { getUserPosts } from "@/services/postService";
+
+// Shared prefix so a post mutation elsewhere (create, delete, like,
+// comment — see usePosts/useCreatePost/useLikedPosts/useComments) can
+// invalidate every per-user posts query at once without knowing which
+// usernames are actually cached. React Query's invalidateQueries matches
+// by prefix, so passing this alone (no username) hits every
+// ["userPosts", username] entry in the cache.
+export const USER_POSTS_QUERY_KEY_PREFIX = ["userPosts"] as const;
+
+// Backs the post grid on both /profile and /u/[username] — a direct
+// fetch of just this user's posts (see app/api/user/[username]/posts/route.ts)
+// instead of pulling the whole feed via usePosts() and filtering it down
+// to one author client-side. Undefined username (e.g. own profile before
+// useCurrentUser resolves) just holds the query off via `enabled` rather
+// than firing a request for "undefined".
+export function useUserPosts(username: string | undefined) {
+  const query = useQuery({
+    queryKey: [...USER_POSTS_QUERY_KEY_PREFIX, username],
+    queryFn: async () => {
+      const result = await getUserPosts(username as string);
+      if (!result?.success) return [];
+      return result.posts;
+    },
+    enabled: Boolean(username),
+  });
+
+  return {
+    posts: query.data ?? [],
+    isLoading: query.isLoading,
+  };
+}
+</file>
+
+<file path="hooks/useUserProfile.ts">
+"use client";
+
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { getUserProfile, toggleFollowUser } from "@/services/userService";
+import type { ProductTag } from "@/types/post";
+
+export type PublicUserProfile = {
+  id: string;
+  username: string;
+  avatarSrc: string;
+  bio: string;
+  toneTag: string;
+  pinnedRoutine: ProductTag[];
+  followerCount: number;
+  followingCount: number;
+  isFollowing: boolean;
+  followsMe: boolean;
+};
+
+function profileQueryKey(username: string) {
+  return ["userProfile", username] as const;
+}
+
+// Backs /u/[username] — the one "view someone else's profile" page in
+// the app. Real backend end to end: profile fields, follower/following
+// counts, and the follow relationship itself all come from the Follow
+// table now (see app/api/user/[username]/route.ts and its sibling
+// follow/route.ts), unlike context/FollowProvider's local Set, which is
+// still what every OTHER follow button in the app (PostCard,
+// NotificationRow, UserListRow) reads and writes. Migrating those is a
+// separate pass — until then, following someone from their profile page
+// here won't be reflected on their post cards elsewhere in the feed.
+export function useUserProfile(username: string) {
+  const queryClient = useQueryClient();
+  const queryKey = profileQueryKey(username);
+
+  const query = useQuery({
+    queryKey,
+    queryFn: async () => {
+      const result = await getUserProfile(username);
+      if (!result?.success) return null;
+      return result.user as PublicUserProfile;
+    },
+    enabled: Boolean(username),
+  });
+
+  // apiFetch never throws on a failed request (see utils/apiClient.ts) —
+  // same optimistic-update / snapshot / rollback-or-refetch pattern as
+  // useLikedPosts.toggleLike and useSavedPosts.
+  const toggleFollowMutation = useMutation({
+    mutationFn: () => toggleFollowUser(username),
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey });
+      const previous = queryClient.getQueryData<PublicUserProfile | null>(
+        queryKey,
+      );
+      queryClient.setQueryData<PublicUserProfile | null>(queryKey, (old) => {
+        if (!old) return old;
+        const nowFollowing = !old.isFollowing;
+        return {
+          ...old,
+          isFollowing: nowFollowing,
+          followerCount: old.followerCount + (nowFollowing ? 1 : -1),
+        };
+      });
+      return { previous };
+    },
+    onSettled: (result, _error, _vars, context) => {
+      if (result === undefined || !result.success) {
+        if (context?.previous !== undefined) {
+          queryClient.setQueryData(queryKey, context.previous);
+        }
+      } else {
+        queryClient.invalidateQueries({ queryKey });
+      }
+    },
+  });
+
+  function toggleFollow() {
+    toggleFollowMutation.mutate();
+  }
+
+  return {
+    user: query.data ?? null,
+    // True only while the request is in flight — once it resolves,
+    // `user === null` means the fetch didn't succeed (not found, or a
+    // network failure), same "no separate error state" simplicity
+    // usePosts/useLikedPosts already use elsewhere in this app.
+    isLoading: query.isLoading,
+    toggleFollow,
+  };
 }
 </file>
 
@@ -6452,55 +6452,6 @@ export function useAuthGatedAction() {
 }
 </file>
 
-<file path="hooks/useCurrentUser.ts">
-"use client";
-
-import { useQuery } from "@tanstack/react-query";
-import { getCurrentUser } from "@/services/authService";
-import type { ProductTag } from "@/types/post";
-
-export type CurrentUser = {
-  id: string;
-  username: string;
-  email: string;
-  avatarSrc: string;
-  bio: string;
-  toneTag: string;
-  pinnedRoutine: ProductTag[];
-  onboardingCompletedAt: string | null;
-};
-
-// Replaces AuthProvider's isAuthenticated boolean entirely. Session
-// state now comes from actually asking the backend "who am I" via the
-// existing session cookies, not a client-only flag that got set once by
-// VerifyContent and then forgotten. This is what fixes the old gap where
-// refreshing the page dropped you back to "logged out" even with valid
-// cookies still present — useQuery refetches on mount automatically.
-export function useCurrentUser() {
-  const query = useQuery({
-    queryKey: ["currentUser"],
-    queryFn: async () => {
-      const result = await getCurrentUser();
-      if (!result?.success) return null;
-      return result.user as CurrentUser;
-    },
-  });
-
-  const user = query.data ?? null;
-
-  return {
-    user,
-    isAuthenticated: Boolean(user),
-    // Only meaningful once actually authenticated — a logged-out visitor
-    // isn't "needing onboarding," they're just logged out, which
-    // RequireAuth already handles as a separate, earlier check.
-    needsOnboarding: Boolean(user) && user?.onboardingCompletedAt == null,
-    isLoading: query.isLoading,
-    refetch: query.refetch,
-  };
-}
-</file>
-
 <file path="lib/auth.ts">
 import jwt from "jsonwebtoken";
 import { nanoid } from "nanoid";
@@ -7388,75 +7339,6 @@ export async function toggleCollectionPost(
 }
 </file>
 
-<file path="services/userService.ts">
-import { apiFetch } from "@/utils/apiClient";
-import { API_ROUTES } from "@/utils/apiRoutes";
-import type { ProductTag } from "@/types/post";
-
-export type CompleteOnboardingInput = {
-  username: string;
-  // Must be a real uploaded URL from useUploadMedia — never a blob:
-  // URL. Onboarding's own submission logic is responsible for only
-  // ever passing a real one through (or omitting it entirely).
-  avatarSrc?: string;
-  toneTag?: string;
-  bio?: string;
-};
-
-export async function completeOnboarding(data: CompleteOnboardingInput) {
-  // authRequired defaults to true here (unlike getCurrentUser, which
-  // explicitly opts out) — this genuinely needs a valid session, and if
-  // the access token happens to be stale, apiFetch's built-in
-  // refresh-and-retry logic is exactly what should handle that.
-  return apiFetch(API_ROUTES.USER.ONBOARDING, {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
-}
-
-export async function checkUsernameAvailability(username: string) {
-  return apiFetch(API_ROUTES.USER.CHECK_USERNAME(username), {
-    method: "GET",
-  });
-}
-
-export type UpdateProfileInput = {
-  username?: string;
-  // Must be a real uploaded URL from useUploadMedia — never a blob:
-  // URL. Same caveat as CompleteOnboardingInput's avatarSrc.
-  avatarSrc?: string;
-  toneTag?: string;
-  bio?: string;
-  pinnedRoutine?: ProductTag[];
-};
-
-export async function updateProfile(data: UpdateProfileInput) {
-  return apiFetch(API_ROUTES.USER.ME, {
-    method: "PATCH",
-    body: JSON.stringify(data),
-  });
-}
-
-// Backs /u/[username] — that page renders logged out too (same as
-// /p/[postId]), so authRequired: false here for the same reason it's
-// false on getCurrentUser/getLikedPostIds: a 401 just means "anonymous
-// visitor," not a real failure, and apiFetch's default 401 handling
-// (refresh-then-redirect) would otherwise boot a logged-out visitor off
-// an intentionally-public page.
-export async function getUserProfile(username: string) {
-  return apiFetch(API_ROUTES.USER.PROFILE(username), {
-    method: "GET",
-    authRequired: false,
-  });
-}
-
-export async function toggleFollowUser(username: string) {
-  return apiFetch(API_ROUTES.USER.TOGGLE_FOLLOW(username), {
-    method: "POST",
-  });
-}
-</file>
-
 <file path="utils/postThumbnail.ts">
 import type { Post } from "@/types/post";
 import { getCloudinaryVideoThumbnail } from "./cloudinaryVideoThumbnail";
@@ -7560,219 +7442,6 @@ const nextConfig: NextConfig = {
 };
 
 export default nextConfig;
-</file>
-
-<file path="app/api/user/me/route.ts">
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { USERNAME_PATTERN, USERNAME_FORMAT_ERROR } from "@/constants/username";
-
-// x-user-id is set by proxy.ts, which already validated the access/
-// refresh token cookies before this route ever runs — this handler
-// trusts that header rather than re-verifying anything itself.
-export async function GET(req: NextRequest) {
-  const userId = req.headers.get("x-user-id");
-
-  if (!userId) {
-    return NextResponse.json(
-      { success: false, error: "Unauthorized" },
-      { status: 401 },
-    );
-  }
-
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    include: { routineItems: { orderBy: { order: "asc" } } },
-  });
-
-  if (!user) {
-    return NextResponse.json(
-      { success: false, error: "Unauthorized" },
-      { status: 401 },
-    );
-  }
-
-  return NextResponse.json({
-    success: true,
-    user: {
-      id: user.id,
-      username: user.username,
-      email: user.email,
-      avatarSrc: user.avatarSrc,
-      bio: user.bio,
-      toneTag: user.toneTag,
-      // Shaped as ProductTag[] (id + label) — same shape the rest of the
-      // frontend already expects for pinned routine / post product tags.
-      pinnedRoutine: user.routineItems.map((item) => ({
-        id: item.id,
-        label: item.label,
-      })),
-      onboardingCompletedAt: user.onboardingCompletedAt,
-    },
-  });
-}
-
-// Own-profile edits (Edit Profile screen). Same trust model as GET and
-// as /api/user/onboarding — proxy.ts has already validated the session,
-// this route just trusts x-user-id. Every field is optional here (unlike
-// onboarding's POST, which requires username): a PATCH only touches
-// whatever the client actually sent.
-export async function PATCH(req: NextRequest) {
-  try {
-    const userId = req.headers.get("x-user-id");
-    if (!userId) {
-      return NextResponse.json(
-        { success: false, error: "Unauthorized" },
-        { status: 401 },
-      );
-    }
-
-    const { username, avatarSrc, toneTag, bio, pinnedRoutine } =
-      await req.json();
-
-    const data: {
-      username?: string;
-      avatarSrc?: string;
-      toneTag?: string;
-      bio?: string;
-    } = {};
-
-    if (username !== undefined) {
-      if (
-        typeof username !== "string" ||
-        !USERNAME_PATTERN.test(username.trim().toLowerCase())
-      ) {
-        return NextResponse.json(
-          { success: false, error: USERNAME_FORMAT_ERROR },
-          { status: 400 },
-        );
-      }
-
-      const normalizedUsername = username.trim().toLowerCase();
-
-      const existing = await prisma.user.findUnique({
-        where: { username: normalizedUsername },
-      });
-
-      if (existing && existing.id !== userId) {
-        return NextResponse.json(
-          { success: false, error: "That username is already taken." },
-          { status: 409 },
-        );
-      }
-
-      data.username = normalizedUsername;
-    }
-
-    // Same guard as onboarding: only ever a URL that actually came from
-    // our own Cloudinary avatars folder, via /api/upload/signature —
-    // never an arbitrary external URL submitted directly.
-    if (avatarSrc !== undefined) {
-      const isValidAvatarSrc =
-        typeof avatarSrc === "string" &&
-        avatarSrc.includes(
-          `res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}/`,
-        ) &&
-        avatarSrc.includes("/vanity/avatars/");
-
-      if (!isValidAvatarSrc) {
-        return NextResponse.json(
-          { success: false, error: "Invalid avatar image." },
-          { status: 400 },
-        );
-      }
-
-      data.avatarSrc = avatarSrc;
-    }
-
-    if (toneTag !== undefined) {
-      if (typeof toneTag !== "string") {
-        return NextResponse.json(
-          { success: false, error: "Invalid tone tag." },
-          { status: 400 },
-        );
-      }
-      data.toneTag = toneTag;
-    }
-
-    if (bio !== undefined) {
-      if (typeof bio !== "string") {
-        return NextResponse.json(
-          { success: false, error: "Invalid bio." },
-          { status: 400 },
-        );
-      }
-      data.bio = bio;
-    }
-
-    // pinnedRoutine, if sent, is validated separately since it isn't a
-    // plain scalar column — it's the RoutineItem rows, replaced wholesale
-    // rather than diffed, same as how onboarding treats the rest of the
-    // profile as "just overwrite it with what was submitted."
-    let routineItemsInput: { label: string }[] | null = null;
-    if (pinnedRoutine !== undefined) {
-      if (
-        !Array.isArray(pinnedRoutine) ||
-        !pinnedRoutine.every(
-          (item) =>
-            item && typeof item === "object" && typeof item.label === "string",
-        )
-      ) {
-        return NextResponse.json(
-          { success: false, error: "Invalid pinned routine." },
-          { status: 400 },
-        );
-      }
-      routineItemsInput = pinnedRoutine.map((item: { label: string }) => ({
-        label: item.label,
-      }));
-    }
-
-    const [user] = await prisma.$transaction([
-      prisma.user.update({ where: { id: userId }, data }),
-      ...(routineItemsInput
-        ? [
-            prisma.routineItem.deleteMany({ where: { userId } }),
-            prisma.routineItem.createMany({
-              data: routineItemsInput.map((item, index) => ({
-                userId,
-                label: item.label,
-                order: index,
-              })),
-            }),
-          ]
-        : []),
-    ]);
-
-    const routineItems = await prisma.routineItem.findMany({
-      where: { userId },
-      orderBy: { order: "asc" },
-    });
-
-    return NextResponse.json({
-      success: true,
-      user: {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        avatarSrc: user.avatarSrc,
-        bio: user.bio,
-        toneTag: user.toneTag,
-        pinnedRoutine: routineItems.map((item) => ({
-          id: item.id,
-          label: item.label,
-        })),
-        onboardingCompletedAt: user.onboardingCompletedAt,
-      },
-    });
-  } catch (err) {
-    console.error("update profile error", err);
-    return NextResponse.json(
-      { success: false, error: "Server error" },
-      { status: 500 },
-    );
-  }
-}
 </file>
 
 <file path="app/create/page.tsx">
@@ -8689,6 +8358,61 @@ export function isMockFollowerOfCurrentUser(username: string): boolean {
 }
 </file>
 
+<file path="hooks/useCurrentUser.ts">
+"use client";
+
+import { useQuery } from "@tanstack/react-query";
+import { getCurrentUser } from "@/services/authService";
+import type { ProductTag } from "@/types/post";
+
+export type CurrentUser = {
+  id: string;
+  username: string;
+  email: string;
+  avatarSrc: string;
+  bio: string;
+  toneTag: string;
+  pinnedRoutine: ProductTag[];
+  onboardingCompletedAt: string | null;
+  // Real counts off the Follow table now (see app/api/user/me/route.ts),
+  // same _count pattern GET /api/user/[username] already used for
+  // someone else's profile — not the CURRENT_USER_PROFILE mock /
+  // FollowProvider's local state this used to read.
+  followerCount: number;
+  followingCount: number;
+};
+
+// Replaces AuthProvider's isAuthenticated boolean entirely. Session
+// state now comes from actually asking the backend "who am I" via the
+// existing session cookies, not a client-only flag that got set once by
+// VerifyContent and then forgotten. This is what fixes the old gap where
+// refreshing the page dropped you back to "logged out" even with valid
+// cookies still present — useQuery refetches on mount automatically.
+export function useCurrentUser() {
+  const query = useQuery({
+    queryKey: ["currentUser"],
+    queryFn: async () => {
+      const result = await getCurrentUser();
+      if (!result?.success) return null;
+      return result.user as CurrentUser;
+    },
+  });
+
+  const user = query.data ?? null;
+
+  return {
+    user,
+    isAuthenticated: Boolean(user),
+    // Only meaningful once actually authenticated — a logged-out visitor
+    // isn't "needing onboarding," they're just logged out, which
+    // RequireAuth already handles as a separate, earlier check.
+    needsOnboarding: Boolean(user) && user?.onboardingCompletedAt == null,
+    isLoading: query.isLoading,
+    refetch: query.refetch,
+  };
+}
+</file>
+
 <file path="hooks/usePosts.ts">
 "use client";
 
@@ -8773,73 +8497,72 @@ export function usePosts() {
 }
 </file>
 
-<file path="services/postService.ts">
+<file path="services/userService.ts">
 import { apiFetch } from "@/utils/apiClient";
 import { API_ROUTES } from "@/utils/apiRoutes";
-import type { Post } from "@/types/post";
+import type { ProductTag } from "@/types/post";
 
-export type CreatePostProduct = { label: string };
-
-// Mirrors the per-mediaType fields app/api/posts/route.ts actually reads —
-// every field here must already be a real Cloudinary URL from
-// useUploadMedia, never a blob: URL. The route re-validates ownership of
-// each URL server-side regardless, but the caller should never be
-// passing anything else in the first place.
-export type CreatePostInput = {
-  mediaType: "IMAGE" | "CAROUSEL" | "VIDEO" | "BEFORE_AFTER";
-  caption?: string;
-  products?: CreatePostProduct[];
-  // IMAGE
-  imageSrc?: string;
-  imageAlt?: string;
-  // CAROUSEL
-  carouselItems?: { src: string; alt?: string }[];
-  // VIDEO
-  videoSrc?: string;
-  // BEFORE_AFTER
-  beforeSrc?: string;
-  beforeAlt?: string;
-  afterSrc?: string;
-  afterAlt?: string;
+export type CompleteOnboardingInput = {
+  username: string;
+  // Must be a real uploaded URL from useUploadMedia — never a blob:
+  // URL. Onboarding's own submission logic is responsible for only
+  // ever passing a real one through (or omitting it entirely).
+  avatarSrc?: string;
+  toneTag?: string;
+  bio?: string;
 };
 
-export type ListPostsResult =
-  | { success: true; posts: Post[] }
-  | { success: false; error: string };
-
-export async function listPosts(): Promise<ListPostsResult> {
-  // authRequired: false — see the identical comment in likeService.ts's
-  // getLikedPostIds. usePosts() is called unconditionally by PostCard
-  // (for deletePost), which also renders on the public /p/[postId] page.
-  // For a logged-out visitor GET /api/posts correctly 401s (the feed
-  // list itself is never public), but that should just resolve to an
-  // empty list here — not trigger apiFetch's refresh-then-hard-redirect
-  // path and boot the visitor off the permalink page.
-  return apiFetch(API_ROUTES.POSTS.LIST, {
-    method: "GET",
-    authRequired: false,
-  });
-}
-
-export type CreatePostResult =
-  | { success: true; post: Post }
-  | { success: false; error: string };
-
-export async function createPost(
-  data: CreatePostInput,
-): Promise<CreatePostResult> {
-  return apiFetch(API_ROUTES.POSTS.CREATE, {
+export async function completeOnboarding(data: CompleteOnboardingInput) {
+  // authRequired defaults to true here (unlike getCurrentUser, which
+  // explicitly opts out) — this genuinely needs a valid session, and if
+  // the access token happens to be stale, apiFetch's built-in
+  // refresh-and-retry logic is exactly what should handle that.
+  return apiFetch(API_ROUTES.USER.ONBOARDING, {
     method: "POST",
     body: JSON.stringify(data),
   });
 }
 
-export type DeletePostResult =
-  | { success: true }
-  | { success: false; error: string };
+export async function checkUsernameAvailability(username: string) {
+  return apiFetch(API_ROUTES.USER.CHECK_USERNAME(username), {
+    method: "GET",
+  });
+}
 
-export async function deletePost(postId: string): Promise<DeletePostResult> {
-  return apiFetch(API_ROUTES.POSTS.DELETE(postId), { method: "DELETE" });
+export type UpdateProfileInput = {
+  username?: string;
+  // Must be a real uploaded URL from useUploadMedia — never a blob:
+  // URL. Same caveat as CompleteOnboardingInput's avatarSrc.
+  avatarSrc?: string;
+  toneTag?: string;
+  bio?: string;
+  pinnedRoutine?: ProductTag[];
+};
+
+export async function updateProfile(data: UpdateProfileInput) {
+  return apiFetch(API_ROUTES.USER.ME, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+// Backs /u/[username] — that page renders logged out too (same as
+// /p/[postId]), so authRequired: false here for the same reason it's
+// false on getCurrentUser/getLikedPostIds: a 401 just means "anonymous
+// visitor," not a real failure, and apiFetch's default 401 handling
+// (refresh-then-redirect) would otherwise boot a logged-out visitor off
+// an intentionally-public page.
+export async function getUserProfile(username: string) {
+  return apiFetch(API_ROUTES.USER.PROFILE(username), {
+    method: "GET",
+    authRequired: false,
+  });
+}
+
+export async function toggleFollowUser(username: string) {
+  return apiFetch(API_ROUTES.USER.TOGGLE_FOLLOW(username), {
+    method: "POST",
+  });
 }
 </file>
 
@@ -8875,6 +8598,230 @@ export type Post = {
   comments?: Comment[]; // seed/existing comments, if any
   createdAt: string; // ISO — used for chronological sort
 };
+</file>
+
+<file path="app/api/user/me/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { USERNAME_PATTERN, USERNAME_FORMAT_ERROR } from "@/constants/username";
+
+// x-user-id is set by proxy.ts, which already validated the access/
+// refresh token cookies before this route ever runs — this handler
+// trusts that header rather than re-verifying anything itself.
+export async function GET(req: NextRequest) {
+  const userId = req.headers.get("x-user-id");
+
+  if (!userId) {
+    return NextResponse.json(
+      { success: false, error: "Unauthorized" },
+      { status: 401 },
+    );
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: {
+      routineItems: { orderBy: { order: "asc" } },
+      // Same _count pattern as GET /api/user/[username] — real counts
+      // off the Follow table instead of the CURRENT_USER_PROFILE mock /
+      // FollowProvider's local state the frontend used to read for its
+      // own profile page. Own-profile is just the one-user case of
+      // "how many people follow this user," so it reuses the same
+      // relations rather than a separate query.
+      _count: { select: { followers: true, following: true } },
+    },
+  });
+
+  if (!user) {
+    return NextResponse.json(
+      { success: false, error: "Unauthorized" },
+      { status: 401 },
+    );
+  }
+
+  return NextResponse.json({
+    success: true,
+    user: {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      avatarSrc: user.avatarSrc,
+      bio: user.bio,
+      toneTag: user.toneTag,
+      // Shaped as ProductTag[] (id + label) — same shape the rest of the
+      // frontend already expects for pinned routine / post product tags.
+      pinnedRoutine: user.routineItems.map((item) => ({
+        id: item.id,
+        label: item.label,
+      })),
+      onboardingCompletedAt: user.onboardingCompletedAt,
+      followerCount: user._count.followers,
+      followingCount: user._count.following,
+    },
+  });
+}
+
+// Own-profile edits (Edit Profile screen). Same trust model as GET and
+// as /api/user/onboarding — proxy.ts has already validated the session,
+// this route just trusts x-user-id. Every field is optional here (unlike
+// onboarding's POST, which requires username): a PATCH only touches
+// whatever the client actually sent.
+export async function PATCH(req: NextRequest) {
+  try {
+    const userId = req.headers.get("x-user-id");
+    if (!userId) {
+      return NextResponse.json(
+        { success: false, error: "Unauthorized" },
+        { status: 401 },
+      );
+    }
+
+    const { username, avatarSrc, toneTag, bio, pinnedRoutine } =
+      await req.json();
+
+    const data: {
+      username?: string;
+      avatarSrc?: string;
+      toneTag?: string;
+      bio?: string;
+    } = {};
+
+    if (username !== undefined) {
+      if (
+        typeof username !== "string" ||
+        !USERNAME_PATTERN.test(username.trim().toLowerCase())
+      ) {
+        return NextResponse.json(
+          { success: false, error: USERNAME_FORMAT_ERROR },
+          { status: 400 },
+        );
+      }
+
+      const normalizedUsername = username.trim().toLowerCase();
+
+      const existing = await prisma.user.findUnique({
+        where: { username: normalizedUsername },
+      });
+
+      if (existing && existing.id !== userId) {
+        return NextResponse.json(
+          { success: false, error: "That username is already taken." },
+          { status: 409 },
+        );
+      }
+
+      data.username = normalizedUsername;
+    }
+
+    // Same guard as onboarding: only ever a URL that actually came from
+    // our own Cloudinary avatars folder, via /api/upload/signature —
+    // never an arbitrary external URL submitted directly.
+    if (avatarSrc !== undefined) {
+      const isValidAvatarSrc =
+        typeof avatarSrc === "string" &&
+        avatarSrc.includes(
+          `res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}/`,
+        ) &&
+        avatarSrc.includes("/vanity/avatars/");
+
+      if (!isValidAvatarSrc) {
+        return NextResponse.json(
+          { success: false, error: "Invalid avatar image." },
+          { status: 400 },
+        );
+      }
+
+      data.avatarSrc = avatarSrc;
+    }
+
+    if (toneTag !== undefined) {
+      if (typeof toneTag !== "string") {
+        return NextResponse.json(
+          { success: false, error: "Invalid tone tag." },
+          { status: 400 },
+        );
+      }
+      data.toneTag = toneTag;
+    }
+
+    if (bio !== undefined) {
+      if (typeof bio !== "string") {
+        return NextResponse.json(
+          { success: false, error: "Invalid bio." },
+          { status: 400 },
+        );
+      }
+      data.bio = bio;
+    }
+
+    // pinnedRoutine, if sent, is validated separately since it isn't a
+    // plain scalar column — it's the RoutineItem rows, replaced wholesale
+    // rather than diffed, same as how onboarding treats the rest of the
+    // profile as "just overwrite it with what was submitted."
+    let routineItemsInput: { label: string }[] | null = null;
+    if (pinnedRoutine !== undefined) {
+      if (
+        !Array.isArray(pinnedRoutine) ||
+        !pinnedRoutine.every(
+          (item) =>
+            item && typeof item === "object" && typeof item.label === "string",
+        )
+      ) {
+        return NextResponse.json(
+          { success: false, error: "Invalid pinned routine." },
+          { status: 400 },
+        );
+      }
+      routineItemsInput = pinnedRoutine.map((item: { label: string }) => ({
+        label: item.label,
+      }));
+    }
+
+    const [user] = await prisma.$transaction([
+      prisma.user.update({ where: { id: userId }, data }),
+      ...(routineItemsInput
+        ? [
+            prisma.routineItem.deleteMany({ where: { userId } }),
+            prisma.routineItem.createMany({
+              data: routineItemsInput.map((item, index) => ({
+                userId,
+                label: item.label,
+                order: index,
+              })),
+            }),
+          ]
+        : []),
+    ]);
+
+    const routineItems = await prisma.routineItem.findMany({
+      where: { userId },
+      orderBy: { order: "asc" },
+    });
+
+    return NextResponse.json({
+      success: true,
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        avatarSrc: user.avatarSrc,
+        bio: user.bio,
+        toneTag: user.toneTag,
+        pinnedRoutine: routineItems.map((item) => ({
+          id: item.id,
+          label: item.label,
+        })),
+        onboardingCompletedAt: user.onboardingCompletedAt,
+      },
+    });
+  } catch (err) {
+    console.error("update profile error", err);
+    return NextResponse.json(
+      { success: false, error: "Server error" },
+      { status: 500 },
+    );
+  }
+}
 </file>
 
 <file path="app/p/[postId]/page.tsx">
@@ -9365,6 +9312,89 @@ export function OnboardingFlow() {
       </button>
     </div>
   );
+}
+</file>
+
+<file path="services/postService.ts">
+import { apiFetch } from "@/utils/apiClient";
+import { API_ROUTES } from "@/utils/apiRoutes";
+import type { Post } from "@/types/post";
+
+export type CreatePostProduct = { label: string };
+
+// Mirrors the per-mediaType fields app/api/posts/route.ts actually reads —
+// every field here must already be a real Cloudinary URL from
+// useUploadMedia, never a blob: URL. The route re-validates ownership of
+// each URL server-side regardless, but the caller should never be
+// passing anything else in the first place.
+export type CreatePostInput = {
+  mediaType: "IMAGE" | "CAROUSEL" | "VIDEO" | "BEFORE_AFTER";
+  caption?: string;
+  products?: CreatePostProduct[];
+  // IMAGE
+  imageSrc?: string;
+  imageAlt?: string;
+  // CAROUSEL
+  carouselItems?: { src: string; alt?: string }[];
+  // VIDEO
+  videoSrc?: string;
+  // BEFORE_AFTER
+  beforeSrc?: string;
+  beforeAlt?: string;
+  afterSrc?: string;
+  afterAlt?: string;
+};
+
+export type ListPostsResult =
+  | { success: true; posts: Post[] }
+  | { success: false; error: string };
+
+export async function listPosts(): Promise<ListPostsResult> {
+  // authRequired: false — see the identical comment in likeService.ts's
+  // getLikedPostIds. usePosts() is called unconditionally by PostCard
+  // (for deletePost), which also renders on the public /p/[postId] page.
+  // For a logged-out visitor GET /api/posts correctly 401s (the feed
+  // list itself is never public), but that should just resolve to an
+  // empty list here — not trigger apiFetch's refresh-then-hard-redirect
+  // path and boot the visitor off the permalink page.
+  return apiFetch(API_ROUTES.POSTS.LIST, {
+    method: "GET",
+    authRequired: false,
+  });
+}
+
+// Backs useUserPosts — GET /api/user/[username]/posts, a dedicated route
+// that queries Post by authorId directly rather than pulling the whole
+// feed and filtering client-side. Public, same as GET /api/user/[username]
+// itself (see the route's own comment): /u/[username] is browsable
+// logged out, so this can't require auth the way listPosts() effectively
+// does.
+export async function getUserPosts(username: string): Promise<ListPostsResult> {
+  return apiFetch(API_ROUTES.USER.POSTS(username), {
+    method: "GET",
+    authRequired: false,
+  });
+}
+
+export type CreatePostResult =
+  | { success: true; post: Post }
+  | { success: false; error: string };
+
+export async function createPost(
+  data: CreatePostInput,
+): Promise<CreatePostResult> {
+  return apiFetch(API_ROUTES.POSTS.CREATE, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export type DeletePostResult =
+  | { success: true }
+  | { success: false; error: string };
+
+export async function deletePost(postId: string): Promise<DeletePostResult> {
+  return apiFetch(API_ROUTES.POSTS.DELETE(postId), { method: "DELETE" });
 }
 </file>
 
@@ -10083,114 +10113,6 @@ export function ProfileHeader(props: Props) {
 }
 </file>
 
-<file path="app/u/[username]/page.tsx">
-"use client";
-
-import { use, useEffect } from "react";
-import { useRouter, notFound } from "next/navigation";
-import { useUserPosts } from "@/hooks/useUserPosts";
-import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { useUserProfile } from "@/hooks/useUserProfile";
-import { PATHS } from "@/utils/paths";
-import { ProfileHeader } from "@/components/profile/ProfileHeader";
-import { ProfileHeaderSkeleton } from "@/components/profile/ProfileHeaderSkeleton";
-import { PostGrid } from "@/components/profile/PostGrid";
-import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
-import { ProductChips } from "@/components/feed/ProductChips";
-import { useAuthGatedAction } from "@/hooks/useAuthGatedAction";
-import { AuthGateModal } from "@/components/auth/AuthGateModal";
-
-type Props = {
-  params: Promise<{ username: string }>;
-};
-
-export default function UserProfilePage({ params }: Props) {
-  const { username } = use(params);
-  const router = useRouter();
-  const { user: currentUser } = useCurrentUser();
-  const {
-    user,
-    isLoading: profileLoading,
-    toggleFollow,
-  } = useUserProfile(username);
-  const { posts: userPosts, isLoading: postsLoading } = useUserPosts(username);
-  const { gateOpen, closeGate, guard } = useAuthGatedAction();
-
-  // This route is for viewing OTHER people. Your own profile — with Edit
-  // Profile instead of a Follow button — lives at /profile. Redirect
-  // rather than rendering a nonsensical "follow yourself" state.
-  // Compared against your LIVE username (not a frozen constant) — since
-  // username is now editable, visiting /u/your-new-handle needs to still
-  // correctly recognize it's you, right after a rename.
-  const isSelf = username === currentUser?.username;
-
-  useEffect(() => {
-    if (isSelf) {
-      router.replace(PATHS.PROFILE);
-    }
-  }, [isSelf, router]);
-
-  if (isSelf) {
-    return null;
-  }
-
-  // profileLoading reflects the real GET /api/user/[username] request,
-  // not a simulated timeout — once it resolves, user === null means the
-  // fetch didn't succeed (nonexistent username, or a network failure),
-  // so there's no fabricated fallback profile rendered with a working
-  // Follow button for nobody. postsLoading is its own separate request
-  // (GET /api/user/[username]/posts, via useUserPosts) rather than a
-  // filter over the whole feed, so it's gated here too — the grid
-  // shouldn't render empty just because the posts fetch hasn't caught up
-  // with the profile fetch yet.
-  if (profileLoading || postsLoading) {
-    return (
-      <div className="flex flex-col">
-        <ProfileHeaderSkeleton />
-        <div className="border-t border-foreground/10">
-          <PostGridSkeleton />
-        </div>
-      </div>
-    );
-  }
-
-  if (!user) {
-    notFound();
-  }
-
-  return (
-    <div className="flex flex-col">
-      <ProfileHeader
-        isOwnProfile={false}
-        username={user.username}
-        avatarSrc={user.avatarSrc}
-        bio={user.bio}
-        toneTag={user.toneTag}
-        postCount={userPosts.length}
-        followerCount={user.followerCount}
-        followingCount={user.followingCount}
-        isFollowing={user.isFollowing}
-        followsMe={user.followsMe}
-        onToggleFollow={guard(toggleFollow)}
-      />
-
-      {user.pinnedRoutine.length > 0 && (
-        <div className="border-t border-foreground/10 px-4 py-4">
-          <p className="mb-2 text-sm font-medium">Routine</p>
-          <ProductChips products={user.pinnedRoutine} />
-        </div>
-      )}
-
-      <div className="border-t border-foreground/10">
-        <PostGrid posts={userPosts} />
-      </div>
-
-      <AuthGateModal open={gateOpen} onClose={closeGate} />
-    </div>
-  );
-}
-</file>
-
 <file path="components/feed/HomeFeed.tsx">
 "use client";
 
@@ -10603,337 +10525,114 @@ export function UserListRow({ user }: { user: MockUser }) {
 }
 </file>
 
-<file path="utils/apiRoutes.ts">
-// Everything from the shared boilerplate's API_ROUTES that isn't shown
-// here (ADMIN, DEPOSITS, WITHDRAWALS, TRANSACTIONS, SUPPORT, PRICES)
-// belonged to a different app template — not part of Vanity, and not
-// carried over. Add new sections here as real Vanity feature endpoints
-// (comments, follow, saved, notifications) get built.
-export const API_ROUTES = {
-  AUTH: {
-    // Unified signup + login + resend — same call every time, since a
-    // magic link makes all three the same action.
-    REQUEST_LINK: "/api/auth/request-link",
-    VERIFY_TOKEN: (token: string) => `/api/auth/verify/${token}`,
-    LOGOUT: "/api/auth/logout",
-    REFRESH_TOKEN: "/api/auth/refresh-token",
-  },
+<file path="app/u/[username]/page.tsx">
+"use client";
 
-  USER: {
-    ME: "/api/user/me",
-    ONBOARDING: "/api/user/onboarding",
-    CHECK_USERNAME: (username: string) =>
-      `/api/user/username-available?username=${encodeURIComponent(username)}`,
-    // Public profile lookup + follow toggle for viewing someone ELSE's
-    // profile (/u/[username]) — distinct from ME above, which is only
-    // ever the logged-in caller's own record.
-    PROFILE: (username: string) => `/api/user/${encodeURIComponent(username)}`,
-    TOGGLE_FOLLOW: (username: string) =>
-      `/api/user/${encodeURIComponent(username)}/follow`,
-  },
+import { use, useEffect } from "react";
+import { useRouter, notFound } from "next/navigation";
+import { useUserPosts } from "@/hooks/useUserPosts";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { useUserProfile } from "@/hooks/useUserProfile";
+import { PATHS } from "@/utils/paths";
+import { ProfileHeader } from "@/components/profile/ProfileHeader";
+import { ProfileHeaderSkeleton } from "@/components/profile/ProfileHeaderSkeleton";
+import { PostGrid } from "@/components/profile/PostGrid";
+import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
+import { ProductChips } from "@/components/feed/ProductChips";
+import { useAuthGatedAction } from "@/hooks/useAuthGatedAction";
+import { AuthGateModal } from "@/components/auth/AuthGateModal";
 
-  UPLOAD: {
-    SIGNATURE: "/api/upload/signature",
-  },
-
-  POSTS: {
-    LIST: "/api/posts",
-    CREATE: "/api/posts",
-    DELETE: (postId: string) => `/api/posts/${postId}`,
-    // GET returns every post id the current user has liked; POST toggles
-    // a single post's like state — same BUNDLE/TOGGLE split as SAVED
-    // below.
-    LIKES_BUNDLE: "/api/posts/likes",
-    TOGGLE_LIKE: (postId: string) => `/api/posts/${postId}/like`,
-  },
-
-  COMMENTS: {
-    LIST: (postId: string) => `/api/posts/${postId}/comments`,
-    CREATE: (postId: string) => `/api/posts/${postId}/comments`,
-    DELETE: (postId: string, commentId: string) =>
-      `/api/posts/${postId}/comments/${commentId}`,
-    TOGGLE_LIKE: (postId: string, commentId: string) =>
-      `/api/posts/${postId}/comments/${commentId}/like`,
-  },
-
-  SAVED: {
-    // GET returns the whole bundle (saved post ids + every collection
-    // with its post ids); POST toggles a post's overall saved state.
-    BUNDLE: "/api/saved",
-    TOGGLE_SAVE: "/api/saved",
-    CREATE_COLLECTION: "/api/saved/collections",
-    RENAME_COLLECTION: (collectionId: string) =>
-      `/api/saved/collections/${collectionId}`,
-    DELETE_COLLECTION: (collectionId: string) =>
-      `/api/saved/collections/${collectionId}`,
-    TOGGLE_COLLECTION_POST: (collectionId: string) =>
-      `/api/saved/collections/${collectionId}/posts`,
-  },
+type Props = {
+  params: Promise<{ username: string }>;
 };
-</file>
 
-<file path="proxy.ts">
-import { NextRequest, NextResponse } from "next/server";
-import {
-  verifyAccessToken,
-  checkRefreshToken,
-  signAccessToken,
-} from "./lib/auth";
-import { prisma } from "./lib/prisma";
+export default function UserProfilePage({ params }: Props) {
+  const { username } = use(params);
+  const router = useRouter();
+  const { user: currentUser } = useCurrentUser();
+  const {
+    user,
+    isLoading: profileLoading,
+    toggleFollow,
+  } = useUserProfile(username);
+  const { posts: userPosts, isLoading: postsLoading } = useUserPosts(username);
+  const { gateOpen, closeGate, guard } = useAuthGatedAction();
 
-function addSecurityHeaders(response: NextResponse) {
-  response.headers.set(
-    "X-Robots-Tag",
-    "noindex, nofollow, noarchive, nosnippet",
-  );
-  response.headers.set("X-Content-Type-Options", "nosniff");
-  response.headers.set("X-Frame-Options", "DENY");
-  response.headers.set("Referrer-Policy", "no-referrer");
-  response.headers.set("Permissions-Policy", "interest-cohort=()");
-  response.headers.set("X-XSS-Protection", "1; mode=block");
-  return response;
-}
+  // This route is for viewing OTHER people. Your own profile — with Edit
+  // Profile instead of a Follow button — lives at /profile. Redirect
+  // rather than rendering a nonsensical "follow yourself" state.
+  // Compared against your LIVE username (not a frozen constant) — since
+  // username is now editable, visiting /u/your-new-handle needs to still
+  // correctly recognize it's you, right after a rename.
+  const isSelf = username === currentUser?.username;
 
-function isBot(userAgent: string): boolean {
-  const botPatterns = [
-    "googlebot",
-    "bingbot",
-    "slurp",
-    "duckduckbot",
-    "baiduspider",
-    "yandexbot",
-    "crawler",
-    "spider",
-    "scraper",
-    "bot",
-    "archive.org",
-    "wayback",
-    "ia_archiver",
-    "gptbot",
-    "chatgpt",
-    "ccbot",
-    "anthropic",
-    "claude",
-    "cohere",
-  ];
-  const lowerUA = userAgent.toLowerCase();
-  return botPatterns.some((pattern) => lowerUA.includes(pattern));
-}
+  useEffect(() => {
+    if (isSelf) {
+      router.replace(PATHS.PROFILE);
+    }
+  }, [isSelf, router]);
 
-// Builds a NextResponse.next() that actually forwards a header to the
-// downstream Route Handler's req.headers — just calling
-// NextResponse.next().headers.set(...) does NOT do this; it only sets a
-// header on the response sent back to the browser. This is the pattern
-// that's actually required for the route handler to see it.
-function nextWithRequestHeader(req: NextRequest, name: string, value: string) {
-  const headers = new Headers(req.headers);
-  headers.set(name, value);
-  return NextResponse.next({ request: { headers } });
-}
+  if (isSelf) {
+    return null;
+  }
 
-// Segment names under /api/posts that are NOT a :postId — without this,
-// a literal path like /api/posts/likes would match the same
-// "/api/posts/<something>" shape as a real single-post GET and get
-// waved through as public. Keep in sync with the static (non-dynamic)
-// routes nested directly under /api/posts (see utils/apiRoutes.ts).
-const RESERVED_POST_SEGMENTS = new Set(["likes"]);
-
-// The only two intentionally-public reads under /api/posts:
-//   GET /api/posts/<postId>            — the /p/[postId] permalink page
-//   GET /api/posts/<postId>/comments   — that page's comment list
-// Everything else under /api/posts (the feed list, create, delete,
-// likes, comment create/delete/like, the saved-likes bundle) stays
-// behind the auth gate below. Matches app/api/posts/[postId]/route.ts's
-// GET and app/api/posts/[postId]/comments/route.ts's GET exactly.
-function isPublicPostGet(pathname: string, method: string): boolean {
-  if (method !== "GET") return false;
-  const match = pathname.match(/^\/api\/posts\/([^/]+)(?:\/comments)?$/);
-  if (!match) return false;
-  const [, postId] = match;
-  return !RESERVED_POST_SEGMENTS.has(postId);
-}
-
-// Segment names directly under /api/user that are NOT a :username — same
-// reasoning as RESERVED_POST_SEGMENTS above. Keep in sync with the
-// static (non-dynamic) routes nested directly under /api/user (see
-// utils/apiRoutes.ts).
-const RESERVED_USER_SEGMENTS = new Set([
-  "me",
-  "onboarding",
-  "username-available",
-]);
-
-// The one intentionally-public read under /api/user: GET /api/user/<username>
-// backs the /u/[username] page, which (like /p/[postId]) is browsable
-// while logged out — only the follow action itself is auth-gated on the
-// frontend (useAuthGatedAction) and enforced again here on the backend
-// (POST /api/user/[username]/follow is NOT matched by this and stays
-// behind the normal auth gate below). The optional /posts suffix covers
-// GET /api/user/[username]/posts, the per-user post grid fetch — same
-// public posture, matching isPublicPostGet's own /comments suffix below.
-function isPublicUserGet(pathname: string, method: string): boolean {
-  if (method !== "GET") return false;
-  const match = pathname.match(/^\/api\/user\/([^/]+)(?:\/posts)?$/);
-  if (!match) return false;
-  const [, username] = match;
-  return !RESERVED_USER_SEGMENTS.has(username);
-}
-
-export async function proxy(req: NextRequest) {
-  const pathname = req.nextUrl.pathname;
-
-  const userAgent = req.headers.get("user-agent") || "";
-  if (isBot(userAgent)) {
-    return addSecurityHeaders(
-      new NextResponse("Access Denied", { status: 403 }),
+  // profileLoading reflects the real GET /api/user/[username] request,
+  // not a simulated timeout — once it resolves, user === null means the
+  // fetch didn't succeed (nonexistent username, or a network failure),
+  // so there's no fabricated fallback profile rendered with a working
+  // Follow button for nobody. This is the only thing the full-page
+  // skeleton waits on now: postsLoading (GET /api/user/[username]/posts,
+  // via useUserPosts) is a separate, independent request, so it no
+  // longer holds up the header too — it just gates the grid further
+  // down, whichever of the two finishes first.
+  if (profileLoading) {
+    return (
+      <div className="flex flex-col">
+        <ProfileHeaderSkeleton />
+        <div className="border-t border-foreground/10">
+          <PostGridSkeleton />
+        </div>
+      </div>
     );
   }
 
-  // Vanity-specific protected API routes. Deliberately short — the
-  // shared boilerplate's deposits/withdrawals/admin/support routes
-  // belonged to a different app entirely and weren't carried over. Add
-  // to this list as real feature API routes (comments, follow, saved,
-  // notifications) get built.
-  //
-  // /api/posts covers both GET (list) and POST (create) — the whole
-  // app is already gated behind RequireAuth on the frontend (see
-  // app/page.tsx), so there's no logged-out "browse the feed" case to
-  // carve out an exception for here. /api/saved covers the saved-posts
-  // bundle plus every collection sub-route the same way.
-  //
-  // Narrow exceptions carved out of that: the single-post GET and its
-  // comment list (both of which back the public /p/[postId] permalink
-  // page — see isPublicPostGet above), plus the single-user profile GET
-  // that backs the public /u/[username] page (see isPublicUserGet
-  // above). Everything else under /api/posts and /api/user still
-  // requires a session.
-  const isProtectedRoute = [
-    "/api/user",
-    "/api/upload",
-    "/api/posts",
-    "/api/saved",
-  ].some((route) => pathname.startsWith(route));
-
-  if (!isProtectedRoute) {
-    return addSecurityHeaders(NextResponse.next());
+  if (!user) {
+    notFound();
   }
 
-  // A public GET still goes through the same token verification below —
-  // NOT an early bypass — so a logged-in visitor still gets x-user-id
-  // set (e.g. for a comment's likedByMe). The only difference for these
-  // two routes is at the very bottom: no valid session falls through to
-  // an anonymous NextResponse.next() instead of a 401.
-  const isPublicGet =
-    isPublicPostGet(pathname, req.method) ||
-    isPublicUserGet(pathname, req.method);
+  return (
+    <div className="flex flex-col">
+      <ProfileHeader
+        isOwnProfile={false}
+        username={user.username}
+        avatarSrc={user.avatarSrc}
+        bio={user.bio}
+        toneTag={user.toneTag}
+        // Falls back to 0 while the posts request is still in flight
+        // rather than holding up the header render for a count.
+        postCount={postsLoading ? 0 : userPosts.length}
+        followerCount={user.followerCount}
+        followingCount={user.followingCount}
+        isFollowing={user.isFollowing}
+        followsMe={user.followsMe}
+        onToggleFollow={guard(toggleFollow)}
+      />
 
-  const accessToken = req.cookies.get("accessToken")?.value;
-  const refreshToken = req.cookies.get("refreshToken")?.value;
-  const uid = req.cookies.get("uid")?.value;
+      {user.pinnedRoutine.length > 0 && (
+        <div className="border-t border-foreground/10 px-4 py-4">
+          <p className="mb-2 text-sm font-medium">Routine</p>
+          <ProductChips products={user.pinnedRoutine} />
+        </div>
+      )}
 
-  // Try access token first
-  if (accessToken) {
-    try {
-      const payload = verifyAccessToken(accessToken);
-      const res = nextWithRequestHeader(
-        req,
-        "x-user-id",
-        (payload as { sub: string }).sub,
-      );
-      // No x-user-role header — the schema has no `role` concept.
-      // Add one back here (and to User) if/when an admin tier exists.
-      return addSecurityHeaders(res);
-    } catch {
-      // Access token invalid/expired, fall through to refresh
-    }
-  }
+      <div className="border-t border-foreground/10">
+        {postsLoading ? <PostGridSkeleton /> : <PostGrid posts={userPosts} />}
+      </div>
 
-  // Try refresh token if access token failed — a lightweight, silent
-  // reissue only. This does NOT rotate the refresh token itself; that
-  // heavier operation is reserved for the explicit /api/auth/refresh-
-  // token route, so a refresh token isn't rotated on every request. It
-  // still needs to check for reuse, though — a stolen/stale token being
-  // replayed is exactly as dangerous here as it is on the dedicated
-  // refresh route.
-  if (refreshToken && uid) {
-    try {
-      const result = await checkRefreshToken(uid, refreshToken);
-
-      if (result.status === "reused") {
-        console.warn(`Refresh token reuse detected for user ${uid}`);
-        const res = addSecurityHeaders(
-          NextResponse.json(
-            { success: false, error: "Unauthorized" },
-            { status: 401 },
-          ),
-        );
-        // Every session for this user was already revoked inside
-        // checkRefreshToken — clear this device's cookies too, since
-        // they're now pointing at dead tokens either way.
-        for (const name of ["accessToken", "refreshToken", "uid"]) {
-          res.headers.append(
-            "Set-Cookie",
-            `${name}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`,
-          );
-        }
-        return res;
-      }
-
-      if (result.status === "valid") {
-        const user = await prisma.user.findUnique({
-          where: { id: uid },
-          select: { id: true },
-        });
-
-        if (user) {
-          const newAccessToken = signAccessToken({ sub: user.id });
-
-          const res = nextWithRequestHeader(req, "x-user-id", user.id);
-
-          const cookieAccess = [
-            `accessToken=${newAccessToken}`,
-            `Path=/`,
-            `HttpOnly`,
-            `SameSite=Strict`,
-            process.env.NODE_ENV === "production" ? "Secure" : "",
-            `Max-Age=${60 * 15}`,
-          ]
-            .filter(Boolean)
-            .join("; ");
-
-          res.headers.append("Set-Cookie", cookieAccess);
-
-          return addSecurityHeaders(res);
-        }
-      }
-    } catch (err) {
-      console.error("proxy refresh error:", err);
-    }
-  }
-
-  // Both tokens invalid or missing. For the two public-GET exceptions
-  // this is just "an anonymous visitor" — let the request through with
-  // no x-user-id, and the route handler itself treats that as anonymous
-  // read access. Every other protected route still 401s here exactly as
-  // before.
-  if (isPublicGet) {
-    return addSecurityHeaders(NextResponse.next());
-  }
-
-  return addSecurityHeaders(
-    NextResponse.json(
-      { success: false, error: "Unauthorized" },
-      { status: 401 },
-    ),
+      <AuthGateModal open={gateOpen} onClose={closeGate} />
+    </div>
   );
 }
-
-export const config = {
-  matcher: [
-    "/api/user/:path*",
-    "/((?!_next/static|_next/image|favicon.ico).*)",
-  ],
-};
 </file>
 
 <file path="app/page.tsx">
@@ -11690,6 +11389,80 @@ export function CommentSheet({
 }
 </file>
 
+<file path="utils/apiRoutes.ts">
+// Everything from the shared boilerplate's API_ROUTES that isn't shown
+// here (ADMIN, DEPOSITS, WITHDRAWALS, TRANSACTIONS, SUPPORT, PRICES)
+// belonged to a different app template — not part of Vanity, and not
+// carried over. Add new sections here as real Vanity feature endpoints
+// (comments, follow, saved, notifications) get built.
+export const API_ROUTES = {
+  AUTH: {
+    // Unified signup + login + resend — same call every time, since a
+    // magic link makes all three the same action.
+    REQUEST_LINK: "/api/auth/request-link",
+    VERIFY_TOKEN: (token: string) => `/api/auth/verify/${token}`,
+    LOGOUT: "/api/auth/logout",
+    REFRESH_TOKEN: "/api/auth/refresh-token",
+  },
+
+  USER: {
+    ME: "/api/user/me",
+    ONBOARDING: "/api/user/onboarding",
+    CHECK_USERNAME: (username: string) =>
+      `/api/user/username-available?username=${encodeURIComponent(username)}`,
+    // Public profile lookup + follow toggle for viewing someone ELSE's
+    // profile (/u/[username]) — distinct from ME above, which is only
+    // ever the logged-in caller's own record.
+    PROFILE: (username: string) => `/api/user/${encodeURIComponent(username)}`,
+    TOGGLE_FOLLOW: (username: string) =>
+      `/api/user/${encodeURIComponent(username)}/follow`,
+    // Dedicated per-user posts route (GET /api/user/[username]/posts) —
+    // backs useUserPosts, used by both /u/[username] and /profile instead
+    // of filtering the full feed client-side. Public, same as PROFILE.
+    POSTS: (username: string) =>
+      `/api/user/${encodeURIComponent(username)}/posts`,
+  },
+
+  UPLOAD: {
+    SIGNATURE: "/api/upload/signature",
+  },
+
+  POSTS: {
+    LIST: "/api/posts",
+    CREATE: "/api/posts",
+    DELETE: (postId: string) => `/api/posts/${postId}`,
+    // GET returns every post id the current user has liked; POST toggles
+    // a single post's like state — same BUNDLE/TOGGLE split as SAVED
+    // below.
+    LIKES_BUNDLE: "/api/posts/likes",
+    TOGGLE_LIKE: (postId: string) => `/api/posts/${postId}/like`,
+  },
+
+  COMMENTS: {
+    LIST: (postId: string) => `/api/posts/${postId}/comments`,
+    CREATE: (postId: string) => `/api/posts/${postId}/comments`,
+    DELETE: (postId: string, commentId: string) =>
+      `/api/posts/${postId}/comments/${commentId}`,
+    TOGGLE_LIKE: (postId: string, commentId: string) =>
+      `/api/posts/${postId}/comments/${commentId}/like`,
+  },
+
+  SAVED: {
+    // GET returns the whole bundle (saved post ids + every collection
+    // with its post ids); POST toggles a post's overall saved state.
+    BUNDLE: "/api/saved",
+    TOGGLE_SAVE: "/api/saved",
+    CREATE_COLLECTION: "/api/saved/collections",
+    RENAME_COLLECTION: (collectionId: string) =>
+      `/api/saved/collections/${collectionId}`,
+    DELETE_COLLECTION: (collectionId: string) =>
+      `/api/saved/collections/${collectionId}`,
+    TOGGLE_COLLECTION_POST: (collectionId: string) =>
+      `/api/saved/collections/${collectionId}/posts`,
+  },
+};
+</file>
+
 <file path="utils/paths.ts">
 export const PATHS = {
   HOME: "/",
@@ -11712,86 +11485,268 @@ export const PATHS = {
 };
 </file>
 
-<file path="app/profile/page.tsx">
-"use client";
+<file path="proxy.ts">
+import { NextRequest, NextResponse } from "next/server";
+import {
+  verifyAccessToken,
+  checkRefreshToken,
+  signAccessToken,
+} from "./lib/auth";
+import { prisma } from "./lib/prisma";
 
-import { useUserPosts } from "@/hooks/useUserPosts";
-import { useFollow } from "@/context/FollowProvider";
-import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { CURRENT_USER_PROFILE } from "@/data/currentUserProfile";
-import { ProfileHeader } from "@/components/profile/ProfileHeader";
-import { ProfileHeaderSkeleton } from "@/components/profile/ProfileHeaderSkeleton";
-import { PostGrid } from "@/components/profile/PostGrid";
-import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
-import { ProductChips } from "@/components/feed/ProductChips";
-import { RequireAuth } from "@/components/auth/RequireAuth";
-
-export default function ProfilePage() {
-  const { followingCount } = useFollow();
-  const { user, isLoading } = useCurrentUser();
-  // Fetched directly for just this user (GET /api/user/[username]/posts)
-  // rather than pulled out of the whole feed via usePosts() and filtered
-  // client-side — same per-user endpoint /u/[username] uses (see
-  // hooks/useUserPosts.ts). Undefined username while user is still
-  // loading just holds the query off via `enabled`.
-  const { posts: myPosts, isLoading: postsLoading } = useUserPosts(
-    user?.username,
+function addSecurityHeaders(response: NextResponse) {
+  response.headers.set(
+    "X-Robots-Tag",
+    "noindex, nofollow, noarchive, nosnippet",
   );
-
-  // isLoading reflects the real /api/user/me request now, not a
-  // simulated timeout — RequireAuth (wrapping this whole page) already
-  // blocks on the same query before rendering children, so by the time
-  // this component's own isLoading is false, user is guaranteed non-null.
-  // postsLoading is the separate per-user posts fetch above, gated here
-  // too so the grid doesn't render empty before it's caught up. Kept
-  // inline in the ternary (rather than a separate boolean) so TypeScript
-  // still narrows `user` to non-null in the branch below.
-  //
-  // Computed once, wrapped once — RequireAuth only needs to appear a
-  // single time regardless of which branch below actually renders.
-  const content =
-    isLoading || !user || postsLoading ? (
-      <div className="flex flex-col">
-        <ProfileHeaderSkeleton />
-        <div className="animate-pulse border-t border-foreground/10 px-4 py-4">
-          <div className="mb-2 h-3.5 w-16 rounded bg-foreground/10" />
-          <div className="flex gap-2">
-            <div className="h-7 w-28 shrink-0 rounded-full bg-foreground/10" />
-            <div className="h-7 w-24 shrink-0 rounded-full bg-foreground/10" />
-          </div>
-        </div>
-        <div className="border-t border-foreground/10">
-          <PostGridSkeleton />
-        </div>
-      </div>
-    ) : (
-      <div className="flex flex-col">
-        <ProfileHeader
-          isOwnProfile
-          username={user.username}
-          avatarSrc={user.avatarSrc}
-          bio={user.bio}
-          toneTag={user.toneTag}
-          postCount={myPosts.length}
-          followerCount={CURRENT_USER_PROFILE.followerCount}
-          followingCount={followingCount}
-        />
-
-        {user.pinnedRoutine.length > 0 && (
-          <div className="border-t border-foreground/10 px-4 py-4">
-            <p className="mb-2 text-sm font-medium">Routine</p>
-            <ProductChips products={user.pinnedRoutine} />
-          </div>
-        )}
-
-        <div className="border-t border-foreground/10">
-          <PostGrid posts={myPosts} />
-        </div>
-      </div>
-    );
-
-  return <RequireAuth>{content}</RequireAuth>;
+  response.headers.set("X-Content-Type-Options", "nosniff");
+  response.headers.set("X-Frame-Options", "DENY");
+  response.headers.set("Referrer-Policy", "no-referrer");
+  response.headers.set("Permissions-Policy", "interest-cohort=()");
+  response.headers.set("X-XSS-Protection", "1; mode=block");
+  return response;
 }
+
+function isBot(userAgent: string): boolean {
+  const botPatterns = [
+    "googlebot",
+    "bingbot",
+    "slurp",
+    "duckduckbot",
+    "baiduspider",
+    "yandexbot",
+    "crawler",
+    "spider",
+    "scraper",
+    "bot",
+    "archive.org",
+    "wayback",
+    "ia_archiver",
+    "gptbot",
+    "chatgpt",
+    "ccbot",
+    "anthropic",
+    "claude",
+    "cohere",
+  ];
+  const lowerUA = userAgent.toLowerCase();
+  return botPatterns.some((pattern) => lowerUA.includes(pattern));
+}
+
+// Builds a NextResponse.next() that actually forwards a header to the
+// downstream Route Handler's req.headers — just calling
+// NextResponse.next().headers.set(...) does NOT do this; it only sets a
+// header on the response sent back to the browser. This is the pattern
+// that's actually required for the route handler to see it.
+function nextWithRequestHeader(req: NextRequest, name: string, value: string) {
+  const headers = new Headers(req.headers);
+  headers.set(name, value);
+  return NextResponse.next({ request: { headers } });
+}
+
+// Segment names under /api/posts that are NOT a :postId — without this,
+// a literal path like /api/posts/likes would match the same
+// "/api/posts/<something>" shape as a real single-post GET and get
+// waved through as public. Keep in sync with the static (non-dynamic)
+// routes nested directly under /api/posts (see utils/apiRoutes.ts).
+const RESERVED_POST_SEGMENTS = new Set(["likes"]);
+
+// The only two intentionally-public reads under /api/posts:
+//   GET /api/posts/<postId>            — the /p/[postId] permalink page
+//   GET /api/posts/<postId>/comments   — that page's comment list
+// Everything else under /api/posts (the feed list, create, delete,
+// likes, comment create/delete/like, the saved-likes bundle) stays
+// behind the auth gate below. Matches app/api/posts/[postId]/route.ts's
+// GET and app/api/posts/[postId]/comments/route.ts's GET exactly.
+function isPublicPostGet(pathname: string, method: string): boolean {
+  if (method !== "GET") return false;
+  const match = pathname.match(/^\/api\/posts\/([^/]+)(?:\/comments)?$/);
+  if (!match) return false;
+  const [, postId] = match;
+  return !RESERVED_POST_SEGMENTS.has(postId);
+}
+
+// Segment names directly under /api/user that are NOT a :username — same
+// reasoning as RESERVED_POST_SEGMENTS above. Keep in sync with the
+// static (non-dynamic) routes nested directly under /api/user (see
+// utils/apiRoutes.ts).
+const RESERVED_USER_SEGMENTS = new Set([
+  "me",
+  "onboarding",
+  "username-available",
+]);
+
+// The one intentionally-public read under /api/user: GET /api/user/<username>
+// backs the /u/[username] page, which (like /p/[postId]) is browsable
+// while logged out — only the follow action itself is auth-gated on the
+// frontend (useAuthGatedAction) and enforced again here on the backend
+// (POST /api/user/[username]/follow is NOT matched by this and stays
+// behind the normal auth gate below). The optional /posts suffix covers
+// GET /api/user/[username]/posts, the per-user post grid fetch — same
+// public posture, matching isPublicPostGet's own /comments suffix below.
+function isPublicUserGet(pathname: string, method: string): boolean {
+  if (method !== "GET") return false;
+  const match = pathname.match(/^\/api\/user\/([^/]+)(?:\/posts)?$/);
+  if (!match) return false;
+  const [, username] = match;
+  return !RESERVED_USER_SEGMENTS.has(username);
+}
+
+export async function proxy(req: NextRequest) {
+  const pathname = req.nextUrl.pathname;
+
+  const userAgent = req.headers.get("user-agent") || "";
+  if (isBot(userAgent)) {
+    return addSecurityHeaders(
+      new NextResponse("Access Denied", { status: 403 }),
+    );
+  }
+
+  // Vanity-specific protected API routes. Deliberately short — the
+  // shared boilerplate's deposits/withdrawals/admin/support routes
+  // belonged to a different app entirely and weren't carried over. Add
+  // to this list as real feature API routes (comments, follow, saved,
+  // notifications) get built.
+  //
+  // /api/posts covers both GET (list) and POST (create) — the whole
+  // app is already gated behind RequireAuth on the frontend (see
+  // app/page.tsx), so there's no logged-out "browse the feed" case to
+  // carve out an exception for here. /api/saved covers the saved-posts
+  // bundle plus every collection sub-route the same way.
+  //
+  // Narrow exceptions carved out of that: the single-post GET and its
+  // comment list (both of which back the public /p/[postId] permalink
+  // page — see isPublicPostGet above), plus the single-user profile GET
+  // that backs the public /u/[username] page (see isPublicUserGet
+  // above). Everything else under /api/posts and /api/user still
+  // requires a session.
+  const isProtectedRoute = [
+    "/api/user",
+    "/api/upload",
+    "/api/posts",
+    "/api/saved",
+  ].some((route) => pathname.startsWith(route));
+
+  if (!isProtectedRoute) {
+    return addSecurityHeaders(NextResponse.next());
+  }
+
+  // A public GET still goes through the same token verification below —
+  // NOT an early bypass — so a logged-in visitor still gets x-user-id
+  // set (e.g. for a comment's likedByMe). The only difference for these
+  // two routes is at the very bottom: no valid session falls through to
+  // an anonymous NextResponse.next() instead of a 401.
+  const isPublicGet =
+    isPublicPostGet(pathname, req.method) ||
+    isPublicUserGet(pathname, req.method);
+
+  const accessToken = req.cookies.get("accessToken")?.value;
+  const refreshToken = req.cookies.get("refreshToken")?.value;
+  const uid = req.cookies.get("uid")?.value;
+
+  // Try access token first
+  if (accessToken) {
+    try {
+      const payload = verifyAccessToken(accessToken);
+      const res = nextWithRequestHeader(
+        req,
+        "x-user-id",
+        (payload as { sub: string }).sub,
+      );
+      // No x-user-role header — the schema has no `role` concept.
+      // Add one back here (and to User) if/when an admin tier exists.
+      return addSecurityHeaders(res);
+    } catch {
+      // Access token invalid/expired, fall through to refresh
+    }
+  }
+
+  // Try refresh token if access token failed — a lightweight, silent
+  // reissue only. This does NOT rotate the refresh token itself; that
+  // heavier operation is reserved for the explicit /api/auth/refresh-
+  // token route, so a refresh token isn't rotated on every request. It
+  // still needs to check for reuse, though — a stolen/stale token being
+  // replayed is exactly as dangerous here as it is on the dedicated
+  // refresh route.
+  if (refreshToken && uid) {
+    try {
+      const result = await checkRefreshToken(uid, refreshToken);
+
+      if (result.status === "reused") {
+        console.warn(`Refresh token reuse detected for user ${uid}`);
+        const res = addSecurityHeaders(
+          NextResponse.json(
+            { success: false, error: "Unauthorized" },
+            { status: 401 },
+          ),
+        );
+        // Every session for this user was already revoked inside
+        // checkRefreshToken — clear this device's cookies too, since
+        // they're now pointing at dead tokens either way.
+        for (const name of ["accessToken", "refreshToken", "uid"]) {
+          res.headers.append(
+            "Set-Cookie",
+            `${name}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`,
+          );
+        }
+        return res;
+      }
+
+      if (result.status === "valid") {
+        const user = await prisma.user.findUnique({
+          where: { id: uid },
+          select: { id: true },
+        });
+
+        if (user) {
+          const newAccessToken = signAccessToken({ sub: user.id });
+
+          const res = nextWithRequestHeader(req, "x-user-id", user.id);
+
+          const cookieAccess = [
+            `accessToken=${newAccessToken}`,
+            `Path=/`,
+            `HttpOnly`,
+            `SameSite=Strict`,
+            process.env.NODE_ENV === "production" ? "Secure" : "",
+            `Max-Age=${60 * 15}`,
+          ]
+            .filter(Boolean)
+            .join("; ");
+
+          res.headers.append("Set-Cookie", cookieAccess);
+
+          return addSecurityHeaders(res);
+        }
+      }
+    } catch (err) {
+      console.error("proxy refresh error:", err);
+    }
+  }
+
+  // Both tokens invalid or missing. For the two public-GET exceptions
+  // this is just "an anonymous visitor" — let the request through with
+  // no x-user-id, and the route handler itself treats that as anonymous
+  // read access. Every other protected route still 401s here exactly as
+  // before.
+  if (isPublicGet) {
+    return addSecurityHeaders(NextResponse.next());
+  }
+
+  return addSecurityHeaders(
+    NextResponse.json(
+      { success: false, error: "Unauthorized" },
+      { status: 401 },
+    ),
+  );
+}
+
+export const config = {
+  matcher: [
+    "/api/user/:path*",
+    "/((?!_next/static|_next/image|favicon.ico).*)",
+  ],
+};
 </file>
 
 <file path="components/shared/TopNav.tsx">
@@ -11909,6 +11864,77 @@ export  function TopNav() {
       </div>
     </nav>
   );
+}
+</file>
+
+<file path="app/profile/page.tsx">
+"use client";
+
+import { useUserPosts } from "@/hooks/useUserPosts";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { ProfileHeader } from "@/components/profile/ProfileHeader";
+import { ProfileHeaderSkeleton } from "@/components/profile/ProfileHeaderSkeleton";
+import { PostGrid } from "@/components/profile/PostGrid";
+import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
+import { ProductChips } from "@/components/feed/ProductChips";
+import { RequireAuth } from "@/components/auth/RequireAuth";
+
+export default function ProfilePage() {
+  const { user, isLoading } = useCurrentUser();
+  // Fetched directly for just this user (GET /api/user/[username]/posts)
+  // rather than pulled out of the whole feed via usePosts() and filtered
+  // client-side — same per-user endpoint /u/[username] uses (see
+  // hooks/useUserPosts.ts). Undefined username while user is still
+  // loading just holds the query off via `enabled`.
+  const { posts: myPosts, isLoading: postsLoading } = useUserPosts(
+    user?.username,
+  );
+
+  const content =
+    isLoading || !user ? (
+      <div className="flex flex-col">
+        <ProfileHeaderSkeleton />
+        <div className="animate-pulse border-t border-foreground/10 px-4 py-4">
+          <div className="mb-2 h-3.5 w-16 rounded bg-foreground/10" />
+          <div className="flex gap-2">
+            <div className="h-7 w-28 shrink-0 rounded-full bg-foreground/10" />
+            <div className="h-7 w-24 shrink-0 rounded-full bg-foreground/10" />
+          </div>
+        </div>
+        <div className="border-t border-foreground/10">
+          <PostGridSkeleton />
+        </div>
+      </div>
+    ) : (
+      <div className="flex flex-col">
+        <ProfileHeader
+          isOwnProfile
+          username={user.username}
+          avatarSrc={user.avatarSrc}
+          bio={user.bio}
+          toneTag={user.toneTag}
+          // Falls back to 0 while posts are still loading rather than
+          // holding up the whole header for a count — matches the grid
+          // below, which shows its own skeleton in the meantime.
+          postCount={postsLoading ? 0 : myPosts.length}
+          followerCount={user.followerCount}
+          followingCount={user.followingCount}
+        />
+
+        {user.pinnedRoutine.length > 0 && (
+          <div className="border-t border-foreground/10 px-4 py-4">
+            <p className="mb-2 text-sm font-medium">Routine</p>
+            <ProductChips products={user.pinnedRoutine} />
+          </div>
+        )}
+
+        <div className="border-t border-foreground/10">
+          {postsLoading ? <PostGridSkeleton /> : <PostGrid posts={myPosts} />}
+        </div>
+      </div>
+    );
+
+  return <RequireAuth>{content}</RequireAuth>;
 }
 </file>
 
