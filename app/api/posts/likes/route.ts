@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { getLikedPostIds } from "@/lib/likes";
 
 // Mirrors GET /api/saved's bundle shape — just the ids, not baked into
 // each Post the way likeCount is. Keeping "did I like this" as its own
@@ -16,13 +16,6 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const likes = await prisma.like.findMany({
-    where: { userId },
-    select: { postId: true },
-  });
-
-  return NextResponse.json({
-    success: true,
-    likedPostIds: likes.map((l) => l.postId),
-  });
+  const likedPostIds = await getLikedPostIds(userId);
+  return NextResponse.json({ success: true, likedPostIds });
 }

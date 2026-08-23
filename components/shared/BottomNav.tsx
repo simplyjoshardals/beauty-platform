@@ -48,10 +48,26 @@ function isTabActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export function BottomNav() {
+export function BottomNav({
+  initialUser,
+}: {
+  initialUser: { avatarSrc: string } | null;
+}) {
   const pathname = usePathname();
   const { unreadCount } = useNotifications();
-  const { user, isAuthenticated } = useCurrentUser();
+  const { user, isAuthenticated, isLoading } = useCurrentUser();
+
+  // Server already told us who this is (via cookies, on the initial
+  // request) — trust that for first paint while the client-side
+  // "who am I" query is still in flight, instead of falling through to
+  // the generic icon and popping to the avatar a moment later. Once
+  // the query settles, its result wins either way (confirms the same
+  // user, picks up an avatar change, or — rare — reveals the session
+  // was actually invalid and drops back to logged-out).
+  const resolvedAvatarSrc =
+    user?.avatarSrc ?? (isLoading ? initialUser?.avatarSrc : undefined);
+  const resolvedAuthenticated =
+    isAuthenticated || (isLoading && Boolean(initialUser));
 
   return (
     <nav
@@ -64,7 +80,7 @@ export function BottomNav() {
         // icon when nobody's actually signed in (useCurrentUser's
         // isAuthenticated reflects a real /api/user/me check, not a
         // client-only flag).
-        const showAvatar = id === "profile" && isAuthenticated;
+        const showAvatar = id === "profile" && resolvedAuthenticated;
 
         return (
           <Link
@@ -82,7 +98,7 @@ export function BottomNav() {
                   }`}
                 >
                   <Image
-                    src={user?.avatarSrc ?? ""}
+                    src={resolvedAvatarSrc ?? ""}
                     alt=""
                     width={26}
                     height={26}

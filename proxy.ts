@@ -45,31 +45,27 @@ function isBot(userAgent: string): boolean {
   return botPatterns.some((pattern) => lowerUA.includes(pattern));
 }
 
-// Builds a NextResponse.next() that actually forwards a header to the
-// downstream Route Handler's req.headers — just calling
-// NextResponse.next().headers.set(...) does NOT do this; it only sets a
-// header on the response sent back to the browser. This is the pattern
-// that's actually required for the route handler to see it.
 function nextWithRequestHeader(req: NextRequest, name: string, value: string) {
   const headers = new Headers(req.headers);
   headers.set(name, value);
   return NextResponse.next({ request: { headers } });
 }
 
-// Segment names under /api/posts that are NOT a :postId — without this,
-// a literal path like /api/posts/likes would match the same
-// "/api/posts/<something>" shape as a real single-post GET and get
-// waved through as public. Keep in sync with the static (non-dynamic)
-// routes nested directly under /api/posts (see utils/apiRoutes.ts).
+// Clears the three auth cookies on whatever response we're already
+// returning — shared by the refresh-token-reuse branch below, since
+// that's now reachable from both page requests and API requests.
+function clearAuthCookies(res: NextResponse) {
+  for (const name of ["accessToken", "refreshToken", "uid"]) {
+    res.headers.append(
+      "Set-Cookie",
+      `${name}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`,
+    );
+  }
+  return res;
+}
+
 const RESERVED_POST_SEGMENTS = new Set(["likes"]);
 
-// The only two intentionally-public reads under /api/posts:
-//   GET /api/posts/<postId>            — the /p/[postId] permalink page
-//   GET /api/posts/<postId>/comments   — that page's comment list
-// Everything else under /api/posts (the feed list, create, delete,
-// likes, comment create/delete/like, the saved-likes bundle) stays
-// behind the auth gate below. Matches app/api/posts/[postId]/route.ts's
-// GET and app/api/posts/[postId]/comments/route.ts's GET exactly.
 function isPublicPostGet(pathname: string, method: string): boolean {
   if (method !== "GET") return false;
   const match = pathname.match(/^\/api\/posts\/([^/]+)(?:\/comments)?$/);
@@ -78,24 +74,12 @@ function isPublicPostGet(pathname: string, method: string): boolean {
   return !RESERVED_POST_SEGMENTS.has(postId);
 }
 
-// Segment names directly under /api/user that are NOT a :username — same
-// reasoning as RESERVED_POST_SEGMENTS above. Keep in sync with the
-// static (non-dynamic) routes nested directly under /api/user (see
-// utils/apiRoutes.ts).
 const RESERVED_USER_SEGMENTS = new Set([
   "me",
   "onboarding",
   "username-available",
 ]);
 
-// The one intentionally-public read under /api/user: GET /api/user/<username>
-// backs the /u/[username] page, which (like /p/[postId]) is browsable
-// while logged out — only the follow action itself is auth-gated on the
-// frontend (useAuthGatedAction) and enforced again here on the backend
-// (POST /api/user/[username]/follow is NOT matched by this and stays
-// behind the normal auth gate below). The optional /posts suffix covers
-// GET /api/user/[username]/posts, the per-user post grid fetch — same
-// public posture, matching isPublicPostGet's own /comments suffix below.
 function isPublicUserGet(pathname: string, method: string): boolean {
   if (method !== "GET") return false;
   const match = pathname.match(/^\/api\/user\/([^/]+)(?:\/posts)?$/);
@@ -114,24 +98,13 @@ export async function proxy(req: NextRequest) {
     );
   }
 
-  // Vanity-specific protected API routes. Deliberately short — the
-  // shared boilerplate's deposits/withdrawals/admin/support routes
-  // belonged to a different app entirely and weren't carried over. Add
-  // to this list as real feature API routes (comments, follow, saved,
-  // notifications) get built.
-  //
-  // /api/posts covers both GET (list) and POST (create) — the whole
-  // app is already gated behind RequireAuth on the frontend (see
-  // app/page.tsx), so there's no logged-out "browse the feed" case to
-  // carve out an exception for here. /api/saved covers the saved-posts
-  // bundle plus every collection sub-route the same way.
-  //
-  // Narrow exceptions carved out of that: the single-post GET and its
-  // comment list (both of which back the public /p/[postId] permalink
-  // page — see isPublicPostGet above), plus the single-user profile GET
-  // that backs the public /u/[username] page (see isPublicUserGet
-  // above). Everything else under /api/posts and /api/user still
-  // requires a session.
+  // Vanity-specific protected API routes — same list as before. The
+  // difference from before: this no longer gates whether we ATTEMPT to
+  // identify the caller (that now happens unconditionally below, for
+  // every request, page or API) — it only gates whether a failed
+  // identification is a hard 401 or a quiet pass-through. A page
+  // request with no valid session isn't an error; RequireAuth decides
+  // what to do with that on the frontend, same as always.
   const isProtectedRoute = [
     "/api/user",
     "/api/upload",
@@ -139,24 +112,25 @@ export async function proxy(req: NextRequest) {
     "/api/saved",
   ].some((route) => pathname.startsWith(route));
 
-  if (!isProtectedRoute) {
-    return addSecurityHeaders(NextResponse.next());
-  }
-
-  // A public GET still goes through the same token verification below —
-  // NOT an early bypass — so a logged-in visitor still gets x-user-id
-  // set (e.g. for a comment's likedByMe). The only difference for these
-  // two routes is at the very bottom: no valid session falls through to
-  // an anonymous NextResponse.next() instead of a 401.
   const isPublicGet =
     isPublicPostGet(pathname, req.method) ||
     isPublicUserGet(pathname, req.method);
+
+  // Only these two cases still enforce a hard 401 when identification
+  // fails below — every other route (pages, /api/auth/*, the public
+  // GET exceptions) falls through to an anonymous NextResponse.next()
+  // instead.
+  const enforceAuth = isProtectedRoute && !isPublicGet;
 
   const accessToken = req.cookies.get("accessToken")?.value;
   const refreshToken = req.cookies.get("refreshToken")?.value;
   const uid = req.cookies.get("uid")?.value;
 
-  // Try access token first
+  // Try access token first. Runs for every request now — not just
+  // protected API routes — so a Server Component can read x-user-id
+  // via lib/session.ts instead of re-verifying the raw cookie itself
+  // (which can't recover an expired token during render; middleware,
+  // running before the Server Component, can).
   if (accessToken) {
     try {
       const payload = verifyAccessToken(accessToken);
@@ -165,43 +139,39 @@ export async function proxy(req: NextRequest) {
         "x-user-id",
         (payload as { sub: string }).sub,
       );
-      // No x-user-role header — the schema has no `role` concept.
-      // Add one back here (and to User) if/when an admin tier exists.
       return addSecurityHeaders(res);
     } catch {
       // Access token invalid/expired, fall through to refresh
     }
   }
 
-  // Try refresh token if access token failed — a lightweight, silent
-  // reissue only. This does NOT rotate the refresh token itself; that
-  // heavier operation is reserved for the explicit /api/auth/refresh-
-  // token route, so a refresh token isn't rotated on every request. It
-  // still needs to check for reuse, though — a stolen/stale token being
-  // replayed is exactly as dangerous here as it is on the dedicated
-  // refresh route.
+  // Try refresh token if access token failed — lightweight, silent
+  // reissue only, same as before. Doesn't rotate the refresh token
+  // itself; that's still reserved for the explicit
+  // /api/auth/refresh-token route.
   if (refreshToken && uid) {
     try {
       const result = await checkRefreshToken(uid, refreshToken);
 
       if (result.status === "reused") {
         console.warn(`Refresh token reuse detected for user ${uid}`);
-        const res = addSecurityHeaders(
-          NextResponse.json(
-            { success: false, error: "Unauthorized" },
-            { status: 401 },
-          ),
-        );
-        // Every session for this user was already revoked inside
-        // checkRefreshToken — clear this device's cookies too, since
-        // they're now pointing at dead tokens either way.
-        for (const name of ["accessToken", "refreshToken", "uid"]) {
-          res.headers.append(
-            "Set-Cookie",
-            `${name}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`,
+        if (enforceAuth) {
+          const res = clearAuthCookies(
+            addSecurityHeaders(
+              NextResponse.json(
+                { success: false, error: "Unauthorized" },
+                { status: 401 },
+              ),
+            ),
           );
+          return res;
         }
-        return res;
+        // Page request (or public GET) — a raw JSON 401 body would
+        // render as the page itself, which is wrong. Clear the
+        // compromised cookies and let it through anonymously instead;
+        // RequireAuth (or the public page) handles a logged-out visit
+        // the normal way from there.
+        return addSecurityHeaders(clearAuthCookies(NextResponse.next()));
       }
 
       if (result.status === "valid") {
@@ -212,7 +182,6 @@ export async function proxy(req: NextRequest) {
 
         if (user) {
           const newAccessToken = signAccessToken({ sub: user.id });
-
           const res = nextWithRequestHeader(req, "x-user-id", user.id);
 
           const cookieAccess = [
@@ -227,7 +196,6 @@ export async function proxy(req: NextRequest) {
             .join("; ");
 
           res.headers.append("Set-Cookie", cookieAccess);
-
           return addSecurityHeaders(res);
         }
       }
@@ -236,21 +204,20 @@ export async function proxy(req: NextRequest) {
     }
   }
 
-  // Both tokens invalid or missing. For the two public-GET exceptions
-  // this is just "an anonymous visitor" — let the request through with
-  // no x-user-id, and the route handler itself treats that as anonymous
-  // read access. Every other protected route still 401s here exactly as
-  // before.
-  if (isPublicGet) {
-    return addSecurityHeaders(NextResponse.next());
+  // Neither token worked. Hard 401 only for the routes that actually
+  // require a session; every page request and every already-public GET
+  // just passes through with no x-user-id — an ordinary anonymous
+  // visit, not an error.
+  if (enforceAuth) {
+    return addSecurityHeaders(
+      NextResponse.json(
+        { success: false, error: "Unauthorized" },
+        { status: 401 },
+      ),
+    );
   }
 
-  return addSecurityHeaders(
-    NextResponse.json(
-      { success: false, error: "Unauthorized" },
-      { status: 401 },
-    ),
-  );
+  return addSecurityHeaders(NextResponse.next());
 }
 
 export const config = {

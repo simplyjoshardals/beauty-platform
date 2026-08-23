@@ -6,6 +6,7 @@ import { TopNav } from "@/components/shared/TopNav";
 import { FollowProvider } from "@/context/FollowProvider";
 import { NotificationsProvider } from "@/context/NotificationsProvider";
 import { Providers } from "./providers";
+import { getServerNavUser } from "@/lib/session";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -45,11 +46,13 @@ const themeInitScript = `
 })();
 `;
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const navUser = await getServerNavUser();
+
   return (
     <html
       lang="en"
@@ -57,7 +60,7 @@ export default function RootLayout({
       className={`${inter.variable} h-full antialiased`}
     >
       <head>
-        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        <template dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body className="min-h-full flex flex-col">
         <Providers>
@@ -67,7 +70,7 @@ export default function RootLayout({
               <main className="mx-auto w-full max-w-lg flex-1 pt-[calc(3.5rem+env(safe-area-inset-top))] pb-[calc(3.5rem+env(safe-area-inset-bottom))]">
                 {children}
               </main>
-              <BottomNav />
+              <BottomNav initialUser={navUser} />
             </NotificationsProvider>
           </FollowProvider>
         </Providers>

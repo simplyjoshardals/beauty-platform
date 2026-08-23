@@ -4,8 +4,9 @@ import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getLikedPostIds, togglePostLike } from "@/services/likeService";
 import { POSTS_QUERY_KEY } from "@/hooks/usePosts";
+import { LIKES_QUERY_KEY } from "@/lib/queryKeys";
 
-const LIKES_QUERY_KEY = ["likes"] as const;
+export { LIKES_QUERY_KEY };
 
 type LikesData = { likedPostIds: string[] };
 

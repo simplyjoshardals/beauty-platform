@@ -6,11 +6,13 @@ import Image from "next/image";
 import { XIcon } from "@phosphor-icons/react";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { useUpdateProfile } from "@/hooks/useUpdateProfile";
+import { useLogout } from "@/hooks/useLogout";
 import { useUploadMedia } from "@/hooks/useUploadMedia";
 import { useUsernameAvailability } from "@/hooks/useUsernameAvailability";
 import { ProductTagEditor } from "@/components/shared/ProductTagEditor";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { validateUsername } from "@/utils/username";
+import { PATHS } from "@/utils/paths";
 import type { ProductTag } from "@/types/post";
 
 export function EditProfileForm() {
@@ -19,11 +21,13 @@ export function EditProfileForm() {
   const { mutateAsync: saveProfile, isPending: saving } = useUpdateProfile();
   const { mutateAsync: uploadAvatar, isPending: avatarUploading } =
     useUploadMedia();
+  const { mutateAsync: logOut, isPending: loggingOut } = useLogout();
 
   // Single source of truth every field reads, same convention as
   // CreatePostForm — nothing should be tamperable while a save is in
-  // flight, whether that's the avatar upload leg or the profile PATCH.
-  const isBusy = saving || avatarUploading;
+  // flight, whether that's the avatar upload leg, the profile PATCH, or
+  // now logging out.
+  const isBusy = saving || avatarUploading || loggingOut;
 
   const [username, setUsername] = useState(user?.username ?? "");
   const [usernameError, setUsernameError] = useState<string | null>(null);
@@ -42,6 +46,8 @@ export function EditProfileForm() {
     user?.pinnedRoutine ?? [],
   );
   const [confirmingDiscard, setConfirmingDiscard] = useState(false);
+  const [confirmingLogout, setConfirmingLogout] = useState(false);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -156,6 +162,19 @@ export function EditProfileForm() {
     } else {
       router.back();
     }
+  }
+
+  async function handleLogoutConfirm() {
+    setLogoutError(null);
+    const result = await logOut();
+    if (!result?.success) {
+      setLogoutError(
+        result?.error || "Something went wrong. Please try again.",
+      );
+      setConfirmingLogout(false);
+      return;
+    }
+    window.location.href = PATHS.AUTH;
   }
 
   const saveDisabled =
@@ -276,6 +295,22 @@ export function EditProfileForm() {
           disabled={isBusy}
         />
 
+        <div className="mt-8 border-t border-foreground/10 pt-5">
+          <button
+            type="button"
+            onClick={() => setConfirmingLogout(true)}
+            disabled={isBusy}
+            className="w-full text-center text-sm font-medium text-red-500 disabled:opacity-50"
+          >
+            {loggingOut ? "Logging out…" : "Log out"}
+          </button>
+          {logoutError && (
+            <p className="mt-2 text-center text-xs text-red-500">
+              {logoutError}
+            </p>
+          )}
+        </div>
+
         {submitError && (
           <p className="mt-4 text-center text-xs text-red-500">{submitError}</p>
         )}
@@ -289,6 +324,16 @@ export function EditProfileForm() {
         destructive
         onConfirm={() => router.back()}
         onCancel={() => setConfirmingDiscard(false)}
+      />
+
+      <ConfirmDialog
+        open={confirmingLogout}
+        title="Log out?"
+        description="You'll need to sign in again to continue."
+        confirmLabel={loggingOut ? "Logging out…" : "Log out"}
+        destructive
+        onConfirm={handleLogoutConfirm}
+        onCancel={() => setConfirmingLogout(false)}
       />
     </div>
   );

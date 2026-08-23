@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { getFollowing } from "@/services/userService";
 import type { MockUser } from "@/data/mockUsers";
+import { followingQueryKey } from "@/lib/queryKeys";
 
 // Same shape UserListWithSearch/UserListRow already render (MockUser),
 // plus the real id the backend returns — kept for parity with other
@@ -25,9 +26,7 @@ export type FollowingUser = MockUser & { id: string };
 // a follow/unfollow happens elsewhere (PostCard, ProfileHeader) — that's
 // what lets toggling follow from a post card optimistically update this
 // list without this hook needing to know anything about who's doing it.
-export function followingQueryKey(username: string | undefined) {
-  return ["following", username] as const;
-}
+export { followingQueryKey };
 
 export function useFollowingList(username: string | undefined) {
   const query = useQuery({

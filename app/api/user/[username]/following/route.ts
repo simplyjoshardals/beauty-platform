@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { getFollowingList } from "@/lib/users";
 
 type Params = { params: Promise<{ username: string }> };
 
@@ -33,46 +33,15 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   const { username } = await params;
 
-  const target = await prisma.user.findUnique({
-    where: { username },
-    select: { id: true },
-  });
+  const search = req.nextUrl.searchParams.get("search")?.trim();
 
-  if (!target) {
+  const users = await getFollowingList(username, search);
+  if (users === null) {
     return NextResponse.json(
       { success: false, error: "User not found." },
       { status: 404 },
     );
   }
 
-  const search = req.nextUrl.searchParams.get("search")?.trim();
-
-  const follows = await prisma.follow.findMany({
-    where: {
-      followerId: target.id,
-      ...(search
-        ? {
-            following: {
-              username: { contains: search, mode: "insensitive" },
-            },
-          }
-        : {}),
-    },
-    orderBy: { createdAt: "desc" },
-    select: {
-      following: {
-        select: {
-          id: true,
-          username: true,
-          avatarSrc: true,
-          toneTag: true,
-        },
-      },
-    },
-  });
-
-  return NextResponse.json({
-    success: true,
-    users: follows.map((f) => f.following),
-  });
+  return NextResponse.json({ success: true, users });
 }

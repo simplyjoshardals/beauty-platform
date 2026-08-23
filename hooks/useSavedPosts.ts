@@ -11,10 +11,11 @@ import {
   toggleCollectionPost,
   type SavedCollection,
 } from "@/services/savedService";
+import { SAVED_QUERY_KEY } from "@/lib/queryKeys";
 
 export type Collection = { id: string; name: string };
 
-const SAVED_QUERY_KEY = ["saved"] as const;
+export { SAVED_QUERY_KEY };
 
 type SavedData = {
   savedPostIds: string[];

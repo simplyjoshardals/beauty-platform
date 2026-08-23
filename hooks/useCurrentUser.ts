@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { getCurrentUser } from "@/services/authService";
 import type { ProductTag } from "@/types/post";
+import { CURRENT_USER_QUERY_KEY } from "@/lib/queryKeys";
 
 export type CurrentUser = {
   id: string;
@@ -29,7 +30,7 @@ export type CurrentUser = {
 // cookies still present — useQuery refetches on mount automatically.
 export function useCurrentUser() {
   const query = useQuery({
-    queryKey: ["currentUser"],
+    queryKey: CURRENT_USER_QUERY_KEY,
     queryFn: async () => {
       const result = await getCurrentUser();
       if (!result?.success) return null;

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { getPublicUserProfile } from "@/lib/users";
 
 type Params = { params: Promise<{ username: string }> };
 
@@ -25,67 +25,13 @@ type Params = { params: Promise<{ username: string }> };
 export async function GET(req: NextRequest, { params }: Params) {
   const { username } = await params;
 
-  const user = await prisma.user.findUnique({
-    where: { username },
-    include: {
-      routineItems: { orderBy: { order: "asc" } },
-      _count: { select: { followers: true, following: true } },
-    },
-  });
-
-  if (!user) {
+  const viewerId = req.headers.get("x-user-id");
+  const profile = await getPublicUserProfile(username, viewerId);
+  if (!profile) {
     return NextResponse.json(
       { success: false, error: "User not found." },
       { status: 404 },
     );
   }
-
-  const viewerId = req.headers.get("x-user-id");
-
-  let isFollowing = false;
-  let followsMe = false;
-
-  if (viewerId && viewerId !== user.id) {
-    const [followingRow, followerRow] = await Promise.all([
-      prisma.follow.findUnique({
-        where: {
-          followerId_followingId: {
-            followerId: viewerId,
-            followingId: user.id,
-          },
-        },
-        select: { id: true },
-      }),
-      prisma.follow.findUnique({
-        where: {
-          followerId_followingId: {
-            followerId: user.id,
-            followingId: viewerId,
-          },
-        },
-        select: { id: true },
-      }),
-    ]);
-    isFollowing = Boolean(followingRow);
-    followsMe = Boolean(followerRow);
-  }
-
-  return NextResponse.json({
-    success: true,
-    user: {
-      id: user.id,
-      username: user.username,
-      avatarSrc: user.avatarSrc,
-      bio: user.bio,
-      toneTag: user.toneTag,
-      pinnedRoutine: user.routineItems.map((item) => ({
-        id: item.id,
-        label: item.label,
-      })),
-      followerCount: user._count.followers,
-      followingCount: user._count.following,
-      isFollowing,
-      followsMe,
-    },
-  });
+  return NextResponse.json({ success: true, user: profile });
 }

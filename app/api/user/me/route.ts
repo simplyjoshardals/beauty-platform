@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { USERNAME_PATTERN, USERNAME_FORMAT_ERROR } from "@/constants/username";
+import { getFullCurrentUser } from "@/lib/users";
 
 // x-user-id is set by proxy.ts, which already validated the access/
 // refresh token cookies before this route ever runs — this handler
@@ -15,20 +16,7 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    include: {
-      routineItems: { orderBy: { order: "asc" } },
-      // Same _count pattern as GET /api/user/[username] — real counts
-      // off the Follow table instead of the CURRENT_USER_PROFILE mock /
-      // FollowProvider's local state the frontend used to read for its
-      // own profile page. Own-profile is just the one-user case of
-      // "how many people follow this user," so it reuses the same
-      // relations rather than a separate query.
-      _count: { select: { followers: true, following: true } },
-    },
-  });
-
+  const user = await getFullCurrentUser(userId);
   if (!user) {
     return NextResponse.json(
       { success: false, error: "Unauthorized" },
@@ -36,26 +24,7 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  return NextResponse.json({
-    success: true,
-    user: {
-      id: user.id,
-      username: user.username,
-      email: user.email,
-      avatarSrc: user.avatarSrc,
-      bio: user.bio,
-      toneTag: user.toneTag,
-      // Shaped as ProductTag[] (id + label) — same shape the rest of the
-      // frontend already expects for pinned routine / post product tags.
-      pinnedRoutine: user.routineItems.map((item) => ({
-        id: item.id,
-        label: item.label,
-      })),
-      onboardingCompletedAt: user.onboardingCompletedAt,
-      followerCount: user._count.followers,
-      followingCount: user._count.following,
-    },
-  });
+  return NextResponse.json({ success: true, user });
 }
 
 // Own-profile edits (Edit Profile screen). Same trust model as GET and

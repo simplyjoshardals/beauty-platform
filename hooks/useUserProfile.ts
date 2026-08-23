@@ -9,6 +9,7 @@ import {
 } from "@/hooks/useFollowingList";
 import { followersQueryKey } from "@/hooks/useFollowersList";
 import type { ProductTag } from "@/types/post";
+import { profileQueryKey } from "@/lib/queryKeys";
 
 export type PublicUserProfile = {
   id: string;
@@ -23,9 +24,7 @@ export type PublicUserProfile = {
   followsMe: boolean;
 };
 
-function profileQueryKey(username: string) {
-  return ["userProfile", username] as const;
-}
+export { profileQueryKey };
 
 // Adds/removes one row from a cached following/followers list, keyed by
 // username — used below to keep the Following/Followers pages in sync
