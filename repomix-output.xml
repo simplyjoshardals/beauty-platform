@@ -219,6 +219,7 @@ hooks/
   useFollowersList.ts
   useFollowingList.ts
   useLikedPosts.ts
+  useLogout.ts
   usePosts.ts
   useSavedPosts.ts
   useUpdateProfile.ts
@@ -311,361 +312,6 @@ tsconfig.json
 
 <files>
 This section contains the contents of the repository's files.
-
-<file path="app/loading.tsx">
-import { HomeFeedSkeleton } from "@/components/feed/HomeFeedSkeleton";
-
-export default function HomeLoading() {
-  return (
-    <div className="min-h-dvh">
-      <HomeFeedSkeleton />
-    </div>
-  );
-}
-</file>
-
-<file path="lib/likes.ts">
-import { prisma } from "./prisma";
-
-export async function getLikedPostIds(userId: string): Promise<string[]> {
-  const likes = await prisma.like.findMany({
-    where: { userId },
-    select: { postId: true },
-  });
-  return likes.map((l) => l.postId);
-}
-</file>
-
-<file path="lib/queryKeys.ts">
-// Plain constants/functions only — deliberately NOT "use client", so
-// Server Components (app/page.tsx's SSR prefetch) can import the real
-// values instead of a client-reference stub. Client hooks import from
-// here too, so there's exactly one definition of each key.
-export const POSTS_QUERY_KEY = ["posts"] as const;
-export const LIKES_QUERY_KEY = ["likes"] as const;
-export const SAVED_QUERY_KEY = ["saved"] as const;
-
-export function followingQueryKey(username: string | undefined) {
-  return ["following", username] as const;
-}
-
-export function profileQueryKey(username: string) {
-  return ["userProfile", username] as const;
-}
-
-export const CURRENT_USER_QUERY_KEY = ["currentUser"] as const;
-</file>
-
-<file path="lib/serverQueries.ts">
-import { prisma } from "./prisma";
-import { postInclude, serializePost } from "./posts";
-import { buildSavedBundle } from "./saved";
-import {
-  getFullCurrentUser,
-  getFollowingList,
-  getPublicUserProfilesBatch,
-} from "./users";
-import { getLikedPostIds } from "./likes";
-
-const FEED_TAKE = 50; // keep in sync with app/api/posts/route.ts
-
-export async function fetchPostsForSSR() {
-  const posts = await prisma.post.findMany({
-    include: postInclude,
-    orderBy: { createdAt: "desc" },
-    take: FEED_TAKE,
-  });
-  return posts.map(serializePost);
-}
-
-export async function fetchLikedPostIdsForSSR(userId: string) {
-  return getLikedPostIds(userId);
-}
-
-export async function fetchSavedBundleForSSR(userId: string) {
-  const [savedPosts, collections] = await Promise.all([
-    prisma.savedPost.findMany({
-      where: { userId },
-      select: {
-        postId: true,
-        collections: { select: { collectionId: true } },
-      },
-      orderBy: { createdAt: "desc" },
-    }),
-    prisma.collection.findMany({
-      where: { userId },
-      select: { id: true, name: true },
-      orderBy: { createdAt: "asc" },
-    }),
-  ]);
-  return buildSavedBundle(savedPosts, collections);
-}
-
-export async function fetchFollowingForSSR(username: string) {
-  return (await getFollowingList(username)) ?? [];
-}
-
-export async function fetchUserProfilesBatchForSSR(
-  usernames: string[],
-  viewerId: string,
-) {
-  return getPublicUserProfilesBatch(usernames, viewerId);
-}
-
-export async function fetchCurrentUserForSSR(userId: string) {
-  return getFullCurrentUser(userId);
-}
-</file>
-
-<file path="lib/session.ts">
-import { cookies } from "next/headers";
-import { verifyAccessToken } from "./auth";
-import { prisma } from "./prisma";
-import { getFullCurrentUser } from "./users";
-
-export async function getServerUserId(): Promise<string | null> {
-  const accessToken = (await cookies()).get("accessToken")?.value;
-  if (!accessToken) return null;
-  try {
-    const payload = verifyAccessToken(accessToken) as { sub: string };
-    return payload.sub;
-  } catch {
-    return null;
-  }
-}
-
-// Minimal, fast read used ONLY to paint the bottom nav's profile tab
-// correctly on first server render, so it doesn't flash from the
-// generic icon to the real avatar after a refresh. Deliberately does
-// NOT attempt refresh-token rotation — a Server Component can't set
-// response cookies during render — so an expired access token here
-// just falls back to the old client-side flash, same as today. That's
-// an acceptable gap for this first pass, not a regression.
-export async function getServerNavUser(): Promise<{
-  avatarSrc: string;
-} | null> {
-  const userId = await getServerUserId();
-  if (!userId) return null;
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { avatarSrc: true },
-  });
-  return user ?? null;
-}
-
-export async function fetchCurrentUserForSSR(userId: string) {
-  return getFullCurrentUser(userId);
-}
-</file>
-
-<file path="lib/users.ts">
-import { prisma } from "./prisma";
-
-export type FullCurrentUser = {
-  id: string;
-  username: string;
-  email: string;
-  avatarSrc: string;
-  bio: string;
-  toneTag: string;
-  pinnedRoutine: { id: string; label: string }[];
-  onboardingCompletedAt: string | null;
-  followerCount: number;
-  followingCount: number;
-};
-
-export async function getFullCurrentUser(
-  userId: string,
-): Promise<FullCurrentUser | null> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    include: {
-      routineItems: { orderBy: { order: "asc" } },
-      _count: { select: { followers: true, following: true } },
-    },
-  });
-  if (!user) return null;
-
-  return {
-    id: user.id,
-    username: user.username,
-    email: user.email,
-    avatarSrc: user.avatarSrc,
-    bio: user.bio,
-    toneTag: user.toneTag,
-    pinnedRoutine: user.routineItems.map((item) => ({
-      id: item.id,
-      label: item.label,
-    })),
-    onboardingCompletedAt: user.onboardingCompletedAt
-      ? user.onboardingCompletedAt.toISOString()
-      : null,
-    followerCount: user._count.followers,
-    followingCount: user._count.following,
-  };
-}
-
-export type FollowingListUser = {
-  id: string;
-  username: string;
-  avatarSrc: string;
-  toneTag: string;
-};
-
-export async function getFollowingList(
-  username: string,
-  search?: string,
-): Promise<FollowingListUser[] | null> {
-  const target = await prisma.user.findUnique({
-    where: { username },
-    select: { id: true },
-  });
-  if (!target) return null;
-
-  const follows = await prisma.follow.findMany({
-    where: {
-      followerId: target.id,
-      ...(search
-        ? { following: { username: { contains: search, mode: "insensitive" } } }
-        : {}),
-    },
-    orderBy: { createdAt: "desc" },
-    select: {
-      following: {
-        select: { id: true, username: true, avatarSrc: true, toneTag: true },
-      },
-    },
-  });
-  return follows.map((f) => f.following);
-}
-
-export type PublicUserProfile = {
-  id: string;
-  username: string;
-  avatarSrc: string;
-  bio: string;
-  toneTag: string;
-  pinnedRoutine: { id: string; label: string }[];
-  followerCount: number;
-  followingCount: number;
-  isFollowing: boolean;
-  followsMe: boolean;
-};
-
-export async function getPublicUserProfile(
-  username: string,
-  viewerId: string | null,
-): Promise<PublicUserProfile | null> {
-  const user = await prisma.user.findUnique({
-    where: { username },
-    include: {
-      routineItems: { orderBy: { order: "asc" } },
-      _count: { select: { followers: true, following: true } },
-    },
-  });
-  if (!user) return null;
-
-  let isFollowing = false;
-  let followsMe = false;
-  if (viewerId && viewerId !== user.id) {
-    const [followingRow, followerRow] = await Promise.all([
-      prisma.follow.findUnique({
-        where: {
-          followerId_followingId: {
-            followerId: viewerId,
-            followingId: user.id,
-          },
-        },
-        select: { id: true },
-      }),
-      prisma.follow.findUnique({
-        where: {
-          followerId_followingId: {
-            followerId: user.id,
-            followingId: viewerId,
-          },
-        },
-        select: { id: true },
-      }),
-    ]);
-    isFollowing = Boolean(followingRow);
-    followsMe = Boolean(followerRow);
-  }
-
-  return {
-    id: user.id,
-    username: user.username,
-    avatarSrc: user.avatarSrc,
-    bio: user.bio,
-    toneTag: user.toneTag,
-    pinnedRoutine: user.routineItems.map((item) => ({
-      id: item.id,
-      label: item.label,
-    })),
-    followerCount: user._count.followers,
-    followingCount: user._count.following,
-    isFollowing,
-    followsMe,
-  };
-}
-
-export async function getPublicUserProfilesBatch(
-  usernames: string[],
-  viewerId: string | null,
-): Promise<Map<string, PublicUserProfile>> {
-  if (usernames.length === 0) return new Map();
-
-  const users = await prisma.user.findMany({
-    where: { username: { in: usernames } },
-    include: {
-      routineItems: { orderBy: { order: "asc" } },
-      _count: { select: { followers: true, following: true } },
-    },
-  });
-
-  const otherUserIds = viewerId
-    ? users.filter((u) => u.id !== viewerId).map((u) => u.id)
-    : [];
-
-  const [followingRows, followerRows] =
-    viewerId && otherUserIds.length > 0
-      ? await Promise.all([
-          prisma.follow.findMany({
-            where: { followerId: viewerId, followingId: { in: otherUserIds } },
-            select: { followingId: true },
-          }),
-          prisma.follow.findMany({
-            where: { followerId: { in: otherUserIds }, followingId: viewerId },
-            select: { followerId: true },
-          }),
-        ])
-      : [[], []];
-
-  const followingSet = new Set(followingRows.map((r) => r.followingId));
-  const followerSet = new Set(followerRows.map((r) => r.followerId));
-
-  const profiles = new Map<string, PublicUserProfile>();
-  for (const user of users) {
-    const isSelf = viewerId === user.id;
-    profiles.set(user.username, {
-      id: user.id,
-      username: user.username,
-      avatarSrc: user.avatarSrc,
-      bio: user.bio,
-      toneTag: user.toneTag,
-      pinnedRoutine: user.routineItems.map((item) => ({
-        id: item.id,
-        label: item.label,
-      })),
-      followerCount: user._count.followers,
-      followingCount: user._count.following,
-      isFollowing: !isSelf && followingSet.has(user.id),
-      followsMe: !isSelf && followerSet.has(user.id),
-    });
-  }
-  return profiles;
-}
-</file>
 
 <file path="app/api/auth/logout/route.ts">
 import { NextRequest, NextResponse } from "next/server";
@@ -1062,30 +708,6 @@ export async function POST(req: NextRequest, { params }: Params) {
       { status: 500 },
     );
   }
-}
-</file>
-
-<file path="app/api/posts/likes/route.ts">
-import { NextRequest, NextResponse } from "next/server";
-import { getLikedPostIds } from "@/lib/likes";
-
-// Mirrors GET /api/saved's bundle shape — just the ids, not baked into
-// each Post the way likeCount is. Keeping "did I like this" as its own
-// small fetch (rather than joining it onto every /api/posts response)
-// matches how isSaved already works via useSavedPosts, and means this
-// route works the same regardless of where the Post objects themselves
-// came from.
-export async function GET(req: NextRequest) {
-  const userId = req.headers.get("x-user-id");
-  if (!userId) {
-    return NextResponse.json(
-      { success: false, error: "Unauthorized" },
-      { status: 401 },
-    );
-  }
-
-  const likedPostIds = await getLikedPostIds(userId);
-  return NextResponse.json({ success: true, likedPostIds });
 }
 </file>
 
@@ -1627,56 +1249,6 @@ export async function GET(req: NextRequest, { params }: Params) {
 }
 </file>
 
-<file path="app/api/user/[username]/following/route.ts">
-import { NextRequest, NextResponse } from "next/server";
-import { getFollowingList } from "@/lib/users";
-
-type Params = { params: Promise<{ username: string }> };
-
-// Requires authentication — unlike GET /api/user/[username] and its
-// /posts sibling, this route is deliberately NOT part of proxy.ts's
-// public-GET carve-out (see isPublicUserGet there), so an unauthenticated
-// request never even reaches this handler with a usable session. The
-// x-user-id check below is defense-in-depth, mirroring the same explicit
-// check in follow/route.ts, rather than the only thing standing between
-// this data and a logged-out caller.
-//
-// Returns the users the given username follows, most recent first. Only
-// the fields UserListRow actually renders are selected — id (React key /
-// self-follow check upstream), username, avatarSrc, toneTag — nothing
-// else off the target rows leaks through.
-//
-// Accepts an optional ?search= for a case-insensitive username filter.
-// Both Following pages currently filter client-side against the full
-// list (see UserListWithSearch), so nothing calls this with a search
-// param yet — it's wired up now so switching either page to server-side
-// search later is a query-param change in useFollowingList, not a new
-// endpoint.
-export async function GET(req: NextRequest, { params }: Params) {
-  const viewerId = req.headers.get("x-user-id");
-  if (!viewerId) {
-    return NextResponse.json(
-      { success: false, error: "Unauthorized" },
-      { status: 401 },
-    );
-  }
-
-  const { username } = await params;
-
-  const search = req.nextUrl.searchParams.get("search")?.trim();
-
-  const users = await getFollowingList(username, search);
-  if (users === null) {
-    return NextResponse.json(
-      { success: false, error: "User not found." },
-      { status: 404 },
-    );
-  }
-
-  return NextResponse.json({ success: true, users });
-}
-</file>
-
 <file path="app/api/user/[username]/posts/route.ts">
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -1723,46 +1295,6 @@ export async function GET(req: NextRequest, { params }: Params) {
     success: true,
     posts: posts.map(serializePost),
   });
-}
-</file>
-
-<file path="app/api/user/[username]/route.ts">
-import { NextRequest, NextResponse } from "next/server";
-import { getPublicUserProfile } from "@/lib/users";
-
-type Params = { params: Promise<{ username: string }> };
-
-// Public read — this is the /u/[username] page's data source, and that
-// page is intentionally browsable while logged out (see the comment on
-// RequireAuth about /p/[postId] and /u/[username] being the two
-// action-gated-not-page-gated routes). proxy.ts carves this route out as
-// a public GET the same way it already does for /api/posts/[postId], but
-// still runs it through token verification first — so a logged-in
-// visitor still gets x-user-id set below, which is what lets
-// isFollowing/followsMe be computed for them even though the route
-// itself doesn't require auth.
-//
-// followerCount/followingCount are real counts off the Follow table
-// (unlike CURRENT_USER_PROFILE.followerCount in data/currentUserProfile.ts,
-// which is still a hardcoded placeholder — there's just no consumer of
-// "who follows me" for your OWN profile yet). isFollowing/followsMe are
-// real too. The one thing still owed to a real backend here is the
-// follow *action* everywhere else in the app (PostCard, NotificationRow,
-// UserListRow all still read/write context/FollowProvider's local
-// Set) — this route and its sibling follow/route.ts are the first real
-// piece of that; wiring the rest through is a separate pass.
-export async function GET(req: NextRequest, { params }: Params) {
-  const { username } = await params;
-
-  const viewerId = req.headers.get("x-user-id");
-  const profile = await getPublicUserProfile(username, viewerId);
-  if (!profile) {
-    return NextResponse.json(
-      { success: false, error: "User not found." },
-      { status: 404 },
-    );
-  }
-  return NextResponse.json({ success: true, user: profile });
 }
 </file>
 
@@ -1918,6 +1450,18 @@ export default function UserNotFound() {
       <p className="text-sm text-foreground/50">
         This account doesn&rsquo;t exist, or the link is incorrect.
       </p>
+    </div>
+  );
+}
+</file>
+
+<file path="app/loading.tsx">
+import { HomeFeedSkeleton } from "@/components/feed/HomeFeedSkeleton";
+
+export default function HomeLoading() {
+  return (
+    <div className="min-h-dvh">
+      <HomeFeedSkeleton />
     </div>
   );
 }
@@ -3277,450 +2821,22 @@ export function useFollowersList(username: string | undefined) {
 }
 </file>
 
-<file path="hooks/useFollowingList.ts">
+<file path="hooks/useLogout.ts">
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
-import { getFollowing } from "@/services/userService";
-import type { MockUser } from "@/data/mockUsers";
-import { followingQueryKey } from "@/lib/queryKeys";
+import { useMutation } from "@tanstack/react-query";
+import { logOutUser } from "@/services/authService";
 
-// Same shape UserListWithSearch/UserListRow already render (MockUser),
-// plus the real id the backend returns — kept for parity with other
-// real-data hooks (useUserProfile's PublicUserProfile, useCurrentUser's
-// CurrentUser) even though the list UI itself doesn't use it yet.
-export type FollowingUser = MockUser & { id: string };
-
-// Backs both Following pages — /profile/following (own) and
-// /u/[username]/following (someone else's). A single fetch of the full
-// list; search stays client-side in UserListWithSearch for now (see its
-// own comment), even though the underlying API already accepts
-// ?search= for when that needs to move server-side.
-//
-// Pass undefined to hold the query off entirely — used by
-// /u/[username]/following so the request isn't fired until the viewer's
-// auth state is actually known (the endpoint requires a session; there's
-// no reason to attempt it, and risk apiFetch's 401 handling kicking in,
-// for a visitor who isn't signed in at all).
-// Exported so useUserProfile can reach into this exact cache entry when
-// a follow/unfollow happens elsewhere (PostCard, ProfileHeader) — that's
-// what lets toggling follow from a post card optimistically update this
-// list without this hook needing to know anything about who's doing it.
-export { followingQueryKey };
-
-export function useFollowingList(username: string | undefined) {
-  const query = useQuery({
-    queryKey: followingQueryKey(username),
-    queryFn: async () => {
-      const result = await getFollowing(username as string);
-      if (!result?.success) return [];
-      return result.users as FollowingUser[];
-    },
-    enabled: Boolean(username),
+// A hard redirect (not router.push) is deliberate — logout is the one
+// moment a fully fresh page load, with no leftover React Query cache or
+// component state from the previous session, is actually what you
+// want. The server's already cleared the session cookies by the time
+// onSuccess fires; this makes sure nothing client-side survives into
+// whatever session gets signed in next on this browser.
+export function useLogout() {
+  return useMutation({
+    mutationFn: () => logOutUser(),
   });
-
-  return {
-    users: query.data ?? [],
-    isLoading: query.isLoading,
-  };
-}
-</file>
-
-<file path="hooks/useLikedPosts.ts">
-"use client";
-
-import { useMemo } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getLikedPostIds, togglePostLike } from "@/services/likeService";
-import { POSTS_QUERY_KEY } from "@/hooks/usePosts";
-import { LIKES_QUERY_KEY } from "@/lib/queryKeys";
-
-export { LIKES_QUERY_KEY };
-
-type LikesData = { likedPostIds: string[] };
-
-const EMPTY_LIKES_DATA: LikesData = { likedPostIds: [] };
-
-// apiFetch never throws on a failed request (see utils/apiClient.ts) —
-// same reasoning as useSavedPosts.ts's mutationFailed.
-function mutationFailed(result: { success: boolean } | undefined) {
-  return result === undefined || !result.success;
-}
-
-// Same shape/spirit as useSavedPosts: "did I like this post" is kept as
-// its own small fetch rather than joined onto every /api/posts response,
-// so it works the same whether the Post objects came from the real feed,
-// a profile grid, or (today) the still-mock single-post page. The
-// optimistic-update / snapshot / rollback-or-refetch pattern is
-// identical to useSavedPosts.ts too.
-export function useLikedPosts() {
-  const queryClient = useQueryClient();
-
-  const query = useQuery({
-    queryKey: LIKES_QUERY_KEY,
-    queryFn: async (): Promise<LikesData> => {
-      const result = await getLikedPostIds();
-      if (!result?.success) return EMPTY_LIKES_DATA;
-      return { likedPostIds: result.likedPostIds };
-    },
-  });
-
-  const likedPostIds = useMemo(
-    () => new Set(query.data?.likedPostIds ?? []),
-    [query.data],
-  );
-
-  const toggleLikeMutation = useMutation({
-    mutationFn: (postId: string) => togglePostLike(postId),
-    onMutate: async (postId) => {
-      await queryClient.cancelQueries({ queryKey: LIKES_QUERY_KEY });
-      const previous = queryClient.getQueryData<LikesData>(LIKES_QUERY_KEY);
-      queryClient.setQueryData<LikesData>(LIKES_QUERY_KEY, (old) => {
-        const data = old ?? EMPTY_LIKES_DATA;
-        const currentlyLiked = data.likedPostIds.includes(postId);
-        return {
-          likedPostIds: currentlyLiked
-            ? data.likedPostIds.filter((id) => id !== postId)
-            : [...data.likedPostIds, postId],
-        };
-      });
-      return { previous };
-    },
-    onSettled: (result, _error, _postId, context) => {
-      if (mutationFailed(result)) {
-        if (context?.previous) {
-          queryClient.setQueryData(LIKES_QUERY_KEY, context.previous);
-        }
-      } else {
-        queryClient.invalidateQueries({ queryKey: LIKES_QUERY_KEY });
-        // A like flips Post.likeCount too (derived via _count) — refetch
-        // the feed so that number catches up with what just happened
-        // here, same as how a comment add/delete needs to below.
-        queryClient.invalidateQueries({ queryKey: POSTS_QUERY_KEY });
-      }
-    },
-  });
-
-  function isLiked(postId: string) {
-    return likedPostIds.has(postId);
-  }
-
-  function toggleLike(postId: string) {
-    toggleLikeMutation.mutate(postId);
-  }
-
-  return {
-    isLiked,
-    toggleLike,
-    isLoading: query.isLoading,
-  };
-}
-</file>
-
-<file path="hooks/useSavedPosts.ts">
-"use client";
-
-import { useMemo } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  getSavedBundle,
-  toggleSavedPost,
-  createCollection as createCollectionRequest,
-  renameCollection as renameCollectionRequest,
-  deleteCollection as deleteCollectionRequest,
-  toggleCollectionPost,
-  type SavedCollection,
-} from "@/services/savedService";
-import { SAVED_QUERY_KEY } from "@/lib/queryKeys";
-
-export type Collection = { id: string; name: string };
-
-export { SAVED_QUERY_KEY };
-
-type SavedData = {
-  savedPostIds: string[];
-  collections: SavedCollection[];
-};
-
-const EMPTY_SAVED_DATA: SavedData = { savedPostIds: [], collections: [] };
-
-// apiFetch never throws on a failed request — network errors, timeouts,
-// and non-2xx responses all resolve to a `{ success: false }` object
-// rather than rejecting (see utils/apiClient.ts). So "did this mutation
-// fail" has to be read off the resolved result, not caught via
-// useMutation's onError — that's why every mutation below checks
-// `result.success` inside onSettled instead.
-function mutationFailed(result: { success: boolean } | undefined) {
-  return result === undefined || !result.success;
-}
-
-// Replaces context/SavedPostsProvider.tsx. Same public shape (isSaved,
-// toggleSave, collections, createCollection, renameCollection,
-// deleteCollection, isPostInCollection, toggleCollectionForPost,
-// getPostIdsForCollection, savedCount) so every existing consumer keeps
-// working with only an import-path change — except createCollection,
-// which is now async (it has to round-trip to the server to get a real
-// id back), so callers that used its return value synchronously need an
-// await. No provider wrapping needed: react-query already dedupes/shares
-// this cache across every component that calls the hook, same as
-// usePosts.
-//
-// Every mutation below updates the cache optimistically in onMutate
-// (so the UI reacts instantly), snapshots the prior cache so it can be
-// restored, and in onSettled either rolls back to that snapshot (on
-// failure) or leaves the optimistic value in place and refetches to
-// reconcile with the server (on success) — same pattern throughout.
-export function useSavedPosts() {
-  const queryClient = useQueryClient();
-
-  const query = useQuery({
-    queryKey: SAVED_QUERY_KEY,
-    queryFn: async (): Promise<SavedData> => {
-      const result = await getSavedBundle();
-      if (!result?.success) return EMPTY_SAVED_DATA;
-      return {
-        savedPostIds: result.savedPostIds,
-        collections: result.collections,
-      };
-    },
-  });
-
-  const savedPostIds = useMemo(
-    () => new Set(query.data?.savedPostIds ?? []),
-    [query.data],
-  );
-  const collections: Collection[] = query.data?.collections ?? [];
-
-  async function snapshotAndCancel() {
-    await queryClient.cancelQueries({ queryKey: SAVED_QUERY_KEY });
-    return queryClient.getQueryData<SavedData>(SAVED_QUERY_KEY);
-  }
-
-  function rollback(previous: SavedData | undefined) {
-    if (previous) {
-      queryClient.setQueryData(SAVED_QUERY_KEY, previous);
-    }
-  }
-
-  function refetch() {
-    return queryClient.invalidateQueries({ queryKey: SAVED_QUERY_KEY });
-  }
-
-  const toggleSaveMutation = useMutation({
-    mutationFn: (postId: string) => toggleSavedPost(postId),
-    onMutate: async (postId) => {
-      const previous = await snapshotAndCancel();
-      queryClient.setQueryData<SavedData>(SAVED_QUERY_KEY, (old) => {
-        const data = old ?? EMPTY_SAVED_DATA;
-        const currentlySaved = data.savedPostIds.includes(postId);
-        if (currentlySaved) {
-          // Fully unsaving removes it from every collection too — a
-          // post can't sit in a folder while not being saved at all,
-          // same cascade the server applies.
-          return {
-            savedPostIds: data.savedPostIds.filter((id) => id !== postId),
-            collections: data.collections.map((c) => ({
-              ...c,
-              postIds: c.postIds.filter((id) => id !== postId),
-            })),
-          };
-        }
-        return { ...data, savedPostIds: [...data.savedPostIds, postId] };
-      });
-      return { previous };
-    },
-    onSettled: (result, _error, _postId, context) => {
-      if (mutationFailed(result)) {
-        rollback(context?.previous);
-      } else {
-        refetch();
-      }
-    },
-  });
-
-  const createCollectionMutation = useMutation({
-    mutationFn: (name: string) => createCollectionRequest(name),
-    onMutate: async (name) => {
-      const previous = await snapshotAndCancel();
-      const tempId = `temp-${crypto.randomUUID()}`;
-      queryClient.setQueryData<SavedData>(SAVED_QUERY_KEY, (old) => {
-        const data = old ?? EMPTY_SAVED_DATA;
-        return {
-          ...data,
-          collections: [...data.collections, { id: tempId, name, postIds: [] }],
-        };
-      });
-      return { previous };
-    },
-    onSettled: (result, _error, _name, context) => {
-      if (mutationFailed(result)) {
-        rollback(context?.previous);
-      } else {
-        // Swaps the temp-id placeholder for the real collection —
-        // mutateAsync's resolved value (used by createCollection below)
-        // already has the real id regardless of this refetch.
-        refetch();
-      }
-    },
-  });
-
-  const renameCollectionMutation = useMutation({
-    mutationFn: ({
-      collectionId,
-      name,
-    }: {
-      collectionId: string;
-      name: string;
-    }) => renameCollectionRequest(collectionId, name),
-    onMutate: async ({ collectionId, name }) => {
-      const previous = await snapshotAndCancel();
-      queryClient.setQueryData<SavedData>(SAVED_QUERY_KEY, (old) => {
-        const data = old ?? EMPTY_SAVED_DATA;
-        return {
-          ...data,
-          collections: data.collections.map((c) =>
-            c.id === collectionId ? { ...c, name } : c,
-          ),
-        };
-      });
-      return { previous };
-    },
-    onSettled: (result, _error, _vars, context) => {
-      if (mutationFailed(result)) {
-        rollback(context?.previous);
-      } else {
-        refetch();
-      }
-    },
-  });
-
-  const deleteCollectionMutation = useMutation({
-    mutationFn: (collectionId: string) => deleteCollectionRequest(collectionId),
-    onMutate: async (collectionId) => {
-      const previous = await snapshotAndCancel();
-      queryClient.setQueryData<SavedData>(SAVED_QUERY_KEY, (old) => {
-        const data = old ?? EMPTY_SAVED_DATA;
-        // Only removes the folder/grouping — savedPostIds is untouched,
-        // matching the server: deleting a collection never unsaves the
-        // posts inside it.
-        return {
-          ...data,
-          collections: data.collections.filter((c) => c.id !== collectionId),
-        };
-      });
-      return { previous };
-    },
-    onSettled: (result, _error, _collectionId, context) => {
-      if (mutationFailed(result)) {
-        rollback(context?.previous);
-      } else {
-        refetch();
-      }
-    },
-  });
-
-  const toggleCollectionPostMutation = useMutation({
-    mutationFn: ({
-      postId,
-      collectionId,
-    }: {
-      postId: string;
-      collectionId: string;
-    }) => toggleCollectionPost(collectionId, postId),
-    onMutate: async ({ postId, collectionId }) => {
-      const previous = await snapshotAndCancel();
-      queryClient.setQueryData<SavedData>(SAVED_QUERY_KEY, (old) => {
-        const data = old ?? EMPTY_SAVED_DATA;
-        const target = data.collections.find((c) => c.id === collectionId);
-        const wasInCollection = target?.postIds.includes(postId) ?? false;
-        return {
-          // Adding to a collection implies the post is saved overall
-          // too — same as toggleSaveMutation, but only in the adding
-          // direction; removing from one collection never unsaves it.
-          savedPostIds:
-            !wasInCollection && !data.savedPostIds.includes(postId)
-              ? [...data.savedPostIds, postId]
-              : data.savedPostIds,
-          collections: data.collections.map((c) =>
-            c.id === collectionId
-              ? {
-                  ...c,
-                  postIds: wasInCollection
-                    ? c.postIds.filter((id) => id !== postId)
-                    : [...c.postIds, postId],
-                }
-              : c,
-          ),
-        };
-      });
-      return { previous };
-    },
-    onSettled: (result, _error, _vars, context) => {
-      if (mutationFailed(result)) {
-        rollback(context?.previous);
-      } else {
-        refetch();
-      }
-    },
-  });
-
-  function isSaved(postId: string) {
-    return savedPostIds.has(postId);
-  }
-
-  function toggleSave(postId: string) {
-    toggleSaveMutation.mutate(postId);
-  }
-
-  // Async, unlike the old context version — resolves to the new
-  // collection's id (or null on failure) once the server round-trip
-  // completes, since there's no client-generated id to hand back
-  // synchronously anymore. Reads off mutateAsync's own resolved value,
-  // not the cache, so it's correct even though the cache briefly holds
-  // a temp-id placeholder (see createCollectionMutation.onMutate above).
-  async function createCollection(name: string): Promise<string | null> {
-    const result = await createCollectionMutation.mutateAsync(name);
-    return result?.success ? result.collection.id : null;
-  }
-
-  function renameCollection(collectionId: string, name: string) {
-    renameCollectionMutation.mutate({ collectionId, name });
-  }
-
-  function deleteCollection(collectionId: string) {
-    deleteCollectionMutation.mutate(collectionId);
-  }
-
-  function isPostInCollection(postId: string, collectionId: string) {
-    const collection = query.data?.collections.find(
-      (c) => c.id === collectionId,
-    );
-    return collection?.postIds.includes(postId) ?? false;
-  }
-
-  function toggleCollectionForPost(postId: string, collectionId: string) {
-    toggleCollectionPostMutation.mutate({ postId, collectionId });
-  }
-
-  function getPostIdsForCollection(collectionId: string): string[] {
-    return (
-      query.data?.collections.find((c) => c.id === collectionId)?.postIds ?? []
-    );
-  }
-
-  return {
-    isSaved,
-    toggleSave,
-    collections,
-    createCollection,
-    renameCollection,
-    deleteCollection,
-    isPostInCollection,
-    toggleCollectionForPost,
-    getPostIdsForCollection,
-    savedCount: savedPostIds.size,
-    isLoading: query.isLoading,
-  };
 }
 </file>
 
@@ -3932,6 +3048,18 @@ export function serializeComment(comment: CommentRecord): Comment {
 }
 </file>
 
+<file path="lib/likes.ts">
+import { prisma } from "./prisma";
+
+export async function getLikedPostIds(userId: string): Promise<string[]> {
+  const likes = await prisma.like.findMany({
+    where: { userId },
+    select: { postId: true },
+  });
+  return likes.map((l) => l.postId);
+}
+</file>
+
 <file path="lib/mailer.ts">
 import { Resend } from "resend";
 
@@ -4004,6 +3132,26 @@ export const prisma: PrismaClient =
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
 </file>
 
+<file path="lib/queryKeys.ts">
+// Plain constants/functions only — deliberately NOT "use client", so
+// Server Components (app/page.tsx's SSR prefetch) can import the real
+// values instead of a client-reference stub. Client hooks import from
+// here too, so there's exactly one definition of each key.
+export const POSTS_QUERY_KEY = ["posts"] as const;
+export const LIKES_QUERY_KEY = ["likes"] as const;
+export const SAVED_QUERY_KEY = ["saved"] as const;
+
+export function followingQueryKey(username: string | undefined) {
+  return ["following", username] as const;
+}
+
+export function profileQueryKey(username: string) {
+  return ["userProfile", username] as const;
+}
+
+export const CURRENT_USER_QUERY_KEY = ["currentUser"] as const;
+</file>
+
 <file path="lib/saved.ts">
 export const MAX_COLLECTION_NAME_LENGTH = 60;
 
@@ -4050,6 +3198,307 @@ export function buildSavedBundle(
       postIds: postIdsByCollection.get(c.id) ?? [],
     })),
   };
+}
+</file>
+
+<file path="lib/serverQueries.ts">
+import { prisma } from "./prisma";
+import { postInclude, serializePost } from "./posts";
+import { buildSavedBundle } from "./saved";
+import {
+  getFullCurrentUser,
+  getFollowingList,
+  getPublicUserProfilesBatch,
+} from "./users";
+import { getLikedPostIds } from "./likes";
+
+const FEED_TAKE = 50; // keep in sync with app/api/posts/route.ts
+
+export async function fetchPostsForSSR() {
+  const posts = await prisma.post.findMany({
+    include: postInclude,
+    orderBy: { createdAt: "desc" },
+    take: FEED_TAKE,
+  });
+  return posts.map(serializePost);
+}
+
+export async function fetchLikedPostIdsForSSR(userId: string) {
+  return getLikedPostIds(userId);
+}
+
+export async function fetchSavedBundleForSSR(userId: string) {
+  const [savedPosts, collections] = await Promise.all([
+    prisma.savedPost.findMany({
+      where: { userId },
+      select: {
+        postId: true,
+        collections: { select: { collectionId: true } },
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.collection.findMany({
+      where: { userId },
+      select: { id: true, name: true },
+      orderBy: { createdAt: "asc" },
+    }),
+  ]);
+  return buildSavedBundle(savedPosts, collections);
+}
+
+export async function fetchFollowingForSSR(username: string) {
+  return (await getFollowingList(username)) ?? [];
+}
+
+export async function fetchUserProfilesBatchForSSR(
+  usernames: string[],
+  viewerId: string,
+) {
+  return getPublicUserProfilesBatch(usernames, viewerId);
+}
+
+export async function fetchCurrentUserForSSR(userId: string) {
+  return getFullCurrentUser(userId);
+}
+</file>
+
+<file path="lib/session.ts">
+import { headers } from "next/headers";
+import { prisma } from "./prisma";
+
+// Identity now comes from proxy.ts, which runs before every request —
+// page or API — verifies the access token, or silently refreshes it via
+// the refresh token if it's expired, and forwards the result as
+// x-user-id. Reading that header here (instead of re-verifying the raw
+// accessToken cookie the way this used to) is what lets a Server
+// Component see an already-refreshed session, since middleware can set
+// a new cookie during the request and this can't.
+export async function getServerUserId(): Promise<string | null> {
+  return (await headers()).get("x-user-id");
+}
+
+// Minimal, fast read used ONLY to paint the bottom nav's profile tab
+// correctly on first server render, so it doesn't flash from the
+// generic icon to the real avatar after a refresh.
+export async function getServerNavUser(): Promise<{
+  avatarSrc: string;
+} | null> {
+  const userId = await getServerUserId();
+  if (!userId) return null;
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { avatarSrc: true },
+  });
+  return user ?? null;
+}
+</file>
+
+<file path="lib/users.ts">
+import { prisma } from "./prisma";
+
+export type FullCurrentUser = {
+  id: string;
+  username: string;
+  email: string;
+  avatarSrc: string;
+  bio: string;
+  toneTag: string;
+  pinnedRoutine: { id: string; label: string }[];
+  onboardingCompletedAt: string | null;
+  followerCount: number;
+  followingCount: number;
+};
+
+export async function getFullCurrentUser(
+  userId: string,
+): Promise<FullCurrentUser | null> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: {
+      routineItems: { orderBy: { order: "asc" } },
+      _count: { select: { followers: true, following: true } },
+    },
+  });
+  if (!user) return null;
+
+  return {
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    avatarSrc: user.avatarSrc,
+    bio: user.bio,
+    toneTag: user.toneTag,
+    pinnedRoutine: user.routineItems.map((item) => ({
+      id: item.id,
+      label: item.label,
+    })),
+    onboardingCompletedAt: user.onboardingCompletedAt
+      ? user.onboardingCompletedAt.toISOString()
+      : null,
+    followerCount: user._count.followers,
+    followingCount: user._count.following,
+  };
+}
+
+export type FollowingListUser = {
+  id: string;
+  username: string;
+  avatarSrc: string;
+  toneTag: string;
+};
+
+export async function getFollowingList(
+  username: string,
+  search?: string,
+): Promise<FollowingListUser[] | null> {
+  const target = await prisma.user.findUnique({
+    where: { username },
+    select: { id: true },
+  });
+  if (!target) return null;
+
+  const follows = await prisma.follow.findMany({
+    where: {
+      followerId: target.id,
+      ...(search
+        ? { following: { username: { contains: search, mode: "insensitive" } } }
+        : {}),
+    },
+    orderBy: { createdAt: "desc" },
+    select: {
+      following: {
+        select: { id: true, username: true, avatarSrc: true, toneTag: true },
+      },
+    },
+  });
+  return follows.map((f) => f.following);
+}
+
+export type PublicUserProfile = {
+  id: string;
+  username: string;
+  avatarSrc: string;
+  bio: string;
+  toneTag: string;
+  pinnedRoutine: { id: string; label: string }[];
+  followerCount: number;
+  followingCount: number;
+  isFollowing: boolean;
+  followsMe: boolean;
+};
+
+export async function getPublicUserProfile(
+  username: string,
+  viewerId: string | null,
+): Promise<PublicUserProfile | null> {
+  const user = await prisma.user.findUnique({
+    where: { username },
+    include: {
+      routineItems: { orderBy: { order: "asc" } },
+      _count: { select: { followers: true, following: true } },
+    },
+  });
+  if (!user) return null;
+
+  let isFollowing = false;
+  let followsMe = false;
+  if (viewerId && viewerId !== user.id) {
+    const [followingRow, followerRow] = await Promise.all([
+      prisma.follow.findUnique({
+        where: {
+          followerId_followingId: {
+            followerId: viewerId,
+            followingId: user.id,
+          },
+        },
+        select: { id: true },
+      }),
+      prisma.follow.findUnique({
+        where: {
+          followerId_followingId: {
+            followerId: user.id,
+            followingId: viewerId,
+          },
+        },
+        select: { id: true },
+      }),
+    ]);
+    isFollowing = Boolean(followingRow);
+    followsMe = Boolean(followerRow);
+  }
+
+  return {
+    id: user.id,
+    username: user.username,
+    avatarSrc: user.avatarSrc,
+    bio: user.bio,
+    toneTag: user.toneTag,
+    pinnedRoutine: user.routineItems.map((item) => ({
+      id: item.id,
+      label: item.label,
+    })),
+    followerCount: user._count.followers,
+    followingCount: user._count.following,
+    isFollowing,
+    followsMe,
+  };
+}
+
+export async function getPublicUserProfilesBatch(
+  usernames: string[],
+  viewerId: string | null,
+): Promise<Map<string, PublicUserProfile>> {
+  if (usernames.length === 0) return new Map();
+
+  const users = await prisma.user.findMany({
+    where: { username: { in: usernames } },
+    include: {
+      routineItems: { orderBy: { order: "asc" } },
+      _count: { select: { followers: true, following: true } },
+    },
+  });
+
+  const otherUserIds = viewerId
+    ? users.filter((u) => u.id !== viewerId).map((u) => u.id)
+    : [];
+
+  const [followingRows, followerRows] =
+    viewerId && otherUserIds.length > 0
+      ? await Promise.all([
+          prisma.follow.findMany({
+            where: { followerId: viewerId, followingId: { in: otherUserIds } },
+            select: { followingId: true },
+          }),
+          prisma.follow.findMany({
+            where: { followerId: { in: otherUserIds }, followingId: viewerId },
+            select: { followerId: true },
+          }),
+        ])
+      : [[], []];
+
+  const followingSet = new Set(followingRows.map((r) => r.followingId));
+  const followerSet = new Set(followerRows.map((r) => r.followerId));
+
+  const profiles = new Map<string, PublicUserProfile>();
+  for (const user of users) {
+    const isSelf = viewerId === user.id;
+    profiles.set(user.username, {
+      id: user.id,
+      username: user.username,
+      avatarSrc: user.avatarSrc,
+      bio: user.bio,
+      toneTag: user.toneTag,
+      pinnedRoutine: user.routineItems.map((item) => ({
+        id: item.id,
+        label: item.label,
+      })),
+      followerCount: user._count.followers,
+      followingCount: user._count.following,
+      isFollowing: !isSelf && followingSet.has(user.id),
+      followsMe: !isSelf && followerSet.has(user.id),
+    });
+  }
+  return profiles;
 }
 </file>
 
@@ -5407,6 +4856,30 @@ export async function DELETE(req: NextRequest, { params }: Params) {
 }
 </file>
 
+<file path="app/api/posts/likes/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { getLikedPostIds } from "@/lib/likes";
+
+// Mirrors GET /api/saved's bundle shape — just the ids, not baked into
+// each Post the way likeCount is. Keeping "did I like this" as its own
+// small fetch (rather than joining it onto every /api/posts response)
+// matches how isSaved already works via useSavedPosts, and means this
+// route works the same regardless of where the Post objects themselves
+// came from.
+export async function GET(req: NextRequest) {
+  const userId = req.headers.get("x-user-id");
+  if (!userId) {
+    return NextResponse.json(
+      { success: false, error: "Unauthorized" },
+      { status: 401 },
+    );
+  }
+
+  const likedPostIds = await getLikedPostIds(userId);
+  return NextResponse.json({ success: true, likedPostIds });
+}
+</file>
+
 <file path="app/api/posts/route.ts">
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -5627,6 +5100,96 @@ export async function POST(req: NextRequest) {
       { status: 500 },
     );
   }
+}
+</file>
+
+<file path="app/api/user/[username]/following/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { getFollowingList } from "@/lib/users";
+
+type Params = { params: Promise<{ username: string }> };
+
+// Requires authentication — unlike GET /api/user/[username] and its
+// /posts sibling, this route is deliberately NOT part of proxy.ts's
+// public-GET carve-out (see isPublicUserGet there), so an unauthenticated
+// request never even reaches this handler with a usable session. The
+// x-user-id check below is defense-in-depth, mirroring the same explicit
+// check in follow/route.ts, rather than the only thing standing between
+// this data and a logged-out caller.
+//
+// Returns the users the given username follows, most recent first. Only
+// the fields UserListRow actually renders are selected — id (React key /
+// self-follow check upstream), username, avatarSrc, toneTag — nothing
+// else off the target rows leaks through.
+//
+// Accepts an optional ?search= for a case-insensitive username filter.
+// Both Following pages currently filter client-side against the full
+// list (see UserListWithSearch), so nothing calls this with a search
+// param yet — it's wired up now so switching either page to server-side
+// search later is a query-param change in useFollowingList, not a new
+// endpoint.
+export async function GET(req: NextRequest, { params }: Params) {
+  const viewerId = req.headers.get("x-user-id");
+  if (!viewerId) {
+    return NextResponse.json(
+      { success: false, error: "Unauthorized" },
+      { status: 401 },
+    );
+  }
+
+  const { username } = await params;
+
+  const search = req.nextUrl.searchParams.get("search")?.trim();
+
+  const users = await getFollowingList(username, search);
+  if (users === null) {
+    return NextResponse.json(
+      { success: false, error: "User not found." },
+      { status: 404 },
+    );
+  }
+
+  return NextResponse.json({ success: true, users });
+}
+</file>
+
+<file path="app/api/user/[username]/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { getPublicUserProfile } from "@/lib/users";
+
+type Params = { params: Promise<{ username: string }> };
+
+// Public read — this is the /u/[username] page's data source, and that
+// page is intentionally browsable while logged out (see the comment on
+// RequireAuth about /p/[postId] and /u/[username] being the two
+// action-gated-not-page-gated routes). proxy.ts carves this route out as
+// a public GET the same way it already does for /api/posts/[postId], but
+// still runs it through token verification first — so a logged-in
+// visitor still gets x-user-id set below, which is what lets
+// isFollowing/followsMe be computed for them even though the route
+// itself doesn't require auth.
+//
+// followerCount/followingCount are real counts off the Follow table
+// (unlike CURRENT_USER_PROFILE.followerCount in data/currentUserProfile.ts,
+// which is still a hardcoded placeholder — there's just no consumer of
+// "who follows me" for your OWN profile yet). isFollowing/followsMe are
+// real too. The one thing still owed to a real backend here is the
+// follow *action* everywhere else in the app (PostCard, NotificationRow,
+// UserListRow all still read/write context/FollowProvider's local
+// Set) — this route and its sibling follow/route.ts are the first real
+// piece of that; wiring the rest through is a separate pass.
+export async function GET(req: NextRequest, { params }: Params) {
+  const { username } = await params;
+
+  const viewerId = req.headers.get("x-user-id");
+  const profile = await getPublicUserProfile(username, viewerId);
+  if (!profile) {
+    return NextResponse.json(
+      { success: false, error: "User not found." },
+      { status: 404 },
+    );
+  }
+  return NextResponse.json({ success: true, user: profile });
 }
 </file>
 
@@ -6828,191 +6391,449 @@ export function useAuthGatedAction() {
 }
 </file>
 
-<file path="hooks/useUserProfile.ts">
+<file path="hooks/useFollowingList.ts">
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getUserProfile, toggleFollowUser } from "@/services/userService";
-import { useCurrentUser } from "@/hooks/useCurrentUser";
-import {
-  followingQueryKey,
-  type FollowingUser,
-} from "@/hooks/useFollowingList";
-import { followersQueryKey } from "@/hooks/useFollowersList";
-import type { ProductTag } from "@/types/post";
-import { profileQueryKey } from "@/lib/queryKeys";
+import { useQuery } from "@tanstack/react-query";
+import { getFollowing } from "@/services/userService";
+import type { MockUser } from "@/data/mockUsers";
+import { followingQueryKey } from "@/lib/queryKeys";
 
-export type PublicUserProfile = {
-  id: string;
-  username: string;
-  avatarSrc: string;
-  bio: string;
-  toneTag: string;
-  pinnedRoutine: ProductTag[];
-  followerCount: number;
-  followingCount: number;
-  isFollowing: boolean;
-  followsMe: boolean;
-};
+// Same shape UserListWithSearch/UserListRow already render (MockUser),
+// plus the real id the backend returns — kept for parity with other
+// real-data hooks (useUserProfile's PublicUserProfile, useCurrentUser's
+// CurrentUser) even though the list UI itself doesn't use it yet.
+export type FollowingUser = MockUser & { id: string };
 
-export { profileQueryKey };
+// Backs both Following pages — /profile/following (own) and
+// /u/[username]/following (someone else's). A single fetch of the full
+// list; search stays client-side in UserListWithSearch for now (see its
+// own comment), even though the underlying API already accepts
+// ?search= for when that needs to move server-side.
+//
+// Pass undefined to hold the query off entirely — used by
+// /u/[username]/following so the request isn't fired until the viewer's
+// auth state is actually known (the endpoint requires a session; there's
+// no reason to attempt it, and risk apiFetch's 401 handling kicking in,
+// for a visitor who isn't signed in at all).
+// Exported so useUserProfile can reach into this exact cache entry when
+// a follow/unfollow happens elsewhere (PostCard, ProfileHeader) — that's
+// what lets toggling follow from a post card optimistically update this
+// list without this hook needing to know anything about who's doing it.
+export { followingQueryKey };
 
-// Adds/removes one row from a cached following/followers list, keyed by
-// username — used below to keep the Following/Followers pages in sync
-// with a follow toggled from elsewhere (a post card, someone's profile
-// header) without those list hooks needing to know anything happened.
-function addOrRemoveRow(
-  list: FollowingUser[] | undefined,
-  adding: boolean,
-  row: FollowingUser,
-): FollowingUser[] | undefined {
-  if (!list) return list;
-  if (adding) {
-    return list.some((u) => u.username === row.username)
-      ? list
-      : [row, ...list];
-  }
-  return list.filter((u) => u.username !== row.username);
-}
-
-// Backs /u/[username]'s ProfileHeader AND PostCard's follow button — the
-// two places that now read/write the real Follow table (see
-// app/api/user/[username]/route.ts and its sibling follow/route.ts).
-// context/FollowProvider's local Set is still what NotificationRow and
-// UserListRow read/write; migrating those is a separate pass.
-export function useUserProfile(username: string) {
-  const queryClient = useQueryClient();
-  const queryKey = profileQueryKey(username);
-  // The logged-in viewer, not the profile being looked at — needed so a
-  // follow/unfollow here can also patch the VIEWER's own following list
-  // (adding/removing this profile) and this profile's followers list
-  // (adding/removing the viewer), the two list caches this toggle
-  // actually affects.
-  const { user: viewer } = useCurrentUser();
-
+export function useFollowingList(username: string | undefined) {
   const query = useQuery({
-    queryKey,
+    queryKey: followingQueryKey(username),
     queryFn: async () => {
-      const result = await getUserProfile(username);
-      if (!result?.success) return null;
-      return result.user as PublicUserProfile;
+      const result = await getFollowing(username as string);
+      if (!result?.success) return [];
+      return result.users as FollowingUser[];
     },
     enabled: Boolean(username),
   });
 
-  // apiFetch never throws on a failed request (see utils/apiClient.ts) —
-  // same optimistic-update / snapshot / rollback-or-refetch pattern as
-  // useLikedPosts.toggleLike and useSavedPosts, just across three cache
-  // entries instead of one: this profile, the viewer's own following
-  // list, and this profile's followers list.
-  const toggleFollowMutation = useMutation({
-    mutationFn: () => toggleFollowUser(username),
-    onMutate: async () => {
-      const viewerFollowingKey = followingQueryKey(viewer?.username);
-      const targetFollowersKey = followersQueryKey(username);
+  return {
+    users: query.data ?? [],
+    isLoading: query.isLoading,
+  };
+}
+</file>
 
-      await Promise.all([
-        queryClient.cancelQueries({ queryKey }),
-        viewer
-          ? queryClient.cancelQueries({ queryKey: viewerFollowingKey })
-          : Promise.resolve(),
-        queryClient.cancelQueries({ queryKey: targetFollowersKey }),
-      ]);
+<file path="hooks/useLikedPosts.ts">
+"use client";
 
-      const previousProfile =
-        queryClient.getQueryData<PublicUserProfile | null>(queryKey);
-      const previousFollowingList = viewer
-        ? queryClient.getQueryData<FollowingUser[]>(viewerFollowingKey)
-        : undefined;
-      const previousFollowersList =
-        queryClient.getQueryData<FollowingUser[]>(targetFollowersKey);
+import { useMemo } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { getLikedPostIds, togglePostLike } from "@/services/likeService";
+import { POSTS_QUERY_KEY } from "@/hooks/usePosts";
+import { LIKES_QUERY_KEY } from "@/lib/queryKeys";
 
-      // Direction comes from the profile snapshot — if it's not loaded
-      // yet, there's nothing to derive "now following or not" from, so
-      // skip every optimistic update below and just let onSettled
-      // invalidate everything once the request actually resolves.
-      if (previousProfile) {
-        const nowFollowing = !previousProfile.isFollowing;
+export { LIKES_QUERY_KEY };
 
-        queryClient.setQueryData<PublicUserProfile | null>(queryKey, (old) => {
-          if (!old) return old;
-          return {
-            ...old,
-            isFollowing: nowFollowing,
-            followerCount: old.followerCount + (nowFollowing ? 1 : -1),
-          };
-        });
+type LikesData = { likedPostIds: string[] };
 
-        if (viewer) {
-          queryClient.setQueryData<FollowingUser[] | undefined>(
-            viewerFollowingKey,
-            (list) =>
-              addOrRemoveRow(list, nowFollowing, {
-                id: previousProfile.id,
-                username: previousProfile.username,
-                avatarSrc: previousProfile.avatarSrc,
-                toneTag: previousProfile.toneTag,
-              }),
-          );
+const EMPTY_LIKES_DATA: LikesData = { likedPostIds: [] };
 
-          queryClient.setQueryData<FollowingUser[] | undefined>(
-            targetFollowersKey,
-            (list) =>
-              addOrRemoveRow(list, nowFollowing, {
-                id: viewer.id,
-                username: viewer.username,
-                avatarSrc: viewer.avatarSrc,
-                toneTag: viewer.toneTag,
-              }),
-          );
-        }
-      }
+// apiFetch never throws on a failed request (see utils/apiClient.ts) —
+// same reasoning as useSavedPosts.ts's mutationFailed.
+function mutationFailed(result: { success: boolean } | undefined) {
+  return result === undefined || !result.success;
+}
 
-      return { previousProfile, previousFollowingList, previousFollowersList };
-    },
-    onSettled: (result, _error, _vars, context) => {
-      const viewerFollowingKey = followingQueryKey(viewer?.username);
-      const targetFollowersKey = followersQueryKey(username);
+// Same shape/spirit as useSavedPosts: "did I like this post" is kept as
+// its own small fetch rather than joined onto every /api/posts response,
+// so it works the same whether the Post objects came from the real feed,
+// a profile grid, or (today) the still-mock single-post page. The
+// optimistic-update / snapshot / rollback-or-refetch pattern is
+// identical to useSavedPosts.ts too.
+export function useLikedPosts() {
+  const queryClient = useQueryClient();
 
-      if (result === undefined || !result.success) {
-        if (context?.previousProfile !== undefined) {
-          queryClient.setQueryData(queryKey, context.previousProfile);
-        }
-        if (viewer && context?.previousFollowingList !== undefined) {
-          queryClient.setQueryData(
-            viewerFollowingKey,
-            context.previousFollowingList,
-          );
-        }
-        if (context?.previousFollowersList !== undefined) {
-          queryClient.setQueryData(
-            targetFollowersKey,
-            context.previousFollowersList,
-          );
-        }
-        return;
-      }
-
-      queryClient.invalidateQueries({ queryKey });
-      if (viewer) {
-        queryClient.invalidateQueries({ queryKey: viewerFollowingKey });
-      }
-      queryClient.invalidateQueries({ queryKey: targetFollowersKey });
+  const query = useQuery({
+    queryKey: LIKES_QUERY_KEY,
+    queryFn: async (): Promise<LikesData> => {
+      const result = await getLikedPostIds();
+      if (!result?.success) return EMPTY_LIKES_DATA;
+      return { likedPostIds: result.likedPostIds };
     },
   });
 
-  function toggleFollow() {
-    toggleFollowMutation.mutate();
+  const likedPostIds = useMemo(
+    () => new Set(query.data?.likedPostIds ?? []),
+    [query.data],
+  );
+
+  const toggleLikeMutation = useMutation({
+    mutationFn: (postId: string) => togglePostLike(postId),
+    onMutate: async (postId) => {
+      await queryClient.cancelQueries({ queryKey: LIKES_QUERY_KEY });
+      const previous = queryClient.getQueryData<LikesData>(LIKES_QUERY_KEY);
+      queryClient.setQueryData<LikesData>(LIKES_QUERY_KEY, (old) => {
+        const data = old ?? EMPTY_LIKES_DATA;
+        const currentlyLiked = data.likedPostIds.includes(postId);
+        return {
+          likedPostIds: currentlyLiked
+            ? data.likedPostIds.filter((id) => id !== postId)
+            : [...data.likedPostIds, postId],
+        };
+      });
+      return { previous };
+    },
+    onSettled: (result, _error, _postId, context) => {
+      if (mutationFailed(result)) {
+        if (context?.previous) {
+          queryClient.setQueryData(LIKES_QUERY_KEY, context.previous);
+        }
+      } else {
+        queryClient.invalidateQueries({ queryKey: LIKES_QUERY_KEY });
+        // A like flips Post.likeCount too (derived via _count) — refetch
+        // the feed so that number catches up with what just happened
+        // here, same as how a comment add/delete needs to below.
+        queryClient.invalidateQueries({ queryKey: POSTS_QUERY_KEY });
+      }
+    },
+  });
+
+  function isLiked(postId: string) {
+    return likedPostIds.has(postId);
+  }
+
+  function toggleLike(postId: string) {
+    toggleLikeMutation.mutate(postId);
   }
 
   return {
-    user: query.data ?? null,
-    // True only while the request is in flight — once it resolves,
-    // `user === null` means the fetch didn't succeed (not found, or a
-    // network failure), same "no separate error state" simplicity
-    // usePosts/useLikedPosts already use elsewhere in this app.
+    isLiked,
+    toggleLike,
     isLoading: query.isLoading,
-    toggleFollow,
+  };
+}
+</file>
+
+<file path="hooks/useSavedPosts.ts">
+"use client";
+
+import { useMemo } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  getSavedBundle,
+  toggleSavedPost,
+  createCollection as createCollectionRequest,
+  renameCollection as renameCollectionRequest,
+  deleteCollection as deleteCollectionRequest,
+  toggleCollectionPost,
+  type SavedCollection,
+} from "@/services/savedService";
+import { SAVED_QUERY_KEY } from "@/lib/queryKeys";
+
+export type Collection = { id: string; name: string };
+
+export { SAVED_QUERY_KEY };
+
+type SavedData = {
+  savedPostIds: string[];
+  collections: SavedCollection[];
+};
+
+const EMPTY_SAVED_DATA: SavedData = { savedPostIds: [], collections: [] };
+
+// apiFetch never throws on a failed request — network errors, timeouts,
+// and non-2xx responses all resolve to a `{ success: false }` object
+// rather than rejecting (see utils/apiClient.ts). So "did this mutation
+// fail" has to be read off the resolved result, not caught via
+// useMutation's onError — that's why every mutation below checks
+// `result.success` inside onSettled instead.
+function mutationFailed(result: { success: boolean } | undefined) {
+  return result === undefined || !result.success;
+}
+
+// Replaces context/SavedPostsProvider.tsx. Same public shape (isSaved,
+// toggleSave, collections, createCollection, renameCollection,
+// deleteCollection, isPostInCollection, toggleCollectionForPost,
+// getPostIdsForCollection, savedCount) so every existing consumer keeps
+// working with only an import-path change — except createCollection,
+// which is now async (it has to round-trip to the server to get a real
+// id back), so callers that used its return value synchronously need an
+// await. No provider wrapping needed: react-query already dedupes/shares
+// this cache across every component that calls the hook, same as
+// usePosts.
+//
+// Every mutation below updates the cache optimistically in onMutate
+// (so the UI reacts instantly), snapshots the prior cache so it can be
+// restored, and in onSettled either rolls back to that snapshot (on
+// failure) or leaves the optimistic value in place and refetches to
+// reconcile with the server (on success) — same pattern throughout.
+export function useSavedPosts() {
+  const queryClient = useQueryClient();
+
+  const query = useQuery({
+    queryKey: SAVED_QUERY_KEY,
+    queryFn: async (): Promise<SavedData> => {
+      const result = await getSavedBundle();
+      if (!result?.success) return EMPTY_SAVED_DATA;
+      return {
+        savedPostIds: result.savedPostIds,
+        collections: result.collections,
+      };
+    },
+  });
+
+  const savedPostIds = useMemo(
+    () => new Set(query.data?.savedPostIds ?? []),
+    [query.data],
+  );
+  const collections: Collection[] = query.data?.collections ?? [];
+
+  async function snapshotAndCancel() {
+    await queryClient.cancelQueries({ queryKey: SAVED_QUERY_KEY });
+    return queryClient.getQueryData<SavedData>(SAVED_QUERY_KEY);
+  }
+
+  function rollback(previous: SavedData | undefined) {
+    if (previous) {
+      queryClient.setQueryData(SAVED_QUERY_KEY, previous);
+    }
+  }
+
+  function refetch() {
+    return queryClient.invalidateQueries({ queryKey: SAVED_QUERY_KEY });
+  }
+
+  const toggleSaveMutation = useMutation({
+    mutationFn: (postId: string) => toggleSavedPost(postId),
+    onMutate: async (postId) => {
+      const previous = await snapshotAndCancel();
+      queryClient.setQueryData<SavedData>(SAVED_QUERY_KEY, (old) => {
+        const data = old ?? EMPTY_SAVED_DATA;
+        const currentlySaved = data.savedPostIds.includes(postId);
+        if (currentlySaved) {
+          // Fully unsaving removes it from every collection too — a
+          // post can't sit in a folder while not being saved at all,
+          // same cascade the server applies.
+          return {
+            savedPostIds: data.savedPostIds.filter((id) => id !== postId),
+            collections: data.collections.map((c) => ({
+              ...c,
+              postIds: c.postIds.filter((id) => id !== postId),
+            })),
+          };
+        }
+        return { ...data, savedPostIds: [...data.savedPostIds, postId] };
+      });
+      return { previous };
+    },
+    onSettled: (result, _error, _postId, context) => {
+      if (mutationFailed(result)) {
+        rollback(context?.previous);
+      } else {
+        refetch();
+      }
+    },
+  });
+
+  const createCollectionMutation = useMutation({
+    mutationFn: (name: string) => createCollectionRequest(name),
+    onMutate: async (name) => {
+      const previous = await snapshotAndCancel();
+      const tempId = `temp-${crypto.randomUUID()}`;
+      queryClient.setQueryData<SavedData>(SAVED_QUERY_KEY, (old) => {
+        const data = old ?? EMPTY_SAVED_DATA;
+        return {
+          ...data,
+          collections: [...data.collections, { id: tempId, name, postIds: [] }],
+        };
+      });
+      return { previous };
+    },
+    onSettled: (result, _error, _name, context) => {
+      if (mutationFailed(result)) {
+        rollback(context?.previous);
+      } else {
+        // Swaps the temp-id placeholder for the real collection —
+        // mutateAsync's resolved value (used by createCollection below)
+        // already has the real id regardless of this refetch.
+        refetch();
+      }
+    },
+  });
+
+  const renameCollectionMutation = useMutation({
+    mutationFn: ({
+      collectionId,
+      name,
+    }: {
+      collectionId: string;
+      name: string;
+    }) => renameCollectionRequest(collectionId, name),
+    onMutate: async ({ collectionId, name }) => {
+      const previous = await snapshotAndCancel();
+      queryClient.setQueryData<SavedData>(SAVED_QUERY_KEY, (old) => {
+        const data = old ?? EMPTY_SAVED_DATA;
+        return {
+          ...data,
+          collections: data.collections.map((c) =>
+            c.id === collectionId ? { ...c, name } : c,
+          ),
+        };
+      });
+      return { previous };
+    },
+    onSettled: (result, _error, _vars, context) => {
+      if (mutationFailed(result)) {
+        rollback(context?.previous);
+      } else {
+        refetch();
+      }
+    },
+  });
+
+  const deleteCollectionMutation = useMutation({
+    mutationFn: (collectionId: string) => deleteCollectionRequest(collectionId),
+    onMutate: async (collectionId) => {
+      const previous = await snapshotAndCancel();
+      queryClient.setQueryData<SavedData>(SAVED_QUERY_KEY, (old) => {
+        const data = old ?? EMPTY_SAVED_DATA;
+        // Only removes the folder/grouping — savedPostIds is untouched,
+        // matching the server: deleting a collection never unsaves the
+        // posts inside it.
+        return {
+          ...data,
+          collections: data.collections.filter((c) => c.id !== collectionId),
+        };
+      });
+      return { previous };
+    },
+    onSettled: (result, _error, _collectionId, context) => {
+      if (mutationFailed(result)) {
+        rollback(context?.previous);
+      } else {
+        refetch();
+      }
+    },
+  });
+
+  const toggleCollectionPostMutation = useMutation({
+    mutationFn: ({
+      postId,
+      collectionId,
+    }: {
+      postId: string;
+      collectionId: string;
+    }) => toggleCollectionPost(collectionId, postId),
+    onMutate: async ({ postId, collectionId }) => {
+      const previous = await snapshotAndCancel();
+      queryClient.setQueryData<SavedData>(SAVED_QUERY_KEY, (old) => {
+        const data = old ?? EMPTY_SAVED_DATA;
+        const target = data.collections.find((c) => c.id === collectionId);
+        const wasInCollection = target?.postIds.includes(postId) ?? false;
+        return {
+          // Adding to a collection implies the post is saved overall
+          // too — same as toggleSaveMutation, but only in the adding
+          // direction; removing from one collection never unsaves it.
+          savedPostIds:
+            !wasInCollection && !data.savedPostIds.includes(postId)
+              ? [...data.savedPostIds, postId]
+              : data.savedPostIds,
+          collections: data.collections.map((c) =>
+            c.id === collectionId
+              ? {
+                  ...c,
+                  postIds: wasInCollection
+                    ? c.postIds.filter((id) => id !== postId)
+                    : [...c.postIds, postId],
+                }
+              : c,
+          ),
+        };
+      });
+      return { previous };
+    },
+    onSettled: (result, _error, _vars, context) => {
+      if (mutationFailed(result)) {
+        rollback(context?.previous);
+      } else {
+        refetch();
+      }
+    },
+  });
+
+  function isSaved(postId: string) {
+    return savedPostIds.has(postId);
+  }
+
+  function toggleSave(postId: string) {
+    toggleSaveMutation.mutate(postId);
+  }
+
+  // Async, unlike the old context version — resolves to the new
+  // collection's id (or null on failure) once the server round-trip
+  // completes, since there's no client-generated id to hand back
+  // synchronously anymore. Reads off mutateAsync's own resolved value,
+  // not the cache, so it's correct even though the cache briefly holds
+  // a temp-id placeholder (see createCollectionMutation.onMutate above).
+  async function createCollection(name: string): Promise<string | null> {
+    const result = await createCollectionMutation.mutateAsync(name);
+    return result?.success ? result.collection.id : null;
+  }
+
+  function renameCollection(collectionId: string, name: string) {
+    renameCollectionMutation.mutate({ collectionId, name });
+  }
+
+  function deleteCollection(collectionId: string) {
+    deleteCollectionMutation.mutate(collectionId);
+  }
+
+  function isPostInCollection(postId: string, collectionId: string) {
+    const collection = query.data?.collections.find(
+      (c) => c.id === collectionId,
+    );
+    return collection?.postIds.includes(postId) ?? false;
+  }
+
+  function toggleCollectionForPost(postId: string, collectionId: string) {
+    toggleCollectionPostMutation.mutate({ postId, collectionId });
+  }
+
+  function getPostIdsForCollection(collectionId: string): string[] {
+    return (
+      query.data?.collections.find((c) => c.id === collectionId)?.postIds ?? []
+    );
+  }
+
+  return {
+    isSaved,
+    toggleSave,
+    collections,
+    createCollection,
+    renameCollection,
+    deleteCollection,
+    isPostInCollection,
+    toggleCollectionForPost,
+    getPostIdsForCollection,
+    savedCount: savedPostIds.size,
+    isLoading: query.isLoading,
   };
 }
 </file>
@@ -8963,144 +8784,192 @@ export function isMockFollowerOfCurrentUser(username: string): boolean {
 }
 </file>
 
-<file path="hooks/useCurrentUser.ts">
+<file path="hooks/useUserProfile.ts">
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
-import { getCurrentUser } from "@/services/authService";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { getUserProfile, toggleFollowUser } from "@/services/userService";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+import {
+  followingQueryKey,
+  type FollowingUser,
+} from "@/hooks/useFollowingList";
+import { followersQueryKey } from "@/hooks/useFollowersList";
 import type { ProductTag } from "@/types/post";
-import { CURRENT_USER_QUERY_KEY } from "@/lib/queryKeys";
+import { profileQueryKey } from "@/lib/queryKeys";
 
-export type CurrentUser = {
+export type PublicUserProfile = {
   id: string;
   username: string;
-  email: string;
   avatarSrc: string;
   bio: string;
   toneTag: string;
   pinnedRoutine: ProductTag[];
-  onboardingCompletedAt: string | null;
-  // Real counts off the Follow table now (see app/api/user/me/route.ts),
-  // same _count pattern GET /api/user/[username] already used for
-  // someone else's profile — not the CURRENT_USER_PROFILE mock /
-  // FollowProvider's local state this used to read.
   followerCount: number;
   followingCount: number;
+  isFollowing: boolean;
+  followsMe: boolean;
 };
 
-// Replaces AuthProvider's isAuthenticated boolean entirely. Session
-// state now comes from actually asking the backend "who am I" via the
-// existing session cookies, not a client-only flag that got set once by
-// VerifyContent and then forgotten. This is what fixes the old gap where
-// refreshing the page dropped you back to "logged out" even with valid
-// cookies still present — useQuery refetches on mount automatically.
-export function useCurrentUser() {
-  const query = useQuery({
-    queryKey: CURRENT_USER_QUERY_KEY,
-    queryFn: async () => {
-      const result = await getCurrentUser();
-      if (!result?.success) return null;
-      return result.user as CurrentUser;
-    },
-  });
+export { profileQueryKey };
 
-  const user = query.data ?? null;
-
-  return {
-    user,
-    isAuthenticated: Boolean(user),
-    // Only meaningful once actually authenticated — a logged-out visitor
-    // isn't "needing onboarding," they're just logged out, which
-    // RequireAuth already handles as a separate, earlier check.
-    needsOnboarding: Boolean(user) && user?.onboardingCompletedAt == null,
-    isLoading: query.isLoading,
-    refetch: query.refetch,
-  };
+// Adds/removes one row from a cached following/followers list, keyed by
+// username — used below to keep the Following/Followers pages in sync
+// with a follow toggled from elsewhere (a post card, someone's profile
+// header) without those list hooks needing to know anything happened.
+function addOrRemoveRow(
+  list: FollowingUser[] | undefined,
+  adding: boolean,
+  row: FollowingUser,
+): FollowingUser[] | undefined {
+  if (!list) return list;
+  if (adding) {
+    return list.some((u) => u.username === row.username)
+      ? list
+      : [row, ...list];
+  }
+  return list.filter((u) => u.username !== row.username);
 }
-</file>
 
-<file path="hooks/usePosts.ts">
-"use client";
-
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Post } from "@/types/post";
-import {
-  listPosts,
-  deletePost as deletePostRequest,
-} from "@/services/postService";
-import { POSTS_QUERY_KEY } from "@/lib/queryKeys";
-
-// Exported so hooks that mutate a post's derived counts from elsewhere
-// (useLikedPosts' toggleLike, useComments' add/delete) can invalidate
-// this cache too — a like/comment changes Post.likeCount/commentCount
-// (both derived via _count, per prisma/schema.prisma) even though those
-// hooks never touch POSTS_QUERY_KEY's data directly.
-export { POSTS_QUERY_KEY };
-
-// Replaces context/PostsProvider.tsx. Same query key, same shape — react-
-// query already dedupes/shares the cache across every component that
-// calls this, so HomeFeed and PostCard both calling usePosts() does NOT
-// mean two separate fetches. No provider wrapping needed, which also
-// means this only ever runs on pages that actually render one of those
-// two components — not on every page in the app (that was what caused
-// the /auth refresh-token 401 loop: PostsProvider used to sit in
-// app/layout.tsx, so it fired on /auth too, on every logged-out load).
-export function usePosts() {
+// Backs /u/[username]'s ProfileHeader AND PostCard's follow button — the
+// two places that now read/write the real Follow table (see
+// app/api/user/[username]/route.ts and its sibling follow/route.ts).
+// context/FollowProvider's local Set is still what NotificationRow and
+// UserListRow read/write; migrating those is a separate pass.
+export function useUserProfile(username: string) {
   const queryClient = useQueryClient();
+  const queryKey = profileQueryKey(username);
+  // The logged-in viewer, not the profile being looked at — needed so a
+  // follow/unfollow here can also patch the VIEWER's own following list
+  // (adding/removing this profile) and this profile's followers list
+  // (adding/removing the viewer), the two list caches this toggle
+  // actually affects.
+  const { user: viewer } = useCurrentUser();
 
   const query = useQuery({
-    queryKey: POSTS_QUERY_KEY,
+    queryKey,
     queryFn: async () => {
-      const result = await listPosts();
-      if (!result?.success) return [];
-      return result.posts;
+      const result = await getUserProfile(username);
+      if (!result?.success) return null;
+      return result.user as PublicUserProfile;
     },
+    enabled: Boolean(username),
   });
 
-  const posts = query.data ?? [];
+  // apiFetch never throws on a failed request (see utils/apiClient.ts) —
+  // same optimistic-update / snapshot / rollback-or-refetch pattern as
+  // useLikedPosts.toggleLike and useSavedPosts, just across three cache
+  // entries instead of one: this profile, the viewer's own following
+  // list, and this profile's followers list.
+  const toggleFollowMutation = useMutation({
+    mutationFn: () => toggleFollowUser(username),
+    onMutate: async () => {
+      const viewerFollowingKey = followingQueryKey(viewer?.username);
+      const targetFollowersKey = followersQueryKey(username);
 
-  // No-op passthrough — real creation goes through useCreatePost, which
-  // already invalidates POSTS_QUERY_KEY on success and lets that refetch
-  // put the new post into `posts`, instead of trusting a client-built
-  // object as the source of truth.
-  function addPost(_post: Post) {}
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey }),
+        viewer
+          ? queryClient.cancelQueries({ queryKey: viewerFollowingKey })
+          : Promise.resolve(),
+        queryClient.cancelQueries({ queryKey: targetFollowersKey }),
+      ]);
 
-  // apiFetch never throws on a failed request — network errors, timeouts,
-  // and non-2xx responses all resolve to a `{ success: false }` object
-  // rather than rejecting (see utils/apiClient.ts and the same reasoning
-  // in useSavedPosts.ts) — so failure has to be read off the resolved
-  // result inside onSettled, not caught via onError.
-  const deletePostMutation = useMutation({
-    mutationFn: (postId: string) => deletePostRequest(postId),
-    onMutate: async (postId) => {
-      await queryClient.cancelQueries({ queryKey: POSTS_QUERY_KEY });
-      const previous = queryClient.getQueryData<Post[]>(POSTS_QUERY_KEY);
-      queryClient.setQueryData<Post[]>(POSTS_QUERY_KEY, (prev) =>
-        (prev ?? []).filter((p) => p.id !== postId),
-      );
-      return { previous };
-    },
-    onSettled: (result, _error, _postId, context) => {
-      if (result === undefined || !result.success) {
-        // Failed — put the removed post right back where it was rather
-        // than leaving the feed silently short one item.
-        if (context?.previous) {
-          queryClient.setQueryData(POSTS_QUERY_KEY, context.previous);
+      const previousProfile =
+        queryClient.getQueryData<PublicUserProfile | null>(queryKey);
+      const previousFollowingList = viewer
+        ? queryClient.getQueryData<FollowingUser[]>(viewerFollowingKey)
+        : undefined;
+      const previousFollowersList =
+        queryClient.getQueryData<FollowingUser[]>(targetFollowersKey);
+
+      // Direction comes from the profile snapshot — if it's not loaded
+      // yet, there's nothing to derive "now following or not" from, so
+      // skip every optimistic update below and just let onSettled
+      // invalidate everything once the request actually resolves.
+      if (previousProfile) {
+        const nowFollowing = !previousProfile.isFollowing;
+
+        queryClient.setQueryData<PublicUserProfile | null>(queryKey, (old) => {
+          if (!old) return old;
+          return {
+            ...old,
+            isFollowing: nowFollowing,
+            followerCount: old.followerCount + (nowFollowing ? 1 : -1),
+          };
+        });
+
+        if (viewer) {
+          queryClient.setQueryData<FollowingUser[] | undefined>(
+            viewerFollowingKey,
+            (list) =>
+              addOrRemoveRow(list, nowFollowing, {
+                id: previousProfile.id,
+                username: previousProfile.username,
+                avatarSrc: previousProfile.avatarSrc,
+                toneTag: previousProfile.toneTag,
+              }),
+          );
+
+          queryClient.setQueryData<FollowingUser[] | undefined>(
+            targetFollowersKey,
+            (list) =>
+              addOrRemoveRow(list, nowFollowing, {
+                id: viewer.id,
+                username: viewer.username,
+                avatarSrc: viewer.avatarSrc,
+                toneTag: viewer.toneTag,
+              }),
+          );
         }
-      } else {
-        // Succeeded — the optimistic removal already matches server
-        // state, but refetch anyway so the list is fully in sync (e.g.
-        // with another post that became visible now this one's gone).
-        queryClient.invalidateQueries({ queryKey: POSTS_QUERY_KEY });
       }
+
+      return { previousProfile, previousFollowingList, previousFollowersList };
+    },
+    onSettled: (result, _error, _vars, context) => {
+      const viewerFollowingKey = followingQueryKey(viewer?.username);
+      const targetFollowersKey = followersQueryKey(username);
+
+      if (result === undefined || !result.success) {
+        if (context?.previousProfile !== undefined) {
+          queryClient.setQueryData(queryKey, context.previousProfile);
+        }
+        if (viewer && context?.previousFollowingList !== undefined) {
+          queryClient.setQueryData(
+            viewerFollowingKey,
+            context.previousFollowingList,
+          );
+        }
+        if (context?.previousFollowersList !== undefined) {
+          queryClient.setQueryData(
+            targetFollowersKey,
+            context.previousFollowersList,
+          );
+        }
+        return;
+      }
+
+      queryClient.invalidateQueries({ queryKey });
+      if (viewer) {
+        queryClient.invalidateQueries({ queryKey: viewerFollowingKey });
+      }
+      queryClient.invalidateQueries({ queryKey: targetFollowersKey });
     },
   });
 
-  function deletePost(postId: string) {
-    deletePostMutation.mutate(postId);
+  function toggleFollow() {
+    toggleFollowMutation.mutate();
   }
 
-  return { posts, isLoading: query.isLoading, addPost, deletePost };
+  return {
+    user: query.data ?? null,
+    // True only while the request is in flight — once it resolves,
+    // `user === null` means the fetch didn't succeed (not found, or a
+    // network failure), same "no separate error state" simplicity
+    // usePosts/useLikedPosts already use elsewhere in this app.
+    isLoading: query.isLoading,
+    toggleFollow,
+  };
 }
 </file>
 
@@ -9136,199 +9005,6 @@ export type Post = {
   comments?: Comment[]; // seed/existing comments, if any
   createdAt: string; // ISO — used for chronological sort
 };
-</file>
-
-<file path="app/api/user/me/route.ts">
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { USERNAME_PATTERN, USERNAME_FORMAT_ERROR } from "@/constants/username";
-import { getFullCurrentUser } from "@/lib/users";
-
-// x-user-id is set by proxy.ts, which already validated the access/
-// refresh token cookies before this route ever runs — this handler
-// trusts that header rather than re-verifying anything itself.
-export async function GET(req: NextRequest) {
-  const userId = req.headers.get("x-user-id");
-
-  if (!userId) {
-    return NextResponse.json(
-      { success: false, error: "Unauthorized" },
-      { status: 401 },
-    );
-  }
-
-  const user = await getFullCurrentUser(userId);
-  if (!user) {
-    return NextResponse.json(
-      { success: false, error: "Unauthorized" },
-      { status: 401 },
-    );
-  }
-
-  return NextResponse.json({ success: true, user });
-}
-
-// Own-profile edits (Edit Profile screen). Same trust model as GET and
-// as /api/user/onboarding — proxy.ts has already validated the session,
-// this route just trusts x-user-id. Every field is optional here (unlike
-// onboarding's POST, which requires username): a PATCH only touches
-// whatever the client actually sent.
-export async function PATCH(req: NextRequest) {
-  try {
-    const userId = req.headers.get("x-user-id");
-    if (!userId) {
-      return NextResponse.json(
-        { success: false, error: "Unauthorized" },
-        { status: 401 },
-      );
-    }
-
-    const { username, avatarSrc, toneTag, bio, pinnedRoutine } =
-      await req.json();
-
-    const data: {
-      username?: string;
-      avatarSrc?: string;
-      toneTag?: string;
-      bio?: string;
-    } = {};
-
-    if (username !== undefined) {
-      if (
-        typeof username !== "string" ||
-        !USERNAME_PATTERN.test(username.trim().toLowerCase())
-      ) {
-        return NextResponse.json(
-          { success: false, error: USERNAME_FORMAT_ERROR },
-          { status: 400 },
-        );
-      }
-
-      const normalizedUsername = username.trim().toLowerCase();
-
-      const existing = await prisma.user.findUnique({
-        where: { username: normalizedUsername },
-      });
-
-      if (existing && existing.id !== userId) {
-        return NextResponse.json(
-          { success: false, error: "That username is already taken." },
-          { status: 409 },
-        );
-      }
-
-      data.username = normalizedUsername;
-    }
-
-    // Same guard as onboarding: only ever a URL that actually came from
-    // our own Cloudinary avatars folder, via /api/upload/signature —
-    // never an arbitrary external URL submitted directly.
-    if (avatarSrc !== undefined) {
-      const isValidAvatarSrc =
-        typeof avatarSrc === "string" &&
-        avatarSrc.includes(
-          `res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}/`,
-        ) &&
-        avatarSrc.includes("/vanity/avatars/");
-
-      if (!isValidAvatarSrc) {
-        return NextResponse.json(
-          { success: false, error: "Invalid avatar image." },
-          { status: 400 },
-        );
-      }
-
-      data.avatarSrc = avatarSrc;
-    }
-
-    if (toneTag !== undefined) {
-      if (typeof toneTag !== "string") {
-        return NextResponse.json(
-          { success: false, error: "Invalid tone tag." },
-          { status: 400 },
-        );
-      }
-      data.toneTag = toneTag;
-    }
-
-    if (bio !== undefined) {
-      if (typeof bio !== "string") {
-        return NextResponse.json(
-          { success: false, error: "Invalid bio." },
-          { status: 400 },
-        );
-      }
-      data.bio = bio;
-    }
-
-    // pinnedRoutine, if sent, is validated separately since it isn't a
-    // plain scalar column — it's the RoutineItem rows, replaced wholesale
-    // rather than diffed, same as how onboarding treats the rest of the
-    // profile as "just overwrite it with what was submitted."
-    let routineItemsInput: { label: string }[] | null = null;
-    if (pinnedRoutine !== undefined) {
-      if (
-        !Array.isArray(pinnedRoutine) ||
-        !pinnedRoutine.every(
-          (item) =>
-            item && typeof item === "object" && typeof item.label === "string",
-        )
-      ) {
-        return NextResponse.json(
-          { success: false, error: "Invalid pinned routine." },
-          { status: 400 },
-        );
-      }
-      routineItemsInput = pinnedRoutine.map((item: { label: string }) => ({
-        label: item.label,
-      }));
-    }
-
-    const [user] = await prisma.$transaction([
-      prisma.user.update({ where: { id: userId }, data }),
-      ...(routineItemsInput
-        ? [
-            prisma.routineItem.deleteMany({ where: { userId } }),
-            prisma.routineItem.createMany({
-              data: routineItemsInput.map((item, index) => ({
-                userId,
-                label: item.label,
-                order: index,
-              })),
-            }),
-          ]
-        : []),
-    ]);
-
-    const routineItems = await prisma.routineItem.findMany({
-      where: { userId },
-      orderBy: { order: "asc" },
-    });
-
-    return NextResponse.json({
-      success: true,
-      user: {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        avatarSrc: user.avatarSrc,
-        bio: user.bio,
-        toneTag: user.toneTag,
-        pinnedRoutine: routineItems.map((item) => ({
-          id: item.id,
-          label: item.label,
-        })),
-        onboardingCompletedAt: user.onboardingCompletedAt,
-      },
-    });
-  } catch (err) {
-    console.error("update profile error", err);
-    return NextResponse.json(
-      { success: false, error: "Server error" },
-      { status: 500 },
-    );
-  }
-}
 </file>
 
 <file path="app/p/[postId]/page.tsx">
@@ -9594,73 +9270,6 @@ export default function SavedCollectionPage({ params }: Props) {
 }
 </file>
 
-<file path="components/auth/RequireAuth.tsx">
-"use client";
-
-import { useEffect, type ReactNode } from "react";
-import { useRouter, usePathname } from "next/navigation";
-import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { PATHS } from "@/utils/paths";
-import { AuthGateModal } from "./AuthGateModal";
-
-type Props = {
-  children: ReactNode;
-  message?: string;
-  fallback?: ReactNode;
-};
-
-// Wraps an entire page that requires a real session — Home, Explore,
-// Saved, Notifications, your own Profile, Create, Onboarding, etc.
-// Nothing to browse read-only behind the modal here (unlike the
-// action-level gates on /p/[postId] and /u/[username]), so it's
-// non-dismissible: signing in is the only way forward.
-//
-// Also handles the "logged in but hasn't finished onboarding yet" case —
-// any page other than /onboarding itself redirects there first. The
-// onboarding page is naturally exempt from this without needing a
-// special prop: pathname === PATHS.ONBOARDING is exactly the condition
-// that skips the redirect below.
-export function RequireAuth({ children, message, fallback = null }: Props) {
-  const { isAuthenticated, needsOnboarding, isLoading } = useCurrentUser();
-  const router = useRouter();
-  const pathname = usePathname();
-
-  const shouldRedirectToOnboarding =
-    isAuthenticated && needsOnboarding && pathname !== PATHS.ONBOARDING;
-
-  useEffect(() => {
-    if (shouldRedirectToOnboarding) {
-      router.replace(PATHS.ONBOARDING);
-    }
-  }, [shouldRedirectToOnboarding, router]);
-
-  // isAuthenticated starts false before the session check resolves, not
-  // just when someone's genuinely logged out — without this check, an
-  // actually-logged-in person would see the sign-in gate flash briefly on
-  // every full page load, before the real /api/user/me result comes back.
-  // On pages that prefetch currentUser server-side (see app/page.tsx),
-  // this resolves instantly. Everywhere else, this is a real — if
-  // brief — loading window, so show something instead of a blank page.
-  // Defaults to rendering nothing (unchanged behavior for every page that
-  // doesn't pass one), but a page with its own real skeleton — Home's
-  // HomeFeedSkeleton, say — can pass it in so this loading window looks
-  // like the actual page instead of a blank flash or a generic blob.
-  if (isLoading) return <>{fallback}</>;
-
-  if (!isAuthenticated) {
-    return <AuthGateModal open dismissible={false} message={message} />;
-  }
-
-  if (shouldRedirectToOnboarding) {
-    // The redirect effect above will fire; render nothing in the
-    // meantime rather than flashing the real page content first.
-    return null;
-  }
-
-  return <>{children}</>;
-}
-</file>
-
 <file path="components/onboarding/OnboardingFlow.tsx">
 "use client";
 
@@ -9900,6 +9509,147 @@ export function OnboardingFlow() {
 }
 </file>
 
+<file path="hooks/useCurrentUser.ts">
+"use client";
+
+import { useQuery } from "@tanstack/react-query";
+import { getCurrentUser } from "@/services/authService";
+import type { ProductTag } from "@/types/post";
+import { CURRENT_USER_QUERY_KEY } from "@/lib/queryKeys";
+
+export type CurrentUser = {
+  id: string;
+  username: string;
+  email: string;
+  avatarSrc: string;
+  bio: string;
+  toneTag: string;
+  pinnedRoutine: ProductTag[];
+  onboardingCompletedAt: string | null;
+  // Real counts off the Follow table now (see app/api/user/me/route.ts),
+  // same _count pattern GET /api/user/[username] already used for
+  // someone else's profile — not the CURRENT_USER_PROFILE mock /
+  // FollowProvider's local state this used to read.
+  followerCount: number;
+  followingCount: number;
+};
+
+// Replaces AuthProvider's isAuthenticated boolean entirely. Session
+// state now comes from actually asking the backend "who am I" via the
+// existing session cookies, not a client-only flag that got set once by
+// VerifyContent and then forgotten. This is what fixes the old gap where
+// refreshing the page dropped you back to "logged out" even with valid
+// cookies still present — useQuery refetches on mount automatically.
+export function useCurrentUser() {
+  const query = useQuery({
+    queryKey: CURRENT_USER_QUERY_KEY,
+    queryFn: async () => {
+      const result = await getCurrentUser();
+      if (!result?.success) return null;
+      return result.user as CurrentUser;
+    },
+  });
+
+  const user = query.data ?? null;
+
+  return {
+    user,
+    isAuthenticated: Boolean(user),
+    // Only meaningful once actually authenticated — a logged-out visitor
+    // isn't "needing onboarding," they're just logged out, which
+    // RequireAuth already handles as a separate, earlier check.
+    needsOnboarding: Boolean(user) && user?.onboardingCompletedAt == null,
+    isLoading: query.isLoading,
+    refetch: query.refetch,
+  };
+}
+</file>
+
+<file path="hooks/usePosts.ts">
+"use client";
+
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { Post } from "@/types/post";
+import {
+  listPosts,
+  deletePost as deletePostRequest,
+} from "@/services/postService";
+import { POSTS_QUERY_KEY } from "@/lib/queryKeys";
+
+// Exported so hooks that mutate a post's derived counts from elsewhere
+// (useLikedPosts' toggleLike, useComments' add/delete) can invalidate
+// this cache too — a like/comment changes Post.likeCount/commentCount
+// (both derived via _count, per prisma/schema.prisma) even though those
+// hooks never touch POSTS_QUERY_KEY's data directly.
+export { POSTS_QUERY_KEY };
+
+// Replaces context/PostsProvider.tsx. Same query key, same shape — react-
+// query already dedupes/shares the cache across every component that
+// calls this, so HomeFeed and PostCard both calling usePosts() does NOT
+// mean two separate fetches. No provider wrapping needed, which also
+// means this only ever runs on pages that actually render one of those
+// two components — not on every page in the app (that was what caused
+// the /auth refresh-token 401 loop: PostsProvider used to sit in
+// app/layout.tsx, so it fired on /auth too, on every logged-out load).
+export function usePosts() {
+  const queryClient = useQueryClient();
+
+  const query = useQuery({
+    queryKey: POSTS_QUERY_KEY,
+    queryFn: async () => {
+      const result = await listPosts();
+      if (!result?.success) return [];
+      return result.posts;
+    },
+  });
+
+  const posts = query.data ?? [];
+
+  // No-op passthrough — real creation goes through useCreatePost, which
+  // already invalidates POSTS_QUERY_KEY on success and lets that refetch
+  // put the new post into `posts`, instead of trusting a client-built
+  // object as the source of truth.
+  function addPost(_post: Post) {}
+
+  // apiFetch never throws on a failed request — network errors, timeouts,
+  // and non-2xx responses all resolve to a `{ success: false }` object
+  // rather than rejecting (see utils/apiClient.ts and the same reasoning
+  // in useSavedPosts.ts) — so failure has to be read off the resolved
+  // result inside onSettled, not caught via onError.
+  const deletePostMutation = useMutation({
+    mutationFn: (postId: string) => deletePostRequest(postId),
+    onMutate: async (postId) => {
+      await queryClient.cancelQueries({ queryKey: POSTS_QUERY_KEY });
+      const previous = queryClient.getQueryData<Post[]>(POSTS_QUERY_KEY);
+      queryClient.setQueryData<Post[]>(POSTS_QUERY_KEY, (prev) =>
+        (prev ?? []).filter((p) => p.id !== postId),
+      );
+      return { previous };
+    },
+    onSettled: (result, _error, _postId, context) => {
+      if (result === undefined || !result.success) {
+        // Failed — put the removed post right back where it was rather
+        // than leaving the feed silently short one item.
+        if (context?.previous) {
+          queryClient.setQueryData(POSTS_QUERY_KEY, context.previous);
+        }
+      } else {
+        // Succeeded — the optimistic removal already matches server
+        // state, but refetch anyway so the list is fully in sync (e.g.
+        // with another post that became visible now this one's gone).
+        queryClient.invalidateQueries({ queryKey: POSTS_QUERY_KEY });
+      }
+    },
+  });
+
+  function deletePost(postId: string) {
+    deletePostMutation.mutate(postId);
+  }
+
+  return { posts, isLoading: query.isLoading, addPost, deletePost };
+}
+</file>
+
 <file path="services/postService.ts">
 import { apiFetch } from "@/utils/apiClient";
 import { API_ROUTES } from "@/utils/apiRoutes";
@@ -10086,51 +9836,197 @@ export type Comment = {
 };
 </file>
 
-<file path=".gitignore">
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+<file path="app/api/user/me/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { USERNAME_PATTERN, USERNAME_FORMAT_ERROR } from "@/constants/username";
+import { getFullCurrentUser } from "@/lib/users";
 
-# dependencies
-/node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
+// x-user-id is set by proxy.ts, which already validated the access/
+// refresh token cookies before this route ever runs — this handler
+// trusts that header rather than re-verifying anything itself.
+export async function GET(req: NextRequest) {
+  const userId = req.headers.get("x-user-id");
 
-# testing
-/coverage
+  if (!userId) {
+    return NextResponse.json(
+      { success: false, error: "Unauthorized" },
+      { status: 401 },
+    );
+  }
 
-# next.js
-/.next/
-/out/
+  const user = await getFullCurrentUser(userId);
+  if (!user) {
+    return NextResponse.json(
+      { success: false, error: "Unauthorized" },
+      { status: 401 },
+    );
+  }
 
-# production
-/build
+  return NextResponse.json({ success: true, user });
+}
 
-# misc
-.DS_Store
-*.pem
+// Own-profile edits (Edit Profile screen). Same trust model as GET and
+// as /api/user/onboarding — proxy.ts has already validated the session,
+// this route just trusts x-user-id. Every field is optional here (unlike
+// onboarding's POST, which requires username): a PATCH only touches
+// whatever the client actually sent.
+export async function PATCH(req: NextRequest) {
+  try {
+    const userId = req.headers.get("x-user-id");
+    if (!userId) {
+      return NextResponse.json(
+        { success: false, error: "Unauthorized" },
+        { status: 401 },
+      );
+    }
 
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
+    const { username, avatarSrc, toneTag, bio, pinnedRoutine } =
+      await req.json();
 
-# env files (can opt-in for committing if needed)
-.env*
+    const data: {
+      username?: string;
+      avatarSrc?: string;
+      toneTag?: string;
+      bio?: string;
+    } = {};
 
-# vercel
-.vercel
+    if (username !== undefined) {
+      if (
+        typeof username !== "string" ||
+        !USERNAME_PATTERN.test(username.trim().toLowerCase())
+      ) {
+        return NextResponse.json(
+          { success: false, error: USERNAME_FORMAT_ERROR },
+          { status: 400 },
+        );
+      }
 
-# typescript
-*.tsbuildinfo
-next-env.d.ts
+      const normalizedUsername = username.trim().toLowerCase();
 
-/lib/generated/prisma
-/.agents
+      const existing = await prisma.user.findUnique({
+        where: { username: normalizedUsername },
+      });
+
+      if (existing && existing.id !== userId) {
+        return NextResponse.json(
+          { success: false, error: "That username is already taken." },
+          { status: 409 },
+        );
+      }
+
+      data.username = normalizedUsername;
+    }
+
+    // Same guard as onboarding: only ever a URL that actually came from
+    // our own Cloudinary avatars folder, via /api/upload/signature —
+    // never an arbitrary external URL submitted directly.
+    if (avatarSrc !== undefined) {
+      const isValidAvatarSrc =
+        typeof avatarSrc === "string" &&
+        avatarSrc.includes(
+          `res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}/`,
+        ) &&
+        avatarSrc.includes("/vanity/avatars/");
+
+      if (!isValidAvatarSrc) {
+        return NextResponse.json(
+          { success: false, error: "Invalid avatar image." },
+          { status: 400 },
+        );
+      }
+
+      data.avatarSrc = avatarSrc;
+    }
+
+    if (toneTag !== undefined) {
+      if (typeof toneTag !== "string") {
+        return NextResponse.json(
+          { success: false, error: "Invalid tone tag." },
+          { status: 400 },
+        );
+      }
+      data.toneTag = toneTag;
+    }
+
+    if (bio !== undefined) {
+      if (typeof bio !== "string") {
+        return NextResponse.json(
+          { success: false, error: "Invalid bio." },
+          { status: 400 },
+        );
+      }
+      data.bio = bio;
+    }
+
+    // pinnedRoutine, if sent, is validated separately since it isn't a
+    // plain scalar column — it's the RoutineItem rows, replaced wholesale
+    // rather than diffed, same as how onboarding treats the rest of the
+    // profile as "just overwrite it with what was submitted."
+    let routineItemsInput: { label: string }[] | null = null;
+    if (pinnedRoutine !== undefined) {
+      if (
+        !Array.isArray(pinnedRoutine) ||
+        !pinnedRoutine.every(
+          (item) =>
+            item && typeof item === "object" && typeof item.label === "string",
+        )
+      ) {
+        return NextResponse.json(
+          { success: false, error: "Invalid pinned routine." },
+          { status: 400 },
+        );
+      }
+      routineItemsInput = pinnedRoutine.map((item: { label: string }) => ({
+        label: item.label,
+      }));
+    }
+
+    const [user] = await prisma.$transaction([
+      prisma.user.update({ where: { id: userId }, data }),
+      ...(routineItemsInput
+        ? [
+            prisma.routineItem.deleteMany({ where: { userId } }),
+            prisma.routineItem.createMany({
+              data: routineItemsInput.map((item, index) => ({
+                userId,
+                label: item.label,
+                order: index,
+              })),
+            }),
+          ]
+        : []),
+    ]);
+
+    const routineItems = await prisma.routineItem.findMany({
+      where: { userId },
+      orderBy: { order: "asc" },
+    });
+
+    return NextResponse.json({
+      success: true,
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        avatarSrc: user.avatarSrc,
+        bio: user.bio,
+        toneTag: user.toneTag,
+        pinnedRoutine: routineItems.map((item) => ({
+          id: item.id,
+          label: item.label,
+        })),
+        onboardingCompletedAt: user.onboardingCompletedAt,
+      },
+    });
+  } catch (err) {
+    console.error("update profile error", err);
+    return NextResponse.json(
+      { success: false, error: "Server error" },
+      { status: 500 },
+    );
+  }
+}
 </file>
 
 <file path="app/explore/page.tsx">
@@ -10319,6 +10215,73 @@ export default function SavedPage() {
       </div>
     </RequireAuth>
   );
+}
+</file>
+
+<file path="components/auth/RequireAuth.tsx">
+"use client";
+
+import { useEffect, type ReactNode } from "react";
+import { useRouter, usePathname } from "next/navigation";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { PATHS } from "@/utils/paths";
+import { AuthGateModal } from "./AuthGateModal";
+
+type Props = {
+  children: ReactNode;
+  message?: string;
+  fallback?: ReactNode;
+};
+
+// Wraps an entire page that requires a real session — Home, Explore,
+// Saved, Notifications, your own Profile, Create, Onboarding, etc.
+// Nothing to browse read-only behind the modal here (unlike the
+// action-level gates on /p/[postId] and /u/[username]), so it's
+// non-dismissible: signing in is the only way forward.
+//
+// Also handles the "logged in but hasn't finished onboarding yet" case —
+// any page other than /onboarding itself redirects there first. The
+// onboarding page is naturally exempt from this without needing a
+// special prop: pathname === PATHS.ONBOARDING is exactly the condition
+// that skips the redirect below.
+export function RequireAuth({ children, message, fallback = null }: Props) {
+  const { isAuthenticated, needsOnboarding, isLoading } = useCurrentUser();
+  const router = useRouter();
+  const pathname = usePathname();
+
+  const shouldRedirectToOnboarding =
+    isAuthenticated && needsOnboarding && pathname !== PATHS.ONBOARDING;
+
+  useEffect(() => {
+    if (shouldRedirectToOnboarding) {
+      router.replace(PATHS.ONBOARDING);
+    }
+  }, [shouldRedirectToOnboarding, router]);
+
+  // isAuthenticated starts false before the session check resolves, not
+  // just when someone's genuinely logged out — without this check, an
+  // actually-logged-in person would see the sign-in gate flash briefly on
+  // every full page load, before the real /api/user/me result comes back.
+  // On pages that prefetch currentUser server-side (see app/page.tsx),
+  // this resolves instantly. Everywhere else, this is a real — if
+  // brief — loading window, so show something instead of a blank page.
+  // Defaults to rendering nothing (unchanged behavior for every page that
+  // doesn't pass one), but a page with its own real skeleton — Home's
+  // HomeFeedSkeleton, say — can pass it in so this loading window looks
+  // like the actual page instead of a blank flash or a generic blob.
+  if (isLoading) return <>{fallback}</>;
+
+  if (!isAuthenticated) {
+    return <AuthGateModal open dismissible={false} message={message} />;
+  }
+
+  if (shouldRedirectToOnboarding) {
+    // The redirect effect above will fire; render nothing in the
+    // meantime rather than flashing the real page content first.
+    return null;
+  }
+
+  return <>{children}</>;
 }
 </file>
 
@@ -10741,6 +10704,55 @@ export function ProfileHeader(props: Props) {
 }
 </file>
 
+<file path=".gitignore">
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+/lib/generated/prisma
+/.agents
+/.claude
+/.windsurf
+</file>
+
 <file path="package.json">
 {
   "name": "beauty-platform",
@@ -10782,304 +10794,6 @@ export function ProfileHeader(props: Props) {
     "tsx": "^4.23.1",
     "typescript": "^5"
   }
-}
-</file>
-
-<file path="components/profile/EditProfileForm.tsx">
-"use client";
-
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
-import { useRouter } from "next/navigation";
-import Image from "next/image";
-import { XIcon } from "@phosphor-icons/react";
-import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { useUpdateProfile } from "@/hooks/useUpdateProfile";
-import { useUploadMedia } from "@/hooks/useUploadMedia";
-import { useUsernameAvailability } from "@/hooks/useUsernameAvailability";
-import { ProductTagEditor } from "@/components/shared/ProductTagEditor";
-import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
-import { validateUsername } from "@/utils/username";
-import type { ProductTag } from "@/types/post";
-
-export function EditProfileForm() {
-  const router = useRouter();
-  const { user } = useCurrentUser();
-  const { mutateAsync: saveProfile, isPending: saving } = useUpdateProfile();
-  const { mutateAsync: uploadAvatar, isPending: avatarUploading } =
-    useUploadMedia();
-
-  // Single source of truth every field reads, same convention as
-  // CreatePostForm — nothing should be tamperable while a save is in
-  // flight, whether that's the avatar upload leg or the profile PATCH.
-  const isBusy = saving || avatarUploading;
-
-  const [username, setUsername] = useState(user?.username ?? "");
-  const [usernameError, setUsernameError] = useState<string | null>(null);
-  // Doubles as both the preview URL AND the "is this real yet" signal,
-  // same convention as onboarding's PhotoStep: a blob: URL means a local
-  // pick that hasn't been uploaded yet; anything else is already a real
-  // hosted URL, safe to submit as-is.
-  const [avatarSrc, setAvatarSrc] = useState(user?.avatarSrc ?? "");
-  // The raw File from the most recent pick, held onto until Save — we
-  // upload once, right before submitting, instead of on every pick.
-  const [avatarFile, setAvatarFile] = useState<File | null>(null);
-  const [avatarError, setAvatarError] = useState<string | null>(null);
-  const [bio, setBio] = useState(user?.bio ?? "");
-  const [toneTag, setToneTag] = useState(user?.toneTag ?? "");
-  const [pinnedRoutine, setPinnedRoutine] = useState<ProductTag[]>(
-    user?.pinnedRoutine ?? [],
-  );
-  const [confirmingDiscard, setConfirmingDiscard] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
-
-  const avatarInputRef = useRef<HTMLInputElement>(null);
-
-  // RequireAuth (wrapping the page this form lives on) already blocks
-  // rendering until useCurrentUser resolves, so `user` is expected
-  // non-null by the time this mounts. This effect just backfills local
-  // state in case the query result arrives a tick after first render,
-  // the same defensive pattern OnboardingFlow uses for avatarSrc.
-  useEffect(() => {
-    if (!user) return;
-    setUsername(user.username);
-    setAvatarSrc(user.avatarSrc);
-    setBio(user.bio);
-    setToneTag(user.toneTag);
-    setPinnedRoutine(user.pinnedRoutine);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
-
-  const { status: usernameCheckStatus } = useUsernameAvailability(
-    username,
-    user?.username,
-  );
-
-  function handleAvatarSelected(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setAvatarError(null);
-    // Swapping to a new pick — drop the previous local preview URL so
-    // repeated swaps don't leak blob: URLs, then swap in the new one.
-    if (avatarSrc.startsWith("blob:")) URL.revokeObjectURL(avatarSrc);
-    setAvatarSrc(URL.createObjectURL(file));
-    setAvatarFile(file);
-  }
-
-  async function handleSave() {
-    if (!user) return;
-
-    const error = validateUsername(username);
-    if (error) {
-      setUsernameError(error);
-      return;
-    }
-    if (usernameCheckStatus === "taken") {
-      setUsernameError("That username is already taken.");
-      return;
-    }
-    if (usernameCheckStatus === "checking") {
-      return;
-    }
-
-    setSubmitError(null);
-
-    // Only the LAST photo picked ever actually gets uploaded, and only
-    // once, right here. An avatar left untouched (still the real,
-    // already-hosted URL) is submitted as-is.
-    let realAvatarSrc = avatarSrc.startsWith("blob:") ? undefined : avatarSrc;
-
-    if (avatarFile) {
-      const result = await uploadAvatar({
-        file: avatarFile,
-        context: "avatar",
-      });
-
-      if (result.success) {
-        realAvatarSrc = result.url;
-      } else {
-        setAvatarError(result.error);
-        return;
-      }
-    }
-
-    const result = await saveProfile({
-      username: username.trim().toLowerCase(),
-      avatarSrc: realAvatarSrc,
-      bio,
-      toneTag,
-      pinnedRoutine,
-    });
-
-    if (!result?.success) {
-      if (result?.error?.toLowerCase().includes("taken")) {
-        setUsernameError(result.error);
-      } else {
-        setSubmitError(
-          result?.error || "Something went wrong. Please try again.",
-        );
-      }
-      return;
-    }
-
-    router.back();
-  }
-
-  // Only warn if something actually changed from what's already saved —
-  // canceling without touching anything shouldn't need confirmation.
-  function hasUnsavedChanges() {
-    if (!user) return false;
-    return (
-      username !== user.username ||
-      avatarSrc !== user.avatarSrc ||
-      bio !== user.bio ||
-      toneTag !== user.toneTag ||
-      JSON.stringify(pinnedRoutine) !== JSON.stringify(user.pinnedRoutine)
-    );
-  }
-
-  function handleCancelPress() {
-    if (isBusy) return;
-    if (hasUnsavedChanges()) {
-      setConfirmingDiscard(true);
-    } else {
-      router.back();
-    }
-  }
-
-  const saveDisabled =
-    isBusy || usernameCheckStatus === "checking" || !hasUnsavedChanges();
-
-  return (
-    <div className="fixed left-1/2 top-0 bottom-0 z-80 w-full max-w-lg -translate-x-1/2 flex flex-col bg-background">
-      <header className="flex items-center justify-between border-b border-foreground/10 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))]">
-        <button
-          type="button"
-          onClick={handleCancelPress}
-          disabled={isBusy}
-          aria-label="Cancel"
-          className="disabled:opacity-30"
-        >
-          <XIcon size={22} className="text-foreground" />
-        </button>
-        <span className="text-sm font-medium">Edit profile</span>
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saveDisabled}
-          className="text-sm font-medium text-foreground disabled:opacity-50"
-        >
-          {isBusy ? "Saving…" : "Save"}
-        </button>
-      </header>
-
-      <div className="flex-1 overflow-y-auto px-4 py-5 pb-[calc(1rem+env(safe-area-inset-bottom))]">
-        <div className="mb-6 flex flex-col items-center gap-2">
-          <button
-            type="button"
-            onClick={() => avatarInputRef.current?.click()}
-            disabled={isBusy}
-            aria-label="Change profile photo"
-            className="relative size-24 overflow-hidden rounded-full disabled:opacity-50"
-          >
-            <Image
-              src={avatarSrc}
-              alt=""
-              fill
-              unoptimized
-              className="object-cover"
-            />
-          </button>
-          <button
-            type="button"
-            onClick={() => avatarInputRef.current?.click()}
-            disabled={isBusy}
-            className="text-sm font-medium text-foreground disabled:opacity-50"
-          >
-            Change photo
-          </button>
-          <input
-            ref={avatarInputRef}
-            type="file"
-            accept="image/*"
-            onChange={handleAvatarSelected}
-            disabled={isBusy}
-            className="hidden"
-          />
-          {avatarError && <p className="text-xs text-red-500">{avatarError}</p>}
-        </div>
-
-        <div className="mb-5">
-          <label className="mb-1.5 block text-xs text-foreground/50">
-            Username
-          </label>
-          <div className="flex items-center rounded-lg border border-foreground/15 px-3 py-2">
-            <span className="text-sm text-foreground/40">@</span>
-            <input
-              value={username}
-              onChange={(e) => {
-                setUsername(e.target.value);
-                setUsernameError(null);
-              }}
-              autoCapitalize="none"
-              autoCorrect="off"
-              disabled={isBusy}
-              className="flex-1 bg-transparent pl-1 text-sm outline-none disabled:opacity-50"
-            />
-          </div>
-          {usernameError && (
-            <p className="mt-1.5 text-xs text-red-500">{usernameError}</p>
-          )}
-        </div>
-
-        <div className="mb-5">
-          <label className="mb-1.5 block text-xs text-foreground/50">
-            Tone tag
-          </label>
-          <input
-            value={toneTag}
-            onChange={(e) => setToneTag(e.target.value)}
-            placeholder="e.g. Combination skin"
-            disabled={isBusy}
-            className="w-full rounded-lg border border-foreground/15 bg-transparent px-3 py-2 text-sm outline-none disabled:opacity-50"
-          />
-        </div>
-
-        <div className="mb-6">
-          <label className="mb-1.5 block text-xs text-foreground/50">Bio</label>
-          <textarea
-            value={bio}
-            onChange={(e) => setBio(e.target.value)}
-            rows={3}
-            placeholder="Tell people about yourself…"
-            disabled={isBusy}
-            className="w-full resize-none rounded-lg border border-foreground/15 bg-transparent p-3 text-sm outline-none disabled:opacity-50"
-          />
-        </div>
-
-        <ProductTagEditor
-          label="Pinned routine"
-          placeholder="e.g. Cleanser: CeraVe Foaming"
-          products={pinnedRoutine}
-          onChange={setPinnedRoutine}
-          disabled={isBusy}
-        />
-
-        {submitError && (
-          <p className="mt-4 text-center text-xs text-red-500">{submitError}</p>
-        )}
-      </div>
-
-      <ConfirmDialog
-        open={confirmingDiscard}
-        title="Discard changes?"
-        description="Your edits won't be saved."
-        confirmLabel="Discard"
-        destructive
-        onConfirm={() => router.back()}
-        onCancel={() => setConfirmingDiscard(false)}
-      />
-    </div>
-  );
 }
 </file>
 
@@ -11190,223 +10904,6 @@ export default function UserProfilePage({ params }: Props) {
       <AuthGateModal open={gateOpen} onClose={closeGate} />
     </div>
   );
-}
-</file>
-
-<file path="app/page.tsx">
-// import {
-//   QueryClient,
-//   dehydrate,
-//   HydrationBoundary,
-// } from "@tanstack/react-query";
-// import { HomeFeed } from "@/components/feed/HomeFeed";
-// import { RequireAuth } from "@/components/auth/RequireAuth";
-// import { getServerUserId } from "@/lib/session";
-// import {
-//   POSTS_QUERY_KEY,
-//   LIKES_QUERY_KEY,
-//   SAVED_QUERY_KEY,
-//   CURRENT_USER_QUERY_KEY,
-//   followingQueryKey,
-//   profileQueryKey,
-// } from "@/lib/queryKeys";
-// import {
-//   fetchPostsForSSR,
-//   fetchLikedPostIdsForSSR,
-//   fetchSavedBundleForSSR,
-//   fetchFollowingForSSR,
-//   fetchUserProfilesBatchForSSR,
-//   fetchCurrentUserForSSR,
-// } from "@/lib/serverQueries";
-// import { HomeFeedSkeleton } from "@/components/feed/HomeFeedSkeleton";
-
-// export default async function HomeFeedPage() {
-//   const userId = await getServerUserId();
-//   const currentUser = userId ? await fetchCurrentUserForSSR(userId) : null;
-//   const viewer = currentUser
-//     ? { id: currentUser.id, username: currentUser.username }
-//     : null;
-//   const queryClient = new QueryClient();
-//   const posts = await fetchPostsForSSR();
-
-//   const prefetches: Promise<unknown>[] = [
-//     queryClient.prefetchQuery({
-//       queryKey: POSTS_QUERY_KEY,
-//       queryFn: async () => posts,
-//     }),
-//   ];
-
-//   if (currentUser) {
-//     prefetches.push(
-//       queryClient.prefetchQuery({
-//         queryKey: CURRENT_USER_QUERY_KEY,
-//         queryFn: async () => currentUser,
-//       }),
-//     );
-//   }
-
-//   if (viewer) {
-//     prefetches.push(
-//       queryClient.prefetchQuery({
-//         queryKey: LIKES_QUERY_KEY,
-//         queryFn: async () => ({
-//           likedPostIds: await fetchLikedPostIdsForSSR(viewer.id),
-//         }),
-//       }),
-//       queryClient.prefetchQuery({
-//         queryKey: SAVED_QUERY_KEY,
-//         queryFn: () => fetchSavedBundleForSSR(viewer.id),
-//       }),
-//       queryClient.prefetchQuery({
-//         queryKey: followingQueryKey(viewer.username),
-//         queryFn: () => fetchFollowingForSSR(viewer.username),
-//       }),
-//     );
-
-//     const authors = [...new Set(posts.map((p) => p.author.username))];
-//     prefetches.push(
-//       fetchUserProfilesBatchForSSR(authors, viewer.id).then((profiles) => {
-//         for (const [username, profile] of profiles) {
-//           queryClient.setQueryData(profileQueryKey(username), profile);
-//         }
-//       }),
-//     );
-//   }
-
-//   await Promise.all(prefetches);
-
-//   return (
-//     <HydrationBoundary state={dehydrate(queryClient)}>
-//       <RequireAuth fallback={<HomeFeedSkeleton />}>
-//         <div className="min-h-dvh">
-//           <HomeFeed />
-//         </div>
-//       </RequireAuth>
-//     </HydrationBoundary>
-//   );
-// }
-
-import {
-  QueryClient,
-  dehydrate,
-  HydrationBoundary,
-} from "@tanstack/react-query";
-import { HomeFeed } from "@/components/feed/HomeFeed";
-import { HomeFeedSkeleton } from "@/components/feed/HomeFeedSkeleton";
-import { RequireAuth } from "@/components/auth/RequireAuth";
-import {
-  POSTS_QUERY_KEY,
-  LIKES_QUERY_KEY,
-  SAVED_QUERY_KEY,
-  CURRENT_USER_QUERY_KEY,
-  followingQueryKey,
-  profileQueryKey,
-} from "@/lib/queryKeys";
-import { getServerUserId } from "@/lib/session";
-import {
-  fetchPostsForSSR,
-  fetchLikedPostIdsForSSR,
-  fetchSavedBundleForSSR,
-  fetchFollowingForSSR,
-  fetchUserProfilesBatchForSSR,
-  fetchCurrentUserForSSR,
-} from "@/lib/serverQueries";
-
-export default async function HomeFeedPage() {
-  const pageStart = performance.now();
-
-  const userId = await getServerUserId();
-  const currentUser = userId ? await fetchCurrentUserForSSR(userId) : null;
-  const viewer = currentUser
-    ? { id: currentUser.id, username: currentUser.username }
-    : null;
-  const queryClient = new QueryClient();
-
-  const postsStart = performance.now();
-  const posts = await fetchPostsForSSR();
-  console.log(
-    `[home] posts: ${(performance.now() - postsStart).toFixed(1)}ms (${posts.length} rows)`,
-  );
-
-  const prefetches: Promise<unknown>[] = [
-    queryClient.prefetchQuery({
-      queryKey: POSTS_QUERY_KEY,
-      queryFn: async () => posts,
-    }),
-  ];
-
-  if (currentUser) {
-    prefetches.push(
-      queryClient.prefetchQuery({
-        queryKey: CURRENT_USER_QUERY_KEY,
-        queryFn: async () => currentUser,
-      }),
-    );
-  }
-
-  if (viewer) {
-    prefetches.push(
-      timed("likes", () =>
-        queryClient.prefetchQuery({
-          queryKey: LIKES_QUERY_KEY,
-          queryFn: async () => ({
-            likedPostIds: await fetchLikedPostIdsForSSR(viewer.id),
-          }),
-        }),
-      ),
-      timed("saved", () =>
-        queryClient.prefetchQuery({
-          queryKey: SAVED_QUERY_KEY,
-          queryFn: () => fetchSavedBundleForSSR(viewer.id),
-        }),
-      ),
-      timed("following", () =>
-        queryClient.prefetchQuery({
-          queryKey: followingQueryKey(viewer.username),
-          queryFn: () => fetchFollowingForSSR(viewer.username),
-        }),
-      ),
-    );
-  }
-
-  const authors = [...new Set(posts.map((p) => p.author.username))];
-  if (viewer) {
-    prefetches.push(
-      timed(`profiles batch (${authors.length} authors)`, () =>
-        fetchUserProfilesBatchForSSR(authors, viewer.id).then((profiles) => {
-          for (const [username, profile] of profiles) {
-            queryClient.setQueryData(profileQueryKey(username), profile);
-          }
-        }),
-      ),
-    );
-  }
-
-  const prefetchStart = performance.now();
-  await Promise.all(prefetches);
-  console.log(
-    `[home] Promise.all total: ${(performance.now() - prefetchStart).toFixed(1)}ms`,
-  );
-  console.log(
-    `[home] full page function: ${(performance.now() - pageStart).toFixed(1)}ms`,
-  );
-
-  return (
-    <HydrationBoundary state={dehydrate(queryClient)}>
-      <RequireAuth fallback={<HomeFeedSkeleton />}>
-        <div className="min-h-dvh">
-          <HomeFeed />
-        </div>
-      </RequireAuth>
-    </HydrationBoundary>
-  );
-}
-
-async function timed<T>(label: string, fn: () => Promise<T>): Promise<T> {
-  const start = performance.now();
-  const result = await fn();
-  console.log(`[home] ${label}: ${(performance.now() - start).toFixed(1)}ms`);
-  return result;
 }
 </file>
 
@@ -12202,6 +11699,349 @@ export function HomeFeed() {
 }
 </file>
 
+<file path="components/profile/EditProfileForm.tsx">
+"use client";
+
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useRouter } from "next/navigation";
+import Image from "next/image";
+import { XIcon } from "@phosphor-icons/react";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { useUpdateProfile } from "@/hooks/useUpdateProfile";
+import { useLogout } from "@/hooks/useLogout";
+import { useUploadMedia } from "@/hooks/useUploadMedia";
+import { useUsernameAvailability } from "@/hooks/useUsernameAvailability";
+import { ProductTagEditor } from "@/components/shared/ProductTagEditor";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { validateUsername } from "@/utils/username";
+import { PATHS } from "@/utils/paths";
+import type { ProductTag } from "@/types/post";
+
+export function EditProfileForm() {
+  const router = useRouter();
+  const { user } = useCurrentUser();
+  const { mutateAsync: saveProfile, isPending: saving } = useUpdateProfile();
+  const { mutateAsync: uploadAvatar, isPending: avatarUploading } =
+    useUploadMedia();
+  const { mutateAsync: logOut, isPending: loggingOut } = useLogout();
+
+  // Single source of truth every field reads, same convention as
+  // CreatePostForm — nothing should be tamperable while a save is in
+  // flight, whether that's the avatar upload leg, the profile PATCH, or
+  // now logging out.
+  const isBusy = saving || avatarUploading || loggingOut;
+
+  const [username, setUsername] = useState(user?.username ?? "");
+  const [usernameError, setUsernameError] = useState<string | null>(null);
+  // Doubles as both the preview URL AND the "is this real yet" signal,
+  // same convention as onboarding's PhotoStep: a blob: URL means a local
+  // pick that hasn't been uploaded yet; anything else is already a real
+  // hosted URL, safe to submit as-is.
+  const [avatarSrc, setAvatarSrc] = useState(user?.avatarSrc ?? "");
+  // The raw File from the most recent pick, held onto until Save — we
+  // upload once, right before submitting, instead of on every pick.
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
+  const [bio, setBio] = useState(user?.bio ?? "");
+  const [toneTag, setToneTag] = useState(user?.toneTag ?? "");
+  const [pinnedRoutine, setPinnedRoutine] = useState<ProductTag[]>(
+    user?.pinnedRoutine ?? [],
+  );
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false);
+  const [confirmingLogout, setConfirmingLogout] = useState(false);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+
+  // RequireAuth (wrapping the page this form lives on) already blocks
+  // rendering until useCurrentUser resolves, so `user` is expected
+  // non-null by the time this mounts. This effect just backfills local
+  // state in case the query result arrives a tick after first render,
+  // the same defensive pattern OnboardingFlow uses for avatarSrc.
+  useEffect(() => {
+    if (!user) return;
+    setUsername(user.username);
+    setAvatarSrc(user.avatarSrc);
+    setBio(user.bio);
+    setToneTag(user.toneTag);
+    setPinnedRoutine(user.pinnedRoutine);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
+  const { status: usernameCheckStatus } = useUsernameAvailability(
+    username,
+    user?.username,
+  );
+
+  function handleAvatarSelected(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAvatarError(null);
+    // Swapping to a new pick — drop the previous local preview URL so
+    // repeated swaps don't leak blob: URLs, then swap in the new one.
+    if (avatarSrc.startsWith("blob:")) URL.revokeObjectURL(avatarSrc);
+    setAvatarSrc(URL.createObjectURL(file));
+    setAvatarFile(file);
+  }
+
+  async function handleSave() {
+    if (!user) return;
+
+    const error = validateUsername(username);
+    if (error) {
+      setUsernameError(error);
+      return;
+    }
+    if (usernameCheckStatus === "taken") {
+      setUsernameError("That username is already taken.");
+      return;
+    }
+    if (usernameCheckStatus === "checking") {
+      return;
+    }
+
+    setSubmitError(null);
+
+    // Only the LAST photo picked ever actually gets uploaded, and only
+    // once, right here. An avatar left untouched (still the real,
+    // already-hosted URL) is submitted as-is.
+    let realAvatarSrc = avatarSrc.startsWith("blob:") ? undefined : avatarSrc;
+
+    if (avatarFile) {
+      const result = await uploadAvatar({
+        file: avatarFile,
+        context: "avatar",
+      });
+
+      if (result.success) {
+        realAvatarSrc = result.url;
+      } else {
+        setAvatarError(result.error);
+        return;
+      }
+    }
+
+    const result = await saveProfile({
+      username: username.trim().toLowerCase(),
+      avatarSrc: realAvatarSrc,
+      bio,
+      toneTag,
+      pinnedRoutine,
+    });
+
+    if (!result?.success) {
+      if (result?.error?.toLowerCase().includes("taken")) {
+        setUsernameError(result.error);
+      } else {
+        setSubmitError(
+          result?.error || "Something went wrong. Please try again.",
+        );
+      }
+      return;
+    }
+
+    router.back();
+  }
+
+  // Only warn if something actually changed from what's already saved —
+  // canceling without touching anything shouldn't need confirmation.
+  function hasUnsavedChanges() {
+    if (!user) return false;
+    return (
+      username !== user.username ||
+      avatarSrc !== user.avatarSrc ||
+      bio !== user.bio ||
+      toneTag !== user.toneTag ||
+      JSON.stringify(pinnedRoutine) !== JSON.stringify(user.pinnedRoutine)
+    );
+  }
+
+  function handleCancelPress() {
+    if (isBusy) return;
+    if (hasUnsavedChanges()) {
+      setConfirmingDiscard(true);
+    } else {
+      router.back();
+    }
+  }
+
+  async function handleLogoutConfirm() {
+    setLogoutError(null);
+    const result = await logOut();
+    if (!result?.success) {
+      setLogoutError(
+        result?.error || "Something went wrong. Please try again.",
+      );
+      setConfirmingLogout(false);
+      return;
+    }
+    window.location.href = PATHS.AUTH;
+  }
+
+  const saveDisabled =
+    isBusy || usernameCheckStatus === "checking" || !hasUnsavedChanges();
+
+  return (
+    <div className="fixed left-1/2 top-0 bottom-0 z-80 w-full max-w-lg -translate-x-1/2 flex flex-col bg-background">
+      <header className="flex items-center justify-between border-b border-foreground/10 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))]">
+        <button
+          type="button"
+          onClick={handleCancelPress}
+          disabled={isBusy}
+          aria-label="Cancel"
+          className="disabled:opacity-30"
+        >
+          <XIcon size={22} className="text-foreground" />
+        </button>
+        <span className="text-sm font-medium">Edit profile</span>
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saveDisabled}
+          className="text-sm font-medium text-foreground disabled:opacity-50"
+        >
+          {isBusy ? "Saving…" : "Save"}
+        </button>
+      </header>
+
+      <div className="flex-1 overflow-y-auto px-4 py-5 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+        <div className="mb-6 flex flex-col items-center gap-2">
+          <button
+            type="button"
+            onClick={() => avatarInputRef.current?.click()}
+            disabled={isBusy}
+            aria-label="Change profile photo"
+            className="relative size-24 overflow-hidden rounded-full disabled:opacity-50"
+          >
+            <Image
+              src={avatarSrc}
+              alt=""
+              fill
+              unoptimized
+              className="object-cover"
+            />
+          </button>
+          <button
+            type="button"
+            onClick={() => avatarInputRef.current?.click()}
+            disabled={isBusy}
+            className="text-sm font-medium text-foreground disabled:opacity-50"
+          >
+            Change photo
+          </button>
+          <input
+            ref={avatarInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleAvatarSelected}
+            disabled={isBusy}
+            className="hidden"
+          />
+          {avatarError && <p className="text-xs text-red-500">{avatarError}</p>}
+        </div>
+
+        <div className="mb-5">
+          <label className="mb-1.5 block text-xs text-foreground/50">
+            Username
+          </label>
+          <div className="flex items-center rounded-lg border border-foreground/15 px-3 py-2">
+            <span className="text-sm text-foreground/40">@</span>
+            <input
+              value={username}
+              onChange={(e) => {
+                setUsername(e.target.value);
+                setUsernameError(null);
+              }}
+              autoCapitalize="none"
+              autoCorrect="off"
+              disabled={isBusy}
+              className="flex-1 bg-transparent pl-1 text-sm outline-none disabled:opacity-50"
+            />
+          </div>
+          {usernameError && (
+            <p className="mt-1.5 text-xs text-red-500">{usernameError}</p>
+          )}
+        </div>
+
+        <div className="mb-5">
+          <label className="mb-1.5 block text-xs text-foreground/50">
+            Tone tag
+          </label>
+          <input
+            value={toneTag}
+            onChange={(e) => setToneTag(e.target.value)}
+            placeholder="e.g. Combination skin"
+            disabled={isBusy}
+            className="w-full rounded-lg border border-foreground/15 bg-transparent px-3 py-2 text-sm outline-none disabled:opacity-50"
+          />
+        </div>
+
+        <div className="mb-6">
+          <label className="mb-1.5 block text-xs text-foreground/50">Bio</label>
+          <textarea
+            value={bio}
+            onChange={(e) => setBio(e.target.value)}
+            rows={3}
+            placeholder="Tell people about yourself…"
+            disabled={isBusy}
+            className="w-full resize-none rounded-lg border border-foreground/15 bg-transparent p-3 text-sm outline-none disabled:opacity-50"
+          />
+        </div>
+
+        <ProductTagEditor
+          label="Pinned routine"
+          placeholder="e.g. Cleanser: CeraVe Foaming"
+          products={pinnedRoutine}
+          onChange={setPinnedRoutine}
+          disabled={isBusy}
+        />
+
+        <div className="mt-8 border-t border-foreground/10 pt-5">
+          <button
+            type="button"
+            onClick={() => setConfirmingLogout(true)}
+            disabled={isBusy}
+            className="w-full text-center text-sm font-medium text-red-500 disabled:opacity-50"
+          >
+            {loggingOut ? "Logging out…" : "Log out"}
+          </button>
+          {logoutError && (
+            <p className="mt-2 text-center text-xs text-red-500">
+              {logoutError}
+            </p>
+          )}
+        </div>
+
+        {submitError && (
+          <p className="mt-4 text-center text-xs text-red-500">{submitError}</p>
+        )}
+      </div>
+
+      <ConfirmDialog
+        open={confirmingDiscard}
+        title="Discard changes?"
+        description="Your edits won't be saved."
+        confirmLabel="Discard"
+        destructive
+        onConfirm={() => router.back()}
+        onCancel={() => setConfirmingDiscard(false)}
+      />
+
+      <ConfirmDialog
+        open={confirmingLogout}
+        title="Log out?"
+        description="You'll need to sign in again to continue."
+        confirmLabel={loggingOut ? "Logging out…" : "Log out"}
+        destructive
+        onConfirm={handleLogoutConfirm}
+        onCancel={() => setConfirmingLogout(false)}
+      />
+    </div>
+  );
+}
+</file>
+
 <file path="components/profile/UserListRow.tsx">
 "use client";
 
@@ -12310,268 +12150,128 @@ export const PATHS = {
 };
 </file>
 
-<file path="proxy.ts">
-import { NextRequest, NextResponse } from "next/server";
+<file path="app/page.tsx">
 import {
-  verifyAccessToken,
-  checkRefreshToken,
-  signAccessToken,
-} from "./lib/auth";
-import { prisma } from "./lib/prisma";
+  QueryClient,
+  dehydrate,
+  HydrationBoundary,
+} from "@tanstack/react-query";
+import { HomeFeed } from "@/components/feed/HomeFeed";
+import { HomeFeedSkeleton } from "@/components/feed/HomeFeedSkeleton";
+import { RequireAuth } from "@/components/auth/RequireAuth";
+import {
+  POSTS_QUERY_KEY,
+  LIKES_QUERY_KEY,
+  SAVED_QUERY_KEY,
+  CURRENT_USER_QUERY_KEY,
+  followingQueryKey,
+  profileQueryKey,
+} from "@/lib/queryKeys";
+import { getServerUserId } from "@/lib/session";
+import {
+  fetchPostsForSSR,
+  fetchLikedPostIdsForSSR,
+  fetchSavedBundleForSSR,
+  fetchFollowingForSSR,
+  fetchUserProfilesBatchForSSR,
+  fetchCurrentUserForSSR,
+} from "@/lib/serverQueries";
 
-function addSecurityHeaders(response: NextResponse) {
-  response.headers.set(
-    "X-Robots-Tag",
-    "noindex, nofollow, noarchive, nosnippet",
-  );
-  response.headers.set("X-Content-Type-Options", "nosniff");
-  response.headers.set("X-Frame-Options", "DENY");
-  response.headers.set("Referrer-Policy", "no-referrer");
-  response.headers.set("Permissions-Policy", "interest-cohort=()");
-  response.headers.set("X-XSS-Protection", "1; mode=block");
-  return response;
-}
+export default async function HomeFeedPage() {
+  const pageStart = performance.now();
 
-function isBot(userAgent: string): boolean {
-  const botPatterns = [
-    "googlebot",
-    "bingbot",
-    "slurp",
-    "duckduckbot",
-    "baiduspider",
-    "yandexbot",
-    "crawler",
-    "spider",
-    "scraper",
-    "bot",
-    "archive.org",
-    "wayback",
-    "ia_archiver",
-    "gptbot",
-    "chatgpt",
-    "ccbot",
-    "anthropic",
-    "claude",
-    "cohere",
+  const userId = await getServerUserId();
+
+  const [currentUser, posts] = await Promise.all([
+    userId ? fetchCurrentUserForSSR(userId) : Promise.resolve(null),
+    fetchPostsForSSR(),
+  ]);
+
+  const viewer = currentUser
+    ? { id: currentUser.id, username: currentUser.username }
+    : null;
+  const queryClient = new QueryClient();
+
+  const prefetches: Promise<unknown>[] = [
+    queryClient.prefetchQuery({
+      queryKey: POSTS_QUERY_KEY,
+      queryFn: async () => posts,
+    }),
   ];
-  const lowerUA = userAgent.toLowerCase();
-  return botPatterns.some((pattern) => lowerUA.includes(pattern));
-}
 
-// Builds a NextResponse.next() that actually forwards a header to the
-// downstream Route Handler's req.headers — just calling
-// NextResponse.next().headers.set(...) does NOT do this; it only sets a
-// header on the response sent back to the browser. This is the pattern
-// that's actually required for the route handler to see it.
-function nextWithRequestHeader(req: NextRequest, name: string, value: string) {
-  const headers = new Headers(req.headers);
-  headers.set(name, value);
-  return NextResponse.next({ request: { headers } });
-}
-
-// Segment names under /api/posts that are NOT a :postId — without this,
-// a literal path like /api/posts/likes would match the same
-// "/api/posts/<something>" shape as a real single-post GET and get
-// waved through as public. Keep in sync with the static (non-dynamic)
-// routes nested directly under /api/posts (see utils/apiRoutes.ts).
-const RESERVED_POST_SEGMENTS = new Set(["likes"]);
-
-// The only two intentionally-public reads under /api/posts:
-//   GET /api/posts/<postId>            — the /p/[postId] permalink page
-//   GET /api/posts/<postId>/comments   — that page's comment list
-// Everything else under /api/posts (the feed list, create, delete,
-// likes, comment create/delete/like, the saved-likes bundle) stays
-// behind the auth gate below. Matches app/api/posts/[postId]/route.ts's
-// GET and app/api/posts/[postId]/comments/route.ts's GET exactly.
-function isPublicPostGet(pathname: string, method: string): boolean {
-  if (method !== "GET") return false;
-  const match = pathname.match(/^\/api\/posts\/([^/]+)(?:\/comments)?$/);
-  if (!match) return false;
-  const [, postId] = match;
-  return !RESERVED_POST_SEGMENTS.has(postId);
-}
-
-// Segment names directly under /api/user that are NOT a :username — same
-// reasoning as RESERVED_POST_SEGMENTS above. Keep in sync with the
-// static (non-dynamic) routes nested directly under /api/user (see
-// utils/apiRoutes.ts).
-const RESERVED_USER_SEGMENTS = new Set([
-  "me",
-  "onboarding",
-  "username-available",
-]);
-
-// The one intentionally-public read under /api/user: GET /api/user/<username>
-// backs the /u/[username] page, which (like /p/[postId]) is browsable
-// while logged out — only the follow action itself is auth-gated on the
-// frontend (useAuthGatedAction) and enforced again here on the backend
-// (POST /api/user/[username]/follow is NOT matched by this and stays
-// behind the normal auth gate below). The optional /posts suffix covers
-// GET /api/user/[username]/posts, the per-user post grid fetch — same
-// public posture, matching isPublicPostGet's own /comments suffix below.
-function isPublicUserGet(pathname: string, method: string): boolean {
-  if (method !== "GET") return false;
-  const match = pathname.match(/^\/api\/user\/([^/]+)(?:\/posts)?$/);
-  if (!match) return false;
-  const [, username] = match;
-  return !RESERVED_USER_SEGMENTS.has(username);
-}
-
-export async function proxy(req: NextRequest) {
-  const pathname = req.nextUrl.pathname;
-
-  const userAgent = req.headers.get("user-agent") || "";
-  if (isBot(userAgent)) {
-    return addSecurityHeaders(
-      new NextResponse("Access Denied", { status: 403 }),
+  if (currentUser) {
+    prefetches.push(
+      queryClient.prefetchQuery({
+        queryKey: CURRENT_USER_QUERY_KEY,
+        queryFn: async () => currentUser,
+      }),
     );
   }
 
-  // Vanity-specific protected API routes. Deliberately short — the
-  // shared boilerplate's deposits/withdrawals/admin/support routes
-  // belonged to a different app entirely and weren't carried over. Add
-  // to this list as real feature API routes (comments, follow, saved,
-  // notifications) get built.
-  //
-  // /api/posts covers both GET (list) and POST (create) — the whole
-  // app is already gated behind RequireAuth on the frontend (see
-  // app/page.tsx), so there's no logged-out "browse the feed" case to
-  // carve out an exception for here. /api/saved covers the saved-posts
-  // bundle plus every collection sub-route the same way.
-  //
-  // Narrow exceptions carved out of that: the single-post GET and its
-  // comment list (both of which back the public /p/[postId] permalink
-  // page — see isPublicPostGet above), plus the single-user profile GET
-  // that backs the public /u/[username] page (see isPublicUserGet
-  // above). Everything else under /api/posts and /api/user still
-  // requires a session.
-  const isProtectedRoute = [
-    "/api/user",
-    "/api/upload",
-    "/api/posts",
-    "/api/saved",
-  ].some((route) => pathname.startsWith(route));
-
-  if (!isProtectedRoute) {
-    return addSecurityHeaders(NextResponse.next());
+  if (viewer) {
+    prefetches.push(
+      timed("likes", () =>
+        queryClient.prefetchQuery({
+          queryKey: LIKES_QUERY_KEY,
+          queryFn: async () => ({
+            likedPostIds: await fetchLikedPostIdsForSSR(viewer.id),
+          }),
+        }),
+      ),
+      timed("saved", () =>
+        queryClient.prefetchQuery({
+          queryKey: SAVED_QUERY_KEY,
+          queryFn: () => fetchSavedBundleForSSR(viewer.id),
+        }),
+      ),
+      timed("following", () =>
+        queryClient.prefetchQuery({
+          queryKey: followingQueryKey(viewer.username),
+          queryFn: () => fetchFollowingForSSR(viewer.username),
+        }),
+      ),
+    );
   }
 
-  // A public GET still goes through the same token verification below —
-  // NOT an early bypass — so a logged-in visitor still gets x-user-id
-  // set (e.g. for a comment's likedByMe). The only difference for these
-  // two routes is at the very bottom: no valid session falls through to
-  // an anonymous NextResponse.next() instead of a 401.
-  const isPublicGet =
-    isPublicPostGet(pathname, req.method) ||
-    isPublicUserGet(pathname, req.method);
-
-  const accessToken = req.cookies.get("accessToken")?.value;
-  const refreshToken = req.cookies.get("refreshToken")?.value;
-  const uid = req.cookies.get("uid")?.value;
-
-  // Try access token first
-  if (accessToken) {
-    try {
-      const payload = verifyAccessToken(accessToken);
-      const res = nextWithRequestHeader(
-        req,
-        "x-user-id",
-        (payload as { sub: string }).sub,
-      );
-      // No x-user-role header — the schema has no `role` concept.
-      // Add one back here (and to User) if/when an admin tier exists.
-      return addSecurityHeaders(res);
-    } catch {
-      // Access token invalid/expired, fall through to refresh
-    }
+  const authors = [...new Set(posts.map((p) => p.author.username))];
+  if (viewer) {
+    prefetches.push(
+      timed(`profiles batch (${authors.length} authors)`, () =>
+        fetchUserProfilesBatchForSSR(authors, viewer.id).then((profiles) => {
+          for (const [username, profile] of profiles) {
+            queryClient.setQueryData(profileQueryKey(username), profile);
+          }
+        }),
+      ),
+    );
   }
 
-  // Try refresh token if access token failed — a lightweight, silent
-  // reissue only. This does NOT rotate the refresh token itself; that
-  // heavier operation is reserved for the explicit /api/auth/refresh-
-  // token route, so a refresh token isn't rotated on every request. It
-  // still needs to check for reuse, though — a stolen/stale token being
-  // replayed is exactly as dangerous here as it is on the dedicated
-  // refresh route.
-  if (refreshToken && uid) {
-    try {
-      const result = await checkRefreshToken(uid, refreshToken);
+  const prefetchStart = performance.now();
+  await Promise.all(prefetches);
+  console.log(
+    `[home] Promise.all total: ${(performance.now() - prefetchStart).toFixed(1)}ms`,
+  );
+  console.log(
+    `[home] full page function: ${(performance.now() - pageStart).toFixed(1)}ms`,
+  );
 
-      if (result.status === "reused") {
-        console.warn(`Refresh token reuse detected for user ${uid}`);
-        const res = addSecurityHeaders(
-          NextResponse.json(
-            { success: false, error: "Unauthorized" },
-            { status: 401 },
-          ),
-        );
-        // Every session for this user was already revoked inside
-        // checkRefreshToken — clear this device's cookies too, since
-        // they're now pointing at dead tokens either way.
-        for (const name of ["accessToken", "refreshToken", "uid"]) {
-          res.headers.append(
-            "Set-Cookie",
-            `${name}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`,
-          );
-        }
-        return res;
-      }
-
-      if (result.status === "valid") {
-        const user = await prisma.user.findUnique({
-          where: { id: uid },
-          select: { id: true },
-        });
-
-        if (user) {
-          const newAccessToken = signAccessToken({ sub: user.id });
-
-          const res = nextWithRequestHeader(req, "x-user-id", user.id);
-
-          const cookieAccess = [
-            `accessToken=${newAccessToken}`,
-            `Path=/`,
-            `HttpOnly`,
-            `SameSite=Strict`,
-            process.env.NODE_ENV === "production" ? "Secure" : "",
-            `Max-Age=${60 * 15}`,
-          ]
-            .filter(Boolean)
-            .join("; ");
-
-          res.headers.append("Set-Cookie", cookieAccess);
-
-          return addSecurityHeaders(res);
-        }
-      }
-    } catch (err) {
-      console.error("proxy refresh error:", err);
-    }
-  }
-
-  // Both tokens invalid or missing. For the two public-GET exceptions
-  // this is just "an anonymous visitor" — let the request through with
-  // no x-user-id, and the route handler itself treats that as anonymous
-  // read access. Every other protected route still 401s here exactly as
-  // before.
-  if (isPublicGet) {
-    return addSecurityHeaders(NextResponse.next());
-  }
-
-  return addSecurityHeaders(
-    NextResponse.json(
-      { success: false, error: "Unauthorized" },
-      { status: 401 },
-    ),
+  return (
+    <HydrationBoundary state={dehydrate(queryClient)}>
+      <RequireAuth fallback={<HomeFeedSkeleton />}>
+        <div className="min-h-dvh">
+          <HomeFeed />
+        </div>
+      </RequireAuth>
+    </HydrationBoundary>
   );
 }
 
-export const config = {
-  matcher: [
-    "/api/user/:path*",
-    "/((?!_next/static|_next/image|favicon.ico).*)",
-  ],
-};
+async function timed<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  const start = performance.now();
+  const result = await fn();
+  console.log(`[home] ${label}: ${(performance.now() - start).toFixed(1)}ms`);
+  return result;
+}
 </file>
 
 <file path="components/shared/TopNav.tsx">
@@ -12784,6 +12484,237 @@ export const API_ROUTES = {
 };
 </file>
 
+<file path="proxy.ts">
+import { NextRequest, NextResponse } from "next/server";
+import {
+  verifyAccessToken,
+  checkRefreshToken,
+  signAccessToken,
+} from "./lib/auth";
+import { prisma } from "./lib/prisma";
+
+function addSecurityHeaders(response: NextResponse) {
+  response.headers.set(
+    "X-Robots-Tag",
+    "noindex, nofollow, noarchive, nosnippet",
+  );
+  response.headers.set("X-Content-Type-Options", "nosniff");
+  response.headers.set("X-Frame-Options", "DENY");
+  response.headers.set("Referrer-Policy", "no-referrer");
+  response.headers.set("Permissions-Policy", "interest-cohort=()");
+  response.headers.set("X-XSS-Protection", "1; mode=block");
+  return response;
+}
+
+function isBot(userAgent: string): boolean {
+  const botPatterns = [
+    "googlebot",
+    "bingbot",
+    "slurp",
+    "duckduckbot",
+    "baiduspider",
+    "yandexbot",
+    "crawler",
+    "spider",
+    "scraper",
+    "bot",
+    "archive.org",
+    "wayback",
+    "ia_archiver",
+    "gptbot",
+    "chatgpt",
+    "ccbot",
+    "anthropic",
+    "claude",
+    "cohere",
+  ];
+  const lowerUA = userAgent.toLowerCase();
+  return botPatterns.some((pattern) => lowerUA.includes(pattern));
+}
+
+function nextWithRequestHeader(req: NextRequest, name: string, value: string) {
+  const headers = new Headers(req.headers);
+  headers.set(name, value);
+  return NextResponse.next({ request: { headers } });
+}
+
+// Clears the three auth cookies on whatever response we're already
+// returning — shared by the refresh-token-reuse branch below, since
+// that's now reachable from both page requests and API requests.
+function clearAuthCookies(res: NextResponse) {
+  for (const name of ["accessToken", "refreshToken", "uid"]) {
+    res.headers.append(
+      "Set-Cookie",
+      `${name}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`,
+    );
+  }
+  return res;
+}
+
+const RESERVED_POST_SEGMENTS = new Set(["likes"]);
+
+function isPublicPostGet(pathname: string, method: string): boolean {
+  if (method !== "GET") return false;
+  const match = pathname.match(/^\/api\/posts\/([^/]+)(?:\/comments)?$/);
+  if (!match) return false;
+  const [, postId] = match;
+  return !RESERVED_POST_SEGMENTS.has(postId);
+}
+
+const RESERVED_USER_SEGMENTS = new Set([
+  "me",
+  "onboarding",
+  "username-available",
+]);
+
+function isPublicUserGet(pathname: string, method: string): boolean {
+  if (method !== "GET") return false;
+  const match = pathname.match(/^\/api\/user\/([^/]+)(?:\/posts)?$/);
+  if (!match) return false;
+  const [, username] = match;
+  return !RESERVED_USER_SEGMENTS.has(username);
+}
+
+export async function proxy(req: NextRequest) {
+  const pathname = req.nextUrl.pathname;
+
+  const userAgent = req.headers.get("user-agent") || "";
+  if (isBot(userAgent)) {
+    return addSecurityHeaders(
+      new NextResponse("Access Denied", { status: 403 }),
+    );
+  }
+
+  // Vanity-specific protected API routes — same list as before. The
+  // difference from before: this no longer gates whether we ATTEMPT to
+  // identify the caller (that now happens unconditionally below, for
+  // every request, page or API) — it only gates whether a failed
+  // identification is a hard 401 or a quiet pass-through. A page
+  // request with no valid session isn't an error; RequireAuth decides
+  // what to do with that on the frontend, same as always.
+  const isProtectedRoute = [
+    "/api/user",
+    "/api/upload",
+    "/api/posts",
+    "/api/saved",
+  ].some((route) => pathname.startsWith(route));
+
+  const isPublicGet =
+    isPublicPostGet(pathname, req.method) ||
+    isPublicUserGet(pathname, req.method);
+
+  // Only these two cases still enforce a hard 401 when identification
+  // fails below — every other route (pages, /api/auth/*, the public
+  // GET exceptions) falls through to an anonymous NextResponse.next()
+  // instead.
+  const enforceAuth = isProtectedRoute && !isPublicGet;
+
+  const accessToken = req.cookies.get("accessToken")?.value;
+  const refreshToken = req.cookies.get("refreshToken")?.value;
+  const uid = req.cookies.get("uid")?.value;
+
+  // Try access token first. Runs for every request now — not just
+  // protected API routes — so a Server Component can read x-user-id
+  // via lib/session.ts instead of re-verifying the raw cookie itself
+  // (which can't recover an expired token during render; middleware,
+  // running before the Server Component, can).
+  if (accessToken) {
+    try {
+      const payload = verifyAccessToken(accessToken);
+      const res = nextWithRequestHeader(
+        req,
+        "x-user-id",
+        (payload as { sub: string }).sub,
+      );
+      return addSecurityHeaders(res);
+    } catch {
+      // Access token invalid/expired, fall through to refresh
+    }
+  }
+
+  // Try refresh token if access token failed — lightweight, silent
+  // reissue only, same as before. Doesn't rotate the refresh token
+  // itself; that's still reserved for the explicit
+  // /api/auth/refresh-token route.
+  if (refreshToken && uid) {
+    try {
+      const result = await checkRefreshToken(uid, refreshToken);
+
+      if (result.status === "reused") {
+        console.warn(`Refresh token reuse detected for user ${uid}`);
+        if (enforceAuth) {
+          const res = clearAuthCookies(
+            addSecurityHeaders(
+              NextResponse.json(
+                { success: false, error: "Unauthorized" },
+                { status: 401 },
+              ),
+            ),
+          );
+          return res;
+        }
+        // Page request (or public GET) — a raw JSON 401 body would
+        // render as the page itself, which is wrong. Clear the
+        // compromised cookies and let it through anonymously instead;
+        // RequireAuth (or the public page) handles a logged-out visit
+        // the normal way from there.
+        return addSecurityHeaders(clearAuthCookies(NextResponse.next()));
+      }
+
+      if (result.status === "valid") {
+        const user = await prisma.user.findUnique({
+          where: { id: uid },
+          select: { id: true },
+        });
+
+        if (user) {
+          const newAccessToken = signAccessToken({ sub: user.id });
+          const res = nextWithRequestHeader(req, "x-user-id", user.id);
+
+          const cookieAccess = [
+            `accessToken=${newAccessToken}`,
+            `Path=/`,
+            `HttpOnly`,
+            `SameSite=Strict`,
+            process.env.NODE_ENV === "production" ? "Secure" : "",
+            `Max-Age=${60 * 15}`,
+          ]
+            .filter(Boolean)
+            .join("; ");
+
+          res.headers.append("Set-Cookie", cookieAccess);
+          return addSecurityHeaders(res);
+        }
+      }
+    } catch (err) {
+      console.error("proxy refresh error:", err);
+    }
+  }
+
+  // Neither token worked. Hard 401 only for the routes that actually
+  // require a session; every page request and every already-public GET
+  // just passes through with no x-user-id — an ordinary anonymous
+  // visit, not an error.
+  if (enforceAuth) {
+    return addSecurityHeaders(
+      NextResponse.json(
+        { success: false, error: "Unauthorized" },
+        { status: 401 },
+      ),
+    );
+  }
+
+  return addSecurityHeaders(NextResponse.next());
+}
+
+export const config = {
+  matcher: [
+    "/api/user/:path*",
+    "/((?!_next/static|_next/image|favicon.ico).*)",
+  ],
+};
+</file>
+
 <file path="app/profile/page.tsx">
 "use client";
 
@@ -12852,138 +12783,6 @@ export default function ProfilePage() {
     );
 
   return <RequireAuth>{content}</RequireAuth>;
-}
-</file>
-
-<file path="components/shared/BottomNav.tsx">
-"use client";
-
-import Link from "next/link";
-import Image from "next/image";
-import { usePathname } from "next/navigation";
-import {
-  BellIcon,
-  BookmarkSimpleIcon,
-  HouseIcon,
-  MagnifyingGlassIcon,
-  UserIcon,
-} from "@phosphor-icons/react";
-import { PATHS } from "@/utils/paths";
-import { useNotifications } from "@/context/NotificationsProvider";
-import { useCurrentUser } from "@/hooks/useCurrentUser";
-
-const tabs = [
-  { id: "home", label: "Home", href: PATHS.HOME, icon: HouseIcon },
-  {
-    id: "explore",
-    label: "Explore",
-    href: PATHS.EXPLORE,
-    icon: MagnifyingGlassIcon,
-  },
-  { id: "saved", label: "Saved", href: PATHS.SAVED, icon: BookmarkSimpleIcon },
-  {
-    id: "notifications",
-    label: "Notifications",
-    href: PATHS.NOTIFICATIONS,
-    icon: BellIcon,
-  },
-  {
-    id: "profile",
-    label: "Profile",
-    href: PATHS.PROFILE,
-    icon: UserIcon,
-  },
-] as const;
-
-// Exact match for Home only — "/" is technically a prefix of every route,
-// so without this special case Home would light up on every page. Every
-// other tab treats its own subroutes (e.g. /profile/followers) as still
-// "under" it, so the tab stays active while navigating deeper.
-function isTabActive(pathname: string, href: string) {
-  if (href === PATHS.HOME) {
-    return pathname === href;
-  }
-  return pathname === href || pathname.startsWith(`${href}/`);
-}
-
-export function BottomNav({
-  initialUser,
-}: {
-  initialUser: { avatarSrc: string } | null;
-}) {
-  const pathname = usePathname();
-  const { unreadCount } = useNotifications();
-  const { user, isAuthenticated, isLoading } = useCurrentUser();
-
-  // Server already told us who this is (via cookies, on the initial
-  // request) — trust that for first paint while the client-side
-  // "who am I" query is still in flight, instead of falling through to
-  // the generic icon and popping to the avatar a moment later. Once
-  // the query settles, its result wins either way (confirms the same
-  // user, picks up an avatar change, or — rare — reveals the session
-  // was actually invalid and drops back to logged-out).
-  const resolvedAvatarSrc =
-    user?.avatarSrc ?? (isLoading ? initialUser?.avatarSrc : undefined);
-  const resolvedAuthenticated =
-    isAuthenticated || (isLoading && Boolean(initialUser));
-
-  return (
-    <nav
-      className="fixed bottom-0 left-1/2 z-50 w-full max-w-lg -translate-x-1/2 flex h-14 pb-[env(safe-area-inset-bottom)] items-stretch border-t border-foreground/10 bg-background"
-      aria-label="Primary"
-    >
-      {tabs.map(({ id, label, href, icon: Icon }) => {
-        const isActive = isTabActive(pathname, href);
-        // Real session, real avatar to show — falls back to the generic
-        // icon when nobody's actually signed in (useCurrentUser's
-        // isAuthenticated reflects a real /api/user/me check, not a
-        // client-only flag).
-        const showAvatar = id === "profile" && resolvedAuthenticated;
-
-        return (
-          <Link
-            key={id}
-            href={href}
-            aria-label={label}
-            aria-current={isActive ? "page" : undefined}
-            className="flex flex-1 items-center justify-center transition-transform duration-100 active:scale-90"
-          >
-            <span className="relative inline-flex">
-              {showAvatar ? (
-                <span
-                  className={`block size-6 overflow-hidden rounded-full ring-1 ring-foreground/15 sm:size-6.5 ${
-                    isActive ? "ring-2 ring-foreground" : ""
-                  }`}
-                >
-                  <Image
-                    src={resolvedAvatarSrc ?? ""}
-                    alt=""
-                    width={26}
-                    height={26}
-                    unoptimized
-                    className="size-full object-cover"
-                  />
-                </span>
-              ) : (
-                <Icon
-                  className="size-6 sm:size-6.5"
-                  weight={
-                    isActive ? (id != "explore" ? "fill" : "bold") : "regular"
-                  }
-                />
-              )}
-              {id === "notifications" && unreadCount > 0 && (
-                <span
-                  className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-red-500 ring-2 ring-background"
-                  aria-hidden
-                />
-              )}
-            </span>
-          </Link>
-        );
-      })}
-    </nav>
-  );
 }
 </file>
 
@@ -13364,6 +13163,138 @@ export function PostCard({ post }: { post: Post }) {
         message={gateMessage}
       />
     </article>
+  );
+}
+</file>
+
+<file path="components/shared/BottomNav.tsx">
+"use client";
+
+import Link from "next/link";
+import Image from "next/image";
+import { usePathname } from "next/navigation";
+import {
+  BellIcon,
+  BookmarkSimpleIcon,
+  HouseIcon,
+  MagnifyingGlassIcon,
+  UserIcon,
+} from "@phosphor-icons/react";
+import { PATHS } from "@/utils/paths";
+import { useNotifications } from "@/context/NotificationsProvider";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+
+const tabs = [
+  { id: "home", label: "Home", href: PATHS.HOME, icon: HouseIcon },
+  {
+    id: "explore",
+    label: "Explore",
+    href: PATHS.EXPLORE,
+    icon: MagnifyingGlassIcon,
+  },
+  { id: "saved", label: "Saved", href: PATHS.SAVED, icon: BookmarkSimpleIcon },
+  {
+    id: "notifications",
+    label: "Notifications",
+    href: PATHS.NOTIFICATIONS,
+    icon: BellIcon,
+  },
+  {
+    id: "profile",
+    label: "Profile",
+    href: PATHS.PROFILE,
+    icon: UserIcon,
+  },
+] as const;
+
+// Exact match for Home only — "/" is technically a prefix of every route,
+// so without this special case Home would light up on every page. Every
+// other tab treats its own subroutes (e.g. /profile/followers) as still
+// "under" it, so the tab stays active while navigating deeper.
+function isTabActive(pathname: string, href: string) {
+  if (href === PATHS.HOME) {
+    return pathname === href;
+  }
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+export function BottomNav({
+  initialUser,
+}: {
+  initialUser: { avatarSrc: string } | null;
+}) {
+  const pathname = usePathname();
+  const { unreadCount } = useNotifications();
+  const { user, isAuthenticated, isLoading } = useCurrentUser();
+
+  // Server already told us who this is (via cookies, on the initial
+  // request) — trust that for first paint while the client-side
+  // "who am I" query is still in flight, instead of falling through to
+  // the generic icon and popping to the avatar a moment later. Once
+  // the query settles, its result wins either way (confirms the same
+  // user, picks up an avatar change, or — rare — reveals the session
+  // was actually invalid and drops back to logged-out).
+  const resolvedAvatarSrc =
+    user?.avatarSrc ?? (isLoading ? initialUser?.avatarSrc : undefined);
+  const resolvedAuthenticated =
+    isAuthenticated || (isLoading && Boolean(initialUser));
+
+  return (
+    <nav
+      className="fixed bottom-0 left-1/2 z-50 w-full max-w-lg -translate-x-1/2 flex h-14 pb-[env(safe-area-inset-bottom)] items-stretch border-t border-foreground/10 bg-background"
+      aria-label="Primary"
+    >
+      {tabs.map(({ id, label, href, icon: Icon }) => {
+        const isActive = isTabActive(pathname, href);
+        // Real session, real avatar to show — falls back to the generic
+        // icon when nobody's actually signed in (useCurrentUser's
+        // isAuthenticated reflects a real /api/user/me check, not a
+        // client-only flag).
+        const showAvatar = id === "profile" && resolvedAuthenticated;
+
+        return (
+          <Link
+            key={id}
+            href={href}
+            aria-label={label}
+            aria-current={isActive ? "page" : undefined}
+            className="flex flex-1 items-center justify-center transition-transform duration-100 active:scale-90"
+          >
+            <span className="relative inline-flex">
+              {showAvatar ? (
+                <span
+                  className={`block size-6 overflow-hidden rounded-full ring-1 ring-foreground/15 sm:size-6.5 ${
+                    isActive ? "ring-2 ring-foreground" : ""
+                  }`}
+                >
+                  <Image
+                    src={resolvedAvatarSrc ?? ""}
+                    alt=""
+                    width={26}
+                    height={26}
+                    unoptimized
+                    className="size-full object-cover"
+                  />
+                </span>
+              ) : (
+                <Icon
+                  className="size-6 sm:size-6.5"
+                  weight={
+                    isActive ? (id != "explore" ? "fill" : "bold") : "regular"
+                  }
+                />
+              )}
+              {id === "notifications" && unreadCount > 0 && (
+                <span
+                  className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-red-500 ring-2 ring-background"
+                  aria-hidden
+                />
+              )}
+            </span>
+          </Link>
+        );
+      })}
+    </nav>
   );
 }
 </file>
