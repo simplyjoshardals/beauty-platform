@@ -1,85 +1,50 @@
-"use client";
-
-import { useState } from "react";
-import { usePosts } from "@/hooks/usePosts";
-import { useSavedPosts } from "@/hooks/useSavedPosts";
-import { getPostThumbnail } from "@/utils/postThumbnail";
-import { CollectionTile } from "@/components/saved/CollectionTile";
-import { CreateCollectionTile } from "@/components/saved/CreateCollectionTile";
-import { CreateCollectionSheet } from "@/components/saved/CreateCollectionSheet";
-import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
+import {
+  QueryClient,
+  dehydrate,
+  HydrationBoundary,
+} from "@tanstack/react-query";
+import { SavedGridContent } from "@/components/saved/SavedGridContent";
 import { RequireAuth } from "@/components/auth/RequireAuth";
+import { SAVED_QUERY_KEY } from "@/lib/queryKeys";
+import { getServerUserId } from "@/lib/session";
+import { fetchSavedBundleForSSR } from "@/lib/serverQueries";
 
-export default function SavedPage() {
-  const { posts, isLoading: postsLoading } = usePosts();
-  const {
-    isSaved,
-    collections,
-    getPostIdsForCollection,
-    isLoading: savedLoading,
-  } = useSavedPosts();
-  const [createOpen, setCreateOpen] = useState(false);
+// Saved's own dedicated SSR-prefetch — one query, awaited before
+// anything renders, same shape as app/(home)/page.tsx's own prefetch.
+// This used to also prefetch POSTS_QUERY_KEY (the home feed) so
+// SavedGridContent could filter it down to saved posts client-side;
+// that's gone now that fetchSavedBundleForSSR (lib/saved.ts's
+// getSavedBundle) returns the actual saved Post[] directly, queried off
+// the SavedPost join rather than cross-referenced against an unrelated
+// feed list. That also fixes a real bug: a saved post from someone you
+// don't follow used to be invisible on /saved, because it was never in
+// the home feed list being filtered against.
+export default async function SavedPage() {
+  const userId = await getServerUserId();
 
-  // Real pending state now — both the feed (for post thumbnails) and the
-  // saved bundle (for what's actually saved) need to have loaded before
-  // there's anything meaningful to render.
-  const loading = postsLoading || savedLoading;
+  if (!userId) {
+    // No session: RequireAuth below is what actually gates this page —
+    // nothing to prefetch for a logged-out visitor.
+    return (
+      <RequireAuth>
+        <SavedGridContent />
+      </RequireAuth>
+    );
+  }
 
-  const allSavedPosts = posts.filter((post) => isSaved(post.id));
-  const allSavedCover = allSavedPosts[0]
-    ? getPostThumbnail(allSavedPosts[0])
-    : undefined;
+  const savedBundle = await fetchSavedBundleForSSR(userId);
+
+  const queryClient = new QueryClient();
+  await queryClient.prefetchQuery({
+    queryKey: SAVED_QUERY_KEY,
+    queryFn: async () => savedBundle,
+  });
 
   return (
-    <RequireAuth>
-      <div className="flex flex-col">
-        <div className="border-b border-foreground/10 px-4 py-3">
-          <p className="text-sm font-medium">Saved</p>
-        </div>
-
-        {loading ? (
-          <PostGridSkeleton />
-        ) : (
-          <div className="grid grid-cols-2 gap-2 p-3">
-            {/* Always present, same as the create tile — it's the default
-                collection, not something that only exists once it has posts */}
-            <CollectionTile
-              id="all"
-              name="All Saved"
-              coverSrc={allSavedCover}
-              count={allSavedPosts.length}
-            />
-
-            {collections.map((collection) => {
-              const postIds = getPostIdsForCollection(collection.id);
-              const collectionPosts = posts.filter((p) =>
-                postIds.includes(p.id),
-              );
-              const cover = collectionPosts[0]
-                ? getPostThumbnail(collectionPosts[0])
-                : undefined;
-              return (
-                <CollectionTile
-                  key={collection.id}
-                  id={collection.id}
-                  name={collection.name}
-                  coverSrc={cover}
-                  count={collectionPosts.length}
-                />
-              );
-            })}
-
-            {/* Always present, even with nothing saved yet — creating a
-                collection shouldn't require saving something first */}
-            <CreateCollectionTile onPress={() => setCreateOpen(true)} />
-          </div>
-        )}
-
-        <CreateCollectionSheet
-          open={createOpen}
-          onClose={() => setCreateOpen(false)}
-        />
-      </div>
-    </RequireAuth>
+    <HydrationBoundary state={dehydrate(queryClient)}>
+      <RequireAuth>
+        <SavedGridContent />
+      </RequireAuth>
+    </HydrationBoundary>
   );
 }

@@ -1,0 +1,132 @@
+"use client";
+
+import { useState } from "react";
+import { notFound, useRouter } from "next/navigation";
+import { DotsThreeIcon } from "@phosphor-icons/react";
+import { useSavedPosts } from "@/hooks/useSavedPosts";
+import { PostGrid } from "@/components/profile/PostGrid";
+import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
+import { CollectionOptionsSheet } from "@/components/saved/CollectionOptionsSheet";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { PATHS } from "@/utils/paths";
+
+type Props = {
+  collectionId: string;
+};
+
+// Extracted from app/saved/[collectionId]/page.tsx as part of moving
+// that page to SSR (same split as SavedGridContent). The page above
+// already does the real 404 check server-side — this client-side
+// notFound() call stays too, since it's the only thing that can catch a
+// collection disappearing *after* first paint (e.g. deleted in another
+// tab), which the SSR check can't see.
+//
+// `posts` now comes from useSavedPosts (the dedicated saved-posts
+// query) instead of usePosts (the home feed) — a collection's posts are
+// filtered from the actual saved set, not from "your posts + who you
+// follow" cross-referenced against saved ids. Same fix as
+// SavedGridContent: a collection post from someone you don't follow
+// used to be unable to render here at all.
+export function SavedCollectionContent({ collectionId }: Props) {
+  const router = useRouter();
+  const {
+    posts,
+    toggleSave,
+    collections,
+    getPostIdsForCollection,
+    toggleCollectionForPost,
+    isLoading,
+  } = useSavedPosts();
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  const [pendingRemovePostId, setPendingRemovePostId] = useState<string | null>(
+    null,
+  );
+
+  const isAll = collectionId === "all";
+  const collection = collections.find((c) => c.id === collectionId);
+
+  // "all" is always valid (it's the built-in view) — anything else must
+  // match a real collection, or this is a bad/stale link. Only decide
+  // that once the saved bundle has actually loaded — `collections` is
+  // empty during the initial fetch too, and that's not the same thing
+  // as a real 404.
+  if (!isAll && !collection && !isLoading) {
+    notFound();
+  }
+
+  const collectionPosts = isAll
+    ? posts
+    : posts.filter((post) =>
+        getPostIdsForCollection(collectionId).includes(post.id),
+      );
+
+  const title = isAll ? "All Saved" : collection?.name;
+
+  // On "All Saved", removing means fully unsaving — which also cascades
+  // to remove it from every collection, per toggleSave's own logic. On a
+  // specific collection, removing only takes it out of THIS collection —
+  // it stays saved everywhere else it already was.
+  function confirmRemove() {
+    if (!pendingRemovePostId) return;
+    if (isAll) {
+      toggleSave(pendingRemovePostId);
+    } else {
+      toggleCollectionForPost(pendingRemovePostId, collectionId);
+    }
+    setPendingRemovePostId(null);
+  }
+
+  return (
+    <div className="flex flex-col">
+      <div className="flex items-center justify-between border-b border-foreground/10 px-4 py-3">
+        <p className="text-sm font-medium">{title}</p>
+        {/* Rename/delete only makes sense on a real collection, not the
+            built-in "All Saved" view */}
+        {!isAll && collection && (
+          <button
+            type="button"
+            onClick={() => setOptionsOpen(true)}
+            aria-label="Collection options"
+          >
+            <DotsThreeIcon size={20} className="text-foreground" />
+          </button>
+        )}
+      </div>
+
+      {isLoading ? (
+        <PostGridSkeleton />
+      ) : (
+        <PostGrid
+          posts={collectionPosts}
+          emptyTitle="Nothing here yet"
+          emptyDescription="Posts you save to this collection will show up here."
+          onRemove={setPendingRemovePostId}
+        />
+      )}
+
+      <ConfirmDialog
+        open={pendingRemovePostId !== null}
+        title={isAll ? "Remove from Saved?" : `Remove from "${title}"?`}
+        description={
+          isAll
+            ? "This post will no longer be saved."
+            : "This post will stay saved elsewhere, just not in this collection."
+        }
+        confirmLabel="Remove"
+        destructive
+        onConfirm={confirmRemove}
+        onCancel={() => setPendingRemovePostId(null)}
+      />
+
+      {!isAll && collection && (
+        <CollectionOptionsSheet
+          open={optionsOpen}
+          onClose={() => setOptionsOpen(false)}
+          collectionId={collection.id}
+          currentName={collection.name}
+          onDeleted={() => router.replace(PATHS.SAVED)}
+        />
+      )}
+    </div>
+  );
+}

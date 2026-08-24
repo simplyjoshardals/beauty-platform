@@ -1,7 +1,6 @@
 import { cache } from "react";
-import { prisma } from "./prisma";
 import { getPostsByUsername, getHomeFeedPosts } from "./posts";
-import { buildSavedBundle } from "./saved";
+import { getSavedBundle } from "./saved";
 import {
   getFullCurrentUser,
   getFollowingList,
@@ -55,23 +54,14 @@ export async function fetchLikedPostIdsForSSR(userId: string) {
   return getLikedPostIds(userId);
 }
 
+// Backs /saved and /saved/[collectionId] — same query GET /api/saved
+// runs (getSavedBundle, in lib/saved.ts), called directly instead of
+// over HTTP, same convention as fetchUserPostsForSSR above. Returns the
+// actual saved Post[] (queried via the SavedPost join), not just ids to
+// cross-reference against some other already-fetched list — see
+// getSavedBundle's own comment for why that distinction matters.
 export async function fetchSavedBundleForSSR(userId: string) {
-  const [savedPosts, collections] = await Promise.all([
-    prisma.savedPost.findMany({
-      where: { userId },
-      select: {
-        postId: true,
-        collections: { select: { collectionId: true } },
-      },
-      orderBy: { createdAt: "desc" },
-    }),
-    prisma.collection.findMany({
-      where: { userId },
-      select: { id: true, name: true },
-      orderBy: { createdAt: "asc" },
-    }),
-  ]);
-  return buildSavedBundle(savedPosts, collections);
+  return getSavedBundle(userId);
 }
 
 export async function fetchFollowingForSSR(username: string) {

@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { Post } from "@/types/post";
 import {
   getSavedBundle,
   toggleSavedPost,
@@ -18,11 +19,16 @@ export type Collection = { id: string; name: string };
 export { SAVED_QUERY_KEY };
 
 type SavedData = {
+  posts: Post[];
   savedPostIds: string[];
   collections: SavedCollection[];
 };
 
-const EMPTY_SAVED_DATA: SavedData = { savedPostIds: [], collections: [] };
+const EMPTY_SAVED_DATA: SavedData = {
+  posts: [],
+  savedPostIds: [],
+  collections: [],
+};
 
 // apiFetch never throws on a failed request — network errors, timeouts,
 // and non-2xx responses all resolve to a `{ success: false }` object
@@ -37,13 +43,16 @@ function mutationFailed(result: { success: boolean } | undefined) {
 // Replaces context/SavedPostsProvider.tsx. Same public shape (isSaved,
 // toggleSave, collections, createCollection, renameCollection,
 // deleteCollection, isPostInCollection, toggleCollectionForPost,
-// getPostIdsForCollection, savedCount) so every existing consumer keeps
-// working with only an import-path change — except createCollection,
-// which is now async (it has to round-trip to the server to get a real
-// id back), so callers that used its return value synchronously need an
-// await. No provider wrapping needed: react-query already dedupes/shares
-// this cache across every component that calls the hook, same as
-// usePosts.
+// getPostIdsForCollection, savedCount) plus a real `posts` array now —
+// the actual saved Post objects (via getSavedBundle → lib/saved.ts's
+// getSavedBundle, queried off the SavedPost join), not just ids that
+// callers had to cross-reference against some other post list. Every
+// existing consumer keeps working with only an import-path change —
+// except createCollection, which is now async (it has to round-trip to
+// the server to get a real id back), so callers that used its return
+// value synchronously need an await. No provider wrapping needed:
+// react-query already dedupes/shares this cache across every component
+// that calls the hook, same as usePosts.
 //
 // Every mutation below updates the cache optimistically in onMutate
 // (so the UI reacts instantly), snapshots the prior cache so it can be
@@ -59,12 +68,14 @@ export function useSavedPosts() {
       const result = await getSavedBundle();
       if (!result?.success) return EMPTY_SAVED_DATA;
       return {
+        posts: result.posts,
         savedPostIds: result.savedPostIds,
         collections: result.collections,
       };
     },
   });
 
+  const posts = query.data?.posts ?? [];
   const savedPostIds = useMemo(
     () => new Set(query.data?.savedPostIds ?? []),
     [query.data],
@@ -94,10 +105,12 @@ export function useSavedPosts() {
         const data = old ?? EMPTY_SAVED_DATA;
         const currentlySaved = data.savedPostIds.includes(postId);
         if (currentlySaved) {
-          // Fully unsaving removes it from every collection too — a
-          // post can't sit in a folder while not being saved at all,
-          // same cascade the server applies.
+          // Fully unsaving removes it from every collection too, and
+          // out of `posts` itself — a post can't sit in a folder (or
+          // in the saved list at all) while not being saved, same
+          // cascade the server applies.
           return {
+            posts: data.posts.filter((p) => p.id !== postId),
             savedPostIds: data.savedPostIds.filter((id) => id !== postId),
             collections: data.collections.map((c) => ({
               ...c,
@@ -105,6 +118,12 @@ export function useSavedPosts() {
             })),
           };
         }
+        // Saving: the caller only has a postId here, not the full Post
+        // object, so `posts` can't be optimistically appended to — it
+        // catches up via the refetch() below once the mutation
+        // succeeds. savedPostIds updates immediately regardless, which
+        // is enough for isSaved() (e.g. a bookmark icon) to react
+        // instantly.
         return { ...data, savedPostIds: [...data.savedPostIds, postId] };
       });
       return { previous };
@@ -180,9 +199,9 @@ export function useSavedPosts() {
       const previous = await snapshotAndCancel();
       queryClient.setQueryData<SavedData>(SAVED_QUERY_KEY, (old) => {
         const data = old ?? EMPTY_SAVED_DATA;
-        // Only removes the folder/grouping — savedPostIds is untouched,
-        // matching the server: deleting a collection never unsaves the
-        // posts inside it.
+        // Only removes the folder/grouping — posts/savedPostIds are
+        // untouched, matching the server: deleting a collection never
+        // unsaves the posts inside it.
         return {
           ...data,
           collections: data.collections.filter((c) => c.id !== collectionId),
@@ -217,10 +236,15 @@ export function useSavedPosts() {
           // Adding to a collection implies the post is saved overall
           // too — same as toggleSaveMutation, but only in the adding
           // direction; removing from one collection never unsaves it.
+          // `posts` isn't touched here either way: this only ever fires
+          // for a post that's already saved (and so already in `posts`)
+          // since a post has to be saved before it can be filed into a
+          // collection.
           savedPostIds:
             !wasInCollection && !data.savedPostIds.includes(postId)
               ? [...data.savedPostIds, postId]
               : data.savedPostIds,
+          posts: data.posts,
           collections: data.collections.map((c) =>
             c.id === collectionId
               ? {
@@ -289,6 +313,7 @@ export function useSavedPosts() {
   }
 
   return {
+    posts,
     isSaved,
     toggleSave,
     collections,

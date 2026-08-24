@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { buildSavedBundle } from "@/lib/saved";
+import { getSavedBundle } from "@/lib/saved";
 
 export async function GET(req: NextRequest) {
   const userId = req.headers.get("x-user-id");
@@ -11,26 +11,9 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const [savedPosts, collections] = await Promise.all([
-    prisma.savedPost.findMany({
-      where: { userId },
-      select: {
-        postId: true,
-        collections: { select: { collectionId: true } },
-      },
-      orderBy: { createdAt: "desc" },
-    }),
-    prisma.collection.findMany({
-      where: { userId },
-      select: { id: true, name: true },
-      orderBy: { createdAt: "asc" },
-    }),
-  ]);
+  const bundle = await getSavedBundle(userId);
 
-  return NextResponse.json({
-    success: true,
-    ...buildSavedBundle(savedPosts, collections),
-  });
+  return NextResponse.json({ success: true, ...bundle });
 }
 
 // Toggles a post's overall saved state — mirrors SavedPostsProvider's old

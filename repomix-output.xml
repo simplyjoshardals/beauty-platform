@@ -197,6 +197,8 @@ components/
     CollectionTile.tsx
     CreateCollectionSheet.tsx
     CreateCollectionTile.tsx
+    SavedCollectionContent.tsx
+    SavedGridContent.tsx
     SaveToCollectionSheet.tsx
   shared/
     BottomNav.tsx
@@ -320,6 +322,231 @@ tsconfig.json
 
 <files>
 This section contains the contents of the repository's files.
+
+<file path="components/saved/SavedCollectionContent.tsx">
+"use client";
+
+import { useState } from "react";
+import { notFound, useRouter } from "next/navigation";
+import { DotsThreeIcon } from "@phosphor-icons/react";
+import { usePosts } from "@/hooks/usePosts";
+import { useSavedPosts } from "@/hooks/useSavedPosts";
+import { PostGrid } from "@/components/profile/PostGrid";
+import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
+import { CollectionOptionsSheet } from "@/components/saved/CollectionOptionsSheet";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { PATHS } from "@/utils/paths";
+
+type Props = {
+  collectionId: string;
+};
+
+// Extracted from app/saved/[collectionId]/page.tsx as part of moving
+// that page to SSR (same split as SavedGridContent). Logic is otherwise
+// unchanged. The page above already does the real 404 check server-side
+// (see its own comment) — this client-side notFound() call stays too,
+// since it's the only thing that can catch a collection disappearing
+// *after* first paint (e.g. deleted in another tab), which the SSR
+// check can't see.
+export function SavedCollectionContent({ collectionId }: Props) {
+  const router = useRouter();
+  const { posts, isLoading: postsLoading } = usePosts();
+  const {
+    isSaved,
+    toggleSave,
+    collections,
+    getPostIdsForCollection,
+    toggleCollectionForPost,
+    isLoading: savedLoading,
+  } = useSavedPosts();
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  const [pendingRemovePostId, setPendingRemovePostId] = useState<string | null>(
+    null,
+  );
+
+  // Real pending state — same reasoning as SavedGridContent.
+  const loading = postsLoading || savedLoading;
+
+  const isAll = collectionId === "all";
+  const collection = collections.find((c) => c.id === collectionId);
+
+  // "all" is always valid (it's the built-in view) — anything else must
+  // match a real collection, or this is a bad/stale link. Only decide
+  // that once the saved bundle has actually loaded — `collections` is
+  // empty during the initial fetch too, and that's not the same thing
+  // as a real 404.
+  if (!isAll && !collection && !savedLoading) {
+    notFound();
+  }
+
+  const collectionPosts = isAll
+    ? posts.filter((post) => isSaved(post.id))
+    : posts.filter((post) =>
+        getPostIdsForCollection(collectionId).includes(post.id),
+      );
+
+  const title = isAll ? "All Saved" : collection?.name;
+
+  // On "All Saved", removing means fully unsaving — which also cascades
+  // to remove it from every collection, per toggleSave's own logic. On a
+  // specific collection, removing only takes it out of THIS collection —
+  // it stays saved everywhere else it already was.
+  function confirmRemove() {
+    if (!pendingRemovePostId) return;
+    if (isAll) {
+      toggleSave(pendingRemovePostId);
+    } else {
+      toggleCollectionForPost(pendingRemovePostId, collectionId);
+    }
+    setPendingRemovePostId(null);
+  }
+
+  return (
+    <div className="flex flex-col">
+      <div className="flex items-center justify-between border-b border-foreground/10 px-4 py-3">
+        <p className="text-sm font-medium">{title}</p>
+        {/* Rename/delete only makes sense on a real collection, not the
+            built-in "All Saved" view */}
+        {!isAll && collection && (
+          <button
+            type="button"
+            onClick={() => setOptionsOpen(true)}
+            aria-label="Collection options"
+          >
+            <DotsThreeIcon size={20} className="text-foreground" />
+          </button>
+        )}
+      </div>
+
+      {loading ? (
+        <PostGridSkeleton />
+      ) : (
+        <PostGrid
+          posts={collectionPosts}
+          emptyTitle="Nothing here yet"
+          emptyDescription="Posts you save to this collection will show up here."
+          onRemove={setPendingRemovePostId}
+        />
+      )}
+
+      <ConfirmDialog
+        open={pendingRemovePostId !== null}
+        title={isAll ? "Remove from Saved?" : `Remove from "${title}"?`}
+        description={
+          isAll
+            ? "This post will no longer be saved."
+            : "This post will stay saved elsewhere, just not in this collection."
+        }
+        confirmLabel="Remove"
+        destructive
+        onConfirm={confirmRemove}
+        onCancel={() => setPendingRemovePostId(null)}
+      />
+
+      {!isAll && collection && (
+        <CollectionOptionsSheet
+          open={optionsOpen}
+          onClose={() => setOptionsOpen(false)}
+          collectionId={collection.id}
+          currentName={collection.name}
+          onDeleted={() => router.replace(PATHS.SAVED)}
+        />
+      )}
+    </div>
+  );
+}
+</file>
+
+<file path="components/saved/SavedGridContent.tsx">
+"use client";
+
+import { useState } from "react";
+import { usePosts } from "@/hooks/usePosts";
+import { useSavedPosts } from "@/hooks/useSavedPosts";
+import { getPostThumbnail } from "@/utils/postThumbnail";
+import { CollectionTile } from "@/components/saved/CollectionTile";
+import { CreateCollectionTile } from "@/components/saved/CreateCollectionTile";
+import { CreateCollectionSheet } from "@/components/saved/CreateCollectionSheet";
+import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
+
+// Extracted from app/saved/page.tsx as part of moving that page to SSR
+// (mirrors app/(home)/page.tsx and app/profile/page.tsx's split: an
+// async Server Component does the prefetch, a "use client" component
+// underneath just reads the now-hydrated caches). Logic here is
+// otherwise unchanged — usePosts/useSavedPosts still do the same
+// client-side reads, they just resolve instantly on first paint now
+// because POSTS_QUERY_KEY and SAVED_QUERY_KEY are already warm.
+export function SavedGridContent() {
+  const { posts, isLoading: postsLoading } = usePosts();
+  const {
+    isSaved,
+    collections,
+    getPostIdsForCollection,
+    isLoading: savedLoading,
+  } = useSavedPosts();
+  const [createOpen, setCreateOpen] = useState(false);
+
+  // Still real pending state, not just a first-paint fallback — a
+  // client-side navigation into /saved reruns this Server Component too
+  // (so it's normally warm), but this keeps the page correct if either
+  // query is ever invalidated/refetching on its own.
+  const loading = postsLoading || savedLoading;
+
+  const allSavedPosts = posts.filter((post) => isSaved(post.id));
+  const allSavedCover = allSavedPosts[0]
+    ? getPostThumbnail(allSavedPosts[0])
+    : undefined;
+
+  return (
+    <div className="flex flex-col">
+      <div className="border-b border-foreground/10 px-4 py-3">
+        <p className="text-sm font-medium">Saved</p>
+      </div>
+
+      {loading ? (
+        <PostGridSkeleton />
+      ) : (
+        <div className="grid grid-cols-2 gap-2 p-3">
+          {/* Always present, same as the create tile — it's the default
+              collection, not something that only exists once it has posts */}
+          <CollectionTile
+            id="all"
+            name="All Saved"
+            coverSrc={allSavedCover}
+            count={allSavedPosts.length}
+          />
+
+          {collections.map((collection) => {
+            const postIds = getPostIdsForCollection(collection.id);
+            const collectionPosts = posts.filter((p) => postIds.includes(p.id));
+            const cover = collectionPosts[0]
+              ? getPostThumbnail(collectionPosts[0])
+              : undefined;
+            return (
+              <CollectionTile
+                key={collection.id}
+                id={collection.id}
+                name={collection.name}
+                coverSrc={cover}
+                count={collectionPosts.length}
+              />
+            );
+          })}
+
+          {/* Always present, even with nothing saved yet — creating a
+              collection shouldn't require saving something first */}
+          <CreateCollectionTile onPress={() => setCreateOpen(true)} />
+        </div>
+      )}
+
+      <CreateCollectionSheet
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+      />
+    </div>
+  );
+}
+</file>
 
 <file path="app/(home)/loading.tsx">
 import { HomeFeedSkeleton } from "@/components/feed/HomeFeedSkeleton";
@@ -4719,229 +4946,6 @@ export async function GET(req: NextRequest) {
 }
 </file>
 
-<file path="app/api/posts/route.ts">
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { MediaType as PrismaMediaType } from "@/lib/generated/prisma/client";
-import {
-  serializePost,
-  postInclude,
-  isValidCloudinaryUrl,
-  POST_IMAGE_FOLDER,
-  POST_VIDEO_FOLDER,
-  MAX_CAPTION_LENGTH,
-  MAX_PRODUCT_LABEL_LENGTH,
-  MAX_PRODUCTS_PER_POST,
-  MAX_CAROUSEL_ITEMS,
-} from "@/lib/posts";
-import { getCloudinaryVideoThumbnail } from "@/utils/cloudinaryVideoThumbnail";
-
-// No pagination yet — fine for a feed this size today. Swap this for a
-// cursor (createdAt + id) once there are enough posts for it to matter;
-// the response shape (an array under `posts`) is set up so that swap
-// doesn't force a change on the frontend beyond how it's called.
-const FEED_TAKE = 50;
-
-export async function GET() {
-  const posts = await prisma.post.findMany({
-    include: postInclude,
-    orderBy: { createdAt: "desc" },
-    take: FEED_TAKE,
-  });
-
-  return NextResponse.json({
-    success: true,
-    posts: posts.map(serializePost),
-  });
-}
-
-type ProductInput = { label: string };
-
-function validateProducts(input: unknown): ProductInput[] | { error: string } {
-  if (input === undefined) return [];
-  if (!Array.isArray(input)) return { error: "Invalid products." };
-  if (input.length > MAX_PRODUCTS_PER_POST) {
-    return { error: `You can tag up to ${MAX_PRODUCTS_PER_POST} products.` };
-  }
-
-  const products: ProductInput[] = [];
-  for (const item of input) {
-    if (
-      !item ||
-      typeof item !== "object" ||
-      typeof (item as { label?: unknown }).label !== "string"
-    ) {
-      return { error: "Invalid products." };
-    }
-    const label = (item as { label: string }).label.trim();
-    if (!label || label.length > MAX_PRODUCT_LABEL_LENGTH) {
-      return { error: "Invalid product label." };
-    }
-    products.push({ label });
-  }
-  return products;
-}
-
-// x-user-id is set by proxy.ts, which already validated the session
-// before this route runs — same trust model as every other protected
-// route (/api/user/me, /api/upload/signature, etc).
-export async function POST(req: NextRequest) {
-  try {
-    const userId = req.headers.get("x-user-id");
-    if (!userId) {
-      return NextResponse.json(
-        { success: false, error: "Unauthorized" },
-        { status: 401 },
-      );
-    }
-
-    const body = await req.json();
-    const { mediaType, caption, products: productsInput } = body;
-
-    if (
-      typeof mediaType !== "string" ||
-      !Object.values(PrismaMediaType).includes(mediaType as PrismaMediaType)
-    ) {
-      return NextResponse.json(
-        { success: false, error: "Invalid post type." },
-        { status: 400 },
-      );
-    }
-
-    if (caption !== undefined && typeof caption !== "string") {
-      return NextResponse.json(
-        { success: false, error: "Invalid caption." },
-        { status: 400 },
-      );
-    }
-    const trimmedCaption = (caption ?? "").trim();
-    if (trimmedCaption.length > MAX_CAPTION_LENGTH) {
-      return NextResponse.json(
-        { success: false, error: "Caption is too long." },
-        { status: 400 },
-      );
-    }
-
-    const products = validateProducts(productsInput);
-    if ("error" in products) {
-      return NextResponse.json(
-        { success: false, error: products.error },
-        { status: 400 },
-      );
-    }
-
-    // Media fields are validated per-type below — only the ones for the
-    // submitted mediaType are checked/used, everything else is ignored
-    // even if present in the body.
-    const media = mediaType as PrismaMediaType;
-
-    const mediaData: {
-      imageSrc?: string;
-      imageAlt?: string;
-      videoSrc?: string;
-      videoPoster?: string;
-      beforeSrc?: string;
-      beforeAlt?: string;
-      afterSrc?: string;
-      afterAlt?: string;
-    } = {};
-    let carouselItemsData: { src: string; alt: string; order: number }[] = [];
-
-    if (media === "IMAGE") {
-      const { imageSrc, imageAlt } = body;
-      if (!isValidCloudinaryUrl(imageSrc, POST_IMAGE_FOLDER)) {
-        return NextResponse.json(
-          { success: false, error: "Invalid post image." },
-          { status: 400 },
-        );
-      }
-      mediaData.imageSrc = imageSrc;
-      mediaData.imageAlt = typeof imageAlt === "string" ? imageAlt : "";
-    } else if (media === "CAROUSEL") {
-      const { carouselItems } = body;
-      if (
-        !Array.isArray(carouselItems) ||
-        carouselItems.length < 2 ||
-        carouselItems.length > MAX_CAROUSEL_ITEMS
-      ) {
-        return NextResponse.json(
-          { success: false, error: "A carousel needs 2–10 photos." },
-          { status: 400 },
-        );
-      }
-      for (const item of carouselItems) {
-        if (!isValidCloudinaryUrl(item?.src, POST_IMAGE_FOLDER)) {
-          return NextResponse.json(
-            { success: false, error: "Invalid carousel image." },
-            { status: 400 },
-          );
-        }
-      }
-      carouselItemsData = carouselItems.map(
-        (item: { src: string; alt?: string }, index: number) => ({
-          src: item.src,
-          alt: typeof item.alt === "string" ? item.alt : "",
-          order: index,
-        }),
-      );
-    } else if (media === "VIDEO") {
-      const { videoSrc } = body;
-      if (!isValidCloudinaryUrl(videoSrc, POST_VIDEO_FOLDER)) {
-        return NextResponse.json(
-          { success: false, error: "Invalid post video." },
-          { status: 400 },
-        );
-      }
-      mediaData.videoSrc = videoSrc;
-      // Always derived server-side from videoSrc, never taken from the
-      // request body — it's a pure transform of a URL we already
-      // validated above, so there's nothing for the client to get wrong
-      // (or skip sending) and no separate upload/model field to keep in
-      // sync with it.
-      mediaData.videoPoster = getCloudinaryVideoThumbnail(videoSrc);
-    } else if (media === "BEFORE_AFTER") {
-      const { beforeSrc, beforeAlt, afterSrc, afterAlt } = body;
-      if (
-        !isValidCloudinaryUrl(beforeSrc, POST_IMAGE_FOLDER) ||
-        !isValidCloudinaryUrl(afterSrc, POST_IMAGE_FOLDER)
-      ) {
-        return NextResponse.json(
-          { success: false, error: "Invalid before/after photos." },
-          { status: 400 },
-        );
-      }
-      mediaData.beforeSrc = beforeSrc;
-      mediaData.beforeAlt =
-        typeof beforeAlt === "string" ? beforeAlt : "Before";
-      mediaData.afterSrc = afterSrc;
-      mediaData.afterAlt = typeof afterAlt === "string" ? afterAlt : "After";
-    }
-
-    const post = await prisma.post.create({
-      data: {
-        authorId: userId,
-        mediaType: media,
-        caption: trimmedCaption,
-        ...mediaData,
-        ...(carouselItemsData.length > 0
-          ? { carouselItems: { create: carouselItemsData } }
-          : {}),
-        ...(products.length > 0 ? { products: { create: products } } : {}),
-      },
-      include: postInclude,
-    });
-
-    return NextResponse.json({ success: true, post: serializePost(post) });
-  } catch (err) {
-    console.error("create post error", err);
-    return NextResponse.json(
-      { success: false, error: "Server error" },
-      { status: 500 },
-    );
-  }
-}
-</file>
-
 <file path="app/api/user/[username]/following/route.ts">
 import { NextRequest, NextResponse } from "next/server";
 import { getFollowingList } from "@/lib/users";
@@ -7909,116 +7913,233 @@ export function validateUsername(value: string): string | null {
 }
 </file>
 
-<file path="app/(home)/page.tsx">
+<file path="app/api/posts/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { MediaType as PrismaMediaType } from "@/lib/generated/prisma/client";
 import {
-  QueryClient,
-  dehydrate,
-  HydrationBoundary,
-} from "@tanstack/react-query";
-import { HomeFeed } from "@/components/feed/HomeFeed";
-import { RequireAuth } from "@/components/auth/RequireAuth";
-import {
-  POSTS_QUERY_KEY,
-  LIKES_QUERY_KEY,
-  SAVED_QUERY_KEY,
-  followingQueryKey,
-  profileQueryKey,
-} from "@/lib/queryKeys";
-import { getServerUserId } from "@/lib/session";
-import {
-  fetchPostsForSSR,
-  fetchLikedPostIdsForSSR,
-  fetchSavedBundleForSSR,
-  fetchFollowingForSSR,
-  fetchUserProfilesBatchForSSR,
-  fetchCurrentUserForSSR,
-} from "@/lib/serverQueries";
+  serializePost,
+  postInclude,
+  isValidCloudinaryUrl,
+  getHomeFeedPosts,
+  POST_IMAGE_FOLDER,
+  POST_VIDEO_FOLDER,
+  MAX_CAPTION_LENGTH,
+  MAX_PRODUCT_LABEL_LENGTH,
+  MAX_PRODUCTS_PER_POST,
+  MAX_CAROUSEL_ITEMS,
+} from "@/lib/posts";
+import { getCloudinaryVideoThumbnail } from "@/utils/cloudinaryVideoThumbnail";
 
-export default async function HomeFeedPage() {
-  const pageStart = performance.now();
-
-  const userId = await getServerUserId();
-
-  const [currentUser, posts] = await Promise.all([
-    userId ? fetchCurrentUserForSSR(userId) : Promise.resolve(null),
-    fetchPostsForSSR(),
-  ]);
-
-  const viewer = currentUser
-    ? { id: currentUser.id, username: currentUser.username }
-    : null;
-  const queryClient = new QueryClient();
-
-  const prefetches: Promise<unknown>[] = [
-    queryClient.prefetchQuery({
-      queryKey: POSTS_QUERY_KEY,
-      queryFn: async () => posts,
-    }),
-  ];
-
-  if (viewer) {
-    prefetches.push(
-      timed("likes", () =>
-        queryClient.prefetchQuery({
-          queryKey: LIKES_QUERY_KEY,
-          queryFn: async () => ({
-            likedPostIds: await fetchLikedPostIdsForSSR(viewer.id),
-          }),
-        }),
-      ),
-      timed("saved", () =>
-        queryClient.prefetchQuery({
-          queryKey: SAVED_QUERY_KEY,
-          queryFn: () => fetchSavedBundleForSSR(viewer.id),
-        }),
-      ),
-      timed("following", () =>
-        queryClient.prefetchQuery({
-          queryKey: followingQueryKey(viewer.username),
-          queryFn: () => fetchFollowingForSSR(viewer.username),
-        }),
-      ),
+// x-user-id is set by proxy.ts. GET /api/posts is a protected route (see
+// proxy.ts's isProtectedRoute/isPublicGet — the feed list itself is
+// never public), so by the time a request reaches here proxy has already
+// enforced a hard 401 for a missing/invalid session; the check below is
+// just defense in depth, not the primary gate.
+//
+// v1 home feed algorithm lives in getHomeFeedPosts (lib/posts.ts): your
+// own posts + everyone you follow, newest first — filtered in the WHERE
+// clause instead of the client fetching every post and filtering
+// against a separately-fetched following list (what HomeFeed used to
+// do).
+export async function GET(req: NextRequest) {
+  const userId = req.headers.get("x-user-id");
+  if (!userId) {
+    return NextResponse.json(
+      { success: false, error: "Unauthorized" },
+      { status: 401 },
     );
   }
 
-  const authors = [...new Set(posts.map((p) => p.author.username))];
-  if (viewer) {
-    prefetches.push(
-      timed(`profiles batch (${authors.length} authors)`, () =>
-        fetchUserProfilesBatchForSSR(authors, viewer.id).then((profiles) => {
-          for (const [username, profile] of profiles) {
-            queryClient.setQueryData(profileQueryKey(username), profile);
-          }
-        }),
-      ),
-    );
-  }
+  const posts = await getHomeFeedPosts(userId);
 
-  const prefetchStart = performance.now();
-  await Promise.all(prefetches);
-  console.log(
-    `[home] Promise.all total: ${(performance.now() - prefetchStart).toFixed(1)}ms`,
-  );
-  console.log(
-    `[home] full page function: ${(performance.now() - pageStart).toFixed(1)}ms`,
-  );
-
-  return (
-    <HydrationBoundary state={dehydrate(queryClient)}>
-      <RequireAuth>
-        <div className="min-h-dvh">
-          <HomeFeed />
-        </div>
-      </RequireAuth>
-    </HydrationBoundary>
-  );
+  return NextResponse.json({ success: true, posts });
 }
 
-async function timed<T>(label: string, fn: () => Promise<T>): Promise<T> {
-  const start = performance.now();
-  const result = await fn();
-  console.log(`[home] ${label}: ${(performance.now() - start).toFixed(1)}ms`);
-  return result;
+type ProductInput = { label: string };
+
+function validateProducts(input: unknown): ProductInput[] | { error: string } {
+  if (input === undefined) return [];
+  if (!Array.isArray(input)) return { error: "Invalid products." };
+  if (input.length > MAX_PRODUCTS_PER_POST) {
+    return { error: `You can tag up to ${MAX_PRODUCTS_PER_POST} products.` };
+  }
+
+  const products: ProductInput[] = [];
+  for (const item of input) {
+    if (
+      !item ||
+      typeof item !== "object" ||
+      typeof (item as { label?: unknown }).label !== "string"
+    ) {
+      return { error: "Invalid products." };
+    }
+    const label = (item as { label: string }).label.trim();
+    if (!label || label.length > MAX_PRODUCT_LABEL_LENGTH) {
+      return { error: "Invalid product label." };
+    }
+    products.push({ label });
+  }
+  return products;
+}
+
+// x-user-id is set by proxy.ts, which already validated the session
+// before this route runs — same trust model as every other protected
+// route (/api/user/me, /api/upload/signature, etc).
+export async function POST(req: NextRequest) {
+  try {
+    const userId = req.headers.get("x-user-id");
+    if (!userId) {
+      return NextResponse.json(
+        { success: false, error: "Unauthorized" },
+        { status: 401 },
+      );
+    }
+
+    const body = await req.json();
+    const { mediaType, caption, products: productsInput } = body;
+
+    if (
+      typeof mediaType !== "string" ||
+      !Object.values(PrismaMediaType).includes(mediaType as PrismaMediaType)
+    ) {
+      return NextResponse.json(
+        { success: false, error: "Invalid post type." },
+        { status: 400 },
+      );
+    }
+
+    if (caption !== undefined && typeof caption !== "string") {
+      return NextResponse.json(
+        { success: false, error: "Invalid caption." },
+        { status: 400 },
+      );
+    }
+    const trimmedCaption = (caption ?? "").trim();
+    if (trimmedCaption.length > MAX_CAPTION_LENGTH) {
+      return NextResponse.json(
+        { success: false, error: "Caption is too long." },
+        { status: 400 },
+      );
+    }
+
+    const products = validateProducts(productsInput);
+    if ("error" in products) {
+      return NextResponse.json(
+        { success: false, error: products.error },
+        { status: 400 },
+      );
+    }
+
+    // Media fields are validated per-type below — only the ones for the
+    // submitted mediaType are checked/used, everything else is ignored
+    // even if present in the body.
+    const media = mediaType as PrismaMediaType;
+
+    const mediaData: {
+      imageSrc?: string;
+      imageAlt?: string;
+      videoSrc?: string;
+      videoPoster?: string;
+      beforeSrc?: string;
+      beforeAlt?: string;
+      afterSrc?: string;
+      afterAlt?: string;
+    } = {};
+    let carouselItemsData: { src: string; alt: string; order: number }[] = [];
+
+    if (media === "IMAGE") {
+      const { imageSrc, imageAlt } = body;
+      if (!isValidCloudinaryUrl(imageSrc, POST_IMAGE_FOLDER)) {
+        return NextResponse.json(
+          { success: false, error: "Invalid post image." },
+          { status: 400 },
+        );
+      }
+      mediaData.imageSrc = imageSrc;
+      mediaData.imageAlt = typeof imageAlt === "string" ? imageAlt : "";
+    } else if (media === "CAROUSEL") {
+      const { carouselItems } = body;
+      if (
+        !Array.isArray(carouselItems) ||
+        carouselItems.length < 2 ||
+        carouselItems.length > MAX_CAROUSEL_ITEMS
+      ) {
+        return NextResponse.json(
+          { success: false, error: "A carousel needs 2–10 photos." },
+          { status: 400 },
+        );
+      }
+      for (const item of carouselItems) {
+        if (!isValidCloudinaryUrl(item?.src, POST_IMAGE_FOLDER)) {
+          return NextResponse.json(
+            { success: false, error: "Invalid carousel image." },
+            { status: 400 },
+          );
+        }
+      }
+      carouselItemsData = carouselItems.map(
+        (item: { src: string; alt?: string }, index: number) => ({
+          src: item.src,
+          alt: typeof item.alt === "string" ? item.alt : "",
+          order: index,
+        }),
+      );
+    } else if (media === "VIDEO") {
+      const { videoSrc } = body;
+      if (!isValidCloudinaryUrl(videoSrc, POST_VIDEO_FOLDER)) {
+        return NextResponse.json(
+          { success: false, error: "Invalid post video." },
+          { status: 400 },
+        );
+      }
+      mediaData.videoSrc = videoSrc;
+      // Always derived server-side from videoSrc, never taken from the
+      // request body — it's a pure transform of a URL we already
+      // validated above, so there's nothing for the client to get wrong
+      // (or skip sending) and no separate upload/model field to keep in
+      // sync with it.
+      mediaData.videoPoster = getCloudinaryVideoThumbnail(videoSrc);
+    } else if (media === "BEFORE_AFTER") {
+      const { beforeSrc, beforeAlt, afterSrc, afterAlt } = body;
+      if (
+        !isValidCloudinaryUrl(beforeSrc, POST_IMAGE_FOLDER) ||
+        !isValidCloudinaryUrl(afterSrc, POST_IMAGE_FOLDER)
+      ) {
+        return NextResponse.json(
+          { success: false, error: "Invalid before/after photos." },
+          { status: 400 },
+        );
+      }
+      mediaData.beforeSrc = beforeSrc;
+      mediaData.beforeAlt =
+        typeof beforeAlt === "string" ? beforeAlt : "Before";
+      mediaData.afterSrc = afterSrc;
+      mediaData.afterAlt = typeof afterAlt === "string" ? afterAlt : "After";
+    }
+
+    const post = await prisma.post.create({
+      data: {
+        authorId: userId,
+        mediaType: media,
+        caption: trimmedCaption,
+        ...mediaData,
+        ...(carouselItemsData.length > 0
+          ? { carouselItems: { create: carouselItemsData } }
+          : {}),
+        ...(products.length > 0 ? { products: { create: products } } : {}),
+      },
+      include: postInclude,
+    });
+
+    return NextResponse.json({ success: true, post: serializePost(post) });
+  } catch (err) {
+    console.error("create post error", err);
+    return NextResponse.json(
+      { success: false, error: "Server error" },
+      { status: 500 },
+    );
+  }
 }
 </file>
 
@@ -8976,190 +9097,6 @@ export function isMockFollowerOfCurrentUser(username: string): boolean {
 }
 </file>
 
-<file path="lib/posts.ts">
-import { prisma } from "./prisma";
-import type { Post, PostMedia } from "@/types/post";
-
-// Mirrors the MediaType enum in prisma/schema.prisma exactly — kept as a
-// plain object (not imported from the generated client) so this file has
-// no dependency on `prisma generate` having been run.
-export const MEDIA_TYPES = [
-  "IMAGE",
-  "CAROUSEL",
-  "VIDEO",
-  "BEFORE_AFTER",
-] as const;
-export type MediaType = (typeof MEDIA_TYPES)[number];
-
-// Shape this file needs from a Prisma Post row — deliberately hand-rolled
-// rather than `Prisma.PostGetPayload<...>` so serializePost has no
-// compile-time dependency on the generated client either.
-export type PostRecord = {
-  id: string;
-  authorId: string;
-  mediaType: string;
-  imageSrc: string | null;
-  imageAlt: string | null;
-  videoSrc: string | null;
-  videoPoster: string | null;
-  beforeSrc: string | null;
-  beforeAlt: string | null;
-  afterSrc: string | null;
-  afterAlt: string | null;
-  caption: string;
-  createdAt: Date;
-  author: {
-    id: string;
-    username: string;
-    avatarSrc: string;
-    toneTag: string;
-  };
-  carouselItems: { id: string; src: string; alt: string; order: number }[];
-  products: { id: string; label: string }[];
-  _count: { likes: number; comments: number };
-};
-
-function buildMedia(post: PostRecord): PostMedia {
-  switch (post.mediaType) {
-    case "IMAGE":
-      return {
-        id: post.id,
-        type: "image",
-        src: post.imageSrc ?? "",
-        alt: post.imageAlt ?? "",
-      };
-    case "CAROUSEL":
-      return {
-        id: post.id,
-        type: "carousel",
-        items: [...post.carouselItems]
-          .sort((a, b) => a.order - b.order)
-          .map((item) => ({ src: item.src, alt: item.alt })),
-      };
-    case "VIDEO":
-      return {
-        id: post.id,
-        type: "video",
-        src: post.videoSrc ?? "",
-        poster: post.videoPoster ?? "",
-      };
-    case "BEFORE_AFTER":
-      return {
-        id: post.id,
-        type: "before_after",
-        before: { src: post.beforeSrc ?? "", alt: post.beforeAlt ?? "" },
-        after: { src: post.afterSrc ?? "", alt: post.afterAlt ?? "" },
-      };
-    default:
-      // Shouldn't happen — mediaType is validated on the way in — but
-      // fall back to something renderable rather than throwing mid-list.
-      return { id: post.id, type: "image", src: "", alt: "" };
-  }
-}
-
-// Shared shape for both GET (list) and POST (create) responses — a post
-// a person just created should look identical to one they'd get back
-// from a subsequent list fetch.
-export function serializePost(post: PostRecord): Post {
-  return {
-    id: post.id,
-    author: {
-      id: post.author.id,
-      username: post.author.username,
-      avatarSrc: post.author.avatarSrc,
-      toneTag: post.author.toneTag || undefined,
-    },
-    media: buildMedia(post),
-    products:
-      post.products.length > 0
-        ? post.products.map((p) => ({ id: p.id, label: p.label }))
-        : undefined,
-    caption: post.caption,
-    likeCount: post._count.likes,
-    commentCount: post._count.comments,
-    createdAt: post.createdAt.toISOString(),
-  };
-}
-
-// Same "did this URL actually come from our own signed upload flow"
-// check that /api/user/me and /api/user/onboarding already apply to
-// avatarSrc — a post's media URLs need the same guard, just pointed at
-// the post-media folders instead of vanity/avatars.
-export function isValidCloudinaryUrl(url: unknown, folder: string): boolean {
-  return (
-    typeof url === "string" &&
-    url.length > 0 &&
-    url.includes(`res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}/`) &&
-    url.includes(`/${folder}/`)
-  );
-}
-
-// Shared between GET (list), GET (single post), and POST (create) — a
-// post returned from any of the three needs the exact same shape, so
-// callers can drop any of them into the same cache/array without a
-// reshape. Kept as a plain object (no generated-Prisma-client import)
-// for the same decoupling reason as MEDIA_TYPES above; Prisma's
-// `include` option just needs the right shape, not the actual enum type.
-export const postInclude = {
-  author: true,
-  carouselItems: true,
-  products: true,
-  _count: { select: { likes: true, comments: true } },
-} as const;
-
-export const POST_IMAGE_FOLDER = "vanity/posts/images";
-export const POST_VIDEO_FOLDER = "vanity/posts/videos";
-
-export const MAX_CAPTION_LENGTH = 2200; // matches Instagram's own limit
-export const MAX_PRODUCT_LABEL_LENGTH = 120;
-export const MAX_PRODUCTS_PER_POST = 20;
-export const MAX_CAROUSEL_ITEMS = 10;
-
-// Same take-50-no-pagination-yet posture as FEED_TAKE in
-// app/api/posts/route.ts — fine for a profile grid this size today,
-// swap for real cursor pagination once it matters. One constant here
-// instead of two copies (route + SSR fetcher) that could drift.
-export const PROFILE_POSTS_TAKE = 50;
-
-// Single source of truth for "this user's posts, newest first" —
-// GET /api/user/[username]/posts (the client-side fetch useUserPosts
-// makes) and lib/serverQueries.ts's fetchUserPostsForSSR (the SSR
-// prefetch app/profile/page.tsx and app/u/[username]/page.tsx run) both
-// call one of these instead of each running their own copy of the same
-// Prisma query — same reason GET /api/user/me and fetchCurrentUserForSSR
-// both call getFullCurrentUser in lib/users.ts rather than duplicating
-// it.
-//
-// getPostsByUserId is the actual query. Callers that already resolved a
-// user row for another reason (the route's own 404 check, or the SSR
-// pages after fetchUserProfileForSSR/fetchCurrentUserForSSR already
-// returned an id) should call this directly rather than the
-// username-based wrapper below, to avoid a second redundant lookup.
-export async function getPostsByUserId(userId: string): Promise<Post[]> {
-  const posts = await prisma.post.findMany({
-    where: { authorId: userId },
-    include: postInclude,
-    orderBy: { createdAt: "desc" },
-    take: PROFILE_POSTS_TAKE,
-  });
-  return posts.map(serializePost);
-}
-
-// Convenience wrapper for the rare caller with only a username on hand
-// and no reason to look up the user row itself first. Returns [] for a
-// nonexistent username rather than null/throwing — callers that need to
-// distinguish "user doesn't exist" from "user has no posts" should do
-// their own lookup (and call getPostsByUserId directly) instead.
-export async function getPostsByUsername(username: string): Promise<Post[]> {
-  const user = await prisma.user.findUnique({
-    where: { username },
-    select: { id: true },
-  });
-  if (!user) return [];
-  return getPostsByUserId(user.id);
-}
-</file>
-
 <file path="types/post.ts">
 import type { Comment } from "./comment";
 
@@ -9223,6 +9160,119 @@ const nextConfig: NextConfig = {
 };
 
 export default nextConfig;
+</file>
+
+<file path="app/(home)/page.tsx">
+import {
+  QueryClient,
+  dehydrate,
+  HydrationBoundary,
+} from "@tanstack/react-query";
+import { HomeFeed } from "@/components/feed/HomeFeed";
+import { RequireAuth } from "@/components/auth/RequireAuth";
+import {
+  POSTS_QUERY_KEY,
+  LIKES_QUERY_KEY,
+  SAVED_QUERY_KEY,
+  followingQueryKey,
+  profileQueryKey,
+} from "@/lib/queryKeys";
+import { getServerUserId } from "@/lib/session";
+import {
+  fetchPostsForSSR,
+  fetchLikedPostIdsForSSR,
+  fetchSavedBundleForSSR,
+  fetchFollowingForSSR,
+  fetchUserProfilesBatchForSSR,
+  fetchCurrentUserForSSR,
+} from "@/lib/serverQueries";
+
+export default async function HomeFeedPage() {
+  const pageStart = performance.now();
+
+  const userId = await getServerUserId();
+
+  const [currentUser, posts] = await Promise.all([
+    userId ? fetchCurrentUserForSSR(userId) : Promise.resolve(null),
+    fetchPostsForSSR(userId),
+  ]);
+
+  const viewer = currentUser
+    ? { id: currentUser.id, username: currentUser.username }
+    : null;
+  const queryClient = new QueryClient();
+
+  const prefetches: Promise<unknown>[] = [
+    queryClient.prefetchQuery({
+      queryKey: POSTS_QUERY_KEY,
+      queryFn: async () => posts,
+    }),
+  ];
+
+  if (viewer) {
+    prefetches.push(
+      timed("likes", () =>
+        queryClient.prefetchQuery({
+          queryKey: LIKES_QUERY_KEY,
+          queryFn: async () => ({
+            likedPostIds: await fetchLikedPostIdsForSSR(viewer.id),
+          }),
+        }),
+      ),
+      timed("saved", () =>
+        queryClient.prefetchQuery({
+          queryKey: SAVED_QUERY_KEY,
+          queryFn: () => fetchSavedBundleForSSR(viewer.id),
+        }),
+      ),
+      timed("following", () =>
+        queryClient.prefetchQuery({
+          queryKey: followingQueryKey(viewer.username),
+          queryFn: () => fetchFollowingForSSR(viewer.username),
+        }),
+      ),
+    );
+  }
+
+  const authors = [...new Set(posts.map((p) => p.author.username))];
+  if (viewer) {
+    prefetches.push(
+      timed(`profiles batch (${authors.length} authors)`, () =>
+        fetchUserProfilesBatchForSSR(authors, viewer.id).then((profiles) => {
+          for (const [username, profile] of profiles) {
+            queryClient.setQueryData(profileQueryKey(username), profile);
+          }
+        }),
+      ),
+    );
+  }
+
+  const prefetchStart = performance.now();
+  await Promise.all(prefetches);
+  console.log(
+    `[home] Promise.all total: ${(performance.now() - prefetchStart).toFixed(1)}ms`,
+  );
+  console.log(
+    `[home] full page function: ${(performance.now() - pageStart).toFixed(1)}ms`,
+  );
+
+  return (
+    <HydrationBoundary state={dehydrate(queryClient)}>
+      <RequireAuth>
+        <div className="min-h-dvh">
+          <HomeFeed />
+        </div>
+      </RequireAuth>
+    </HydrationBoundary>
+  );
+}
+
+async function timed<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  const start = performance.now();
+  const result = await fn();
+  console.log(`[home] ${label}: ${(performance.now() - start).toFixed(1)}ms`);
+  return result;
+}
 </file>
 
 <file path="app/p/[postId]/page.tsx">
@@ -9358,132 +9408,78 @@ export default function FollowingPage() {
 </file>
 
 <file path="app/saved/[collectionId]/page.tsx">
-"use client";
-
-import { use, useState } from "react";
-import { notFound, useRouter } from "next/navigation";
-import { DotsThreeIcon } from "@phosphor-icons/react";
-import { usePosts } from "@/hooks/usePosts";
-import { useSavedPosts } from "@/hooks/useSavedPosts";
-import { PostGrid } from "@/components/profile/PostGrid";
-import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
-import { CollectionOptionsSheet } from "@/components/saved/CollectionOptionsSheet";
-import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
-import { PATHS } from "@/utils/paths";
+import { notFound } from "next/navigation";
+import {
+  QueryClient,
+  dehydrate,
+  HydrationBoundary,
+} from "@tanstack/react-query";
+import { SavedCollectionContent } from "@/components/saved/SavedCollectionContent";
 import { RequireAuth } from "@/components/auth/RequireAuth";
+import { POSTS_QUERY_KEY, SAVED_QUERY_KEY } from "@/lib/queryKeys";
+import { getServerUserId } from "@/lib/session";
+import { fetchPostsForSSR, fetchSavedBundleForSSR } from "@/lib/serverQueries";
 
 type Props = {
   params: Promise<{ collectionId: string }>;
 };
 
-export default function SavedCollectionPage({ params }: Props) {
-  const { collectionId } = use(params);
-  const router = useRouter();
-  const { posts, isLoading: postsLoading } = usePosts();
-  const {
-    isSaved,
-    toggleSave,
-    collections,
-    getPostIdsForCollection,
-    toggleCollectionForPost,
-    isLoading: savedLoading,
-  } = useSavedPosts();
-  const [optionsOpen, setOptionsOpen] = useState(false);
-  const [pendingRemovePostId, setPendingRemovePostId] = useState<string | null>(
-    null,
-  );
+// Same SSR-prefetch pair as app/saved/page.tsx (POSTS_QUERY_KEY via
+// fetchPostsForSSR, SAVED_QUERY_KEY via fetchSavedBundleForSSR) — both
+// awaited before anything renders, same reasoning as that page's own
+// comment. On top of that, this page can now do the "is collectionId
+// real" check server-side too, the same way app/u/[username]/page.tsx
+// 404s on a nonexistent username before flushing anything to the
+// client — a bad/stale collection link now produces a true server-side
+// 404 instead of a client-side check-after-mount. SavedCollectionContent
+// keeps its own client-side notFound() call for the one case this can't
+// cover: a collection deleted *after* first paint (e.g. in another tab).
+export default async function SavedCollectionPage({ params }: Props) {
+  const { collectionId } = await params;
+  const userId = await getServerUserId();
 
-  // Real pending state — same reasoning as app/saved/page.tsx.
-  const loading = postsLoading || savedLoading;
+  if (!userId) {
+    // No session: RequireAuth below is what actually gates this page —
+    // nothing to prefetch, and no way to know yet whether collectionId
+    // is even real, for a logged-out visitor.
+    return (
+      <RequireAuth>
+        <SavedCollectionContent collectionId={collectionId} />
+      </RequireAuth>
+    );
+  }
+
+  const [posts, savedBundle] = await Promise.all([
+    fetchPostsForSSR(userId),
+    fetchSavedBundleForSSR(userId),
+  ]);
 
   const isAll = collectionId === "all";
-  const collection = collections.find((c) => c.id === collectionId);
-
-  // "all" is always valid (it's the built-in view) — anything else must
-  // match a real collection, or this is a bad/stale link. Only decide
-  // that once the saved bundle has actually loaded — `collections` is
-  // empty during the initial fetch too, and that's not the same thing
-  // as a real 404.
-  if (!isAll && !collection && !savedLoading) {
+  const collectionExists = savedBundle.collections.some(
+    (c) => c.id === collectionId,
+  );
+  if (!isAll && !collectionExists) {
     notFound();
   }
 
-  const collectionPosts = isAll
-    ? posts.filter((post) => isSaved(post.id))
-    : posts.filter((post) =>
-        getPostIdsForCollection(collectionId).includes(post.id),
-      );
-
-  const title = isAll ? "All Saved" : collection?.name;
-
-  // On "All Saved", removing means fully unsaving — which also cascades
-  // to remove it from every collection, per toggleSave's own logic. On a
-  // specific collection, removing only takes it out of THIS collection —
-  // it stays saved everywhere else it already was.
-  function confirmRemove() {
-    if (!pendingRemovePostId) return;
-    if (isAll) {
-      toggleSave(pendingRemovePostId);
-    } else {
-      toggleCollectionForPost(pendingRemovePostId, collectionId);
-    }
-    setPendingRemovePostId(null);
-  }
+  const queryClient = new QueryClient();
+  await Promise.all([
+    queryClient.prefetchQuery({
+      queryKey: POSTS_QUERY_KEY,
+      queryFn: async () => posts,
+    }),
+    queryClient.prefetchQuery({
+      queryKey: SAVED_QUERY_KEY,
+      queryFn: async () => savedBundle,
+    }),
+  ]);
 
   return (
-    <RequireAuth>
-      <div className="flex flex-col">
-        <div className="flex items-center justify-between border-b border-foreground/10 px-4 py-3">
-          <p className="text-sm font-medium">{title}</p>
-          {/* Rename/delete only makes sense on a real collection, not the
-              built-in "All Saved" view */}
-          {!isAll && collection && (
-            <button
-              type="button"
-              onClick={() => setOptionsOpen(true)}
-              aria-label="Collection options"
-            >
-              <DotsThreeIcon size={20} className="text-foreground" />
-            </button>
-          )}
-        </div>
-
-        {loading ? (
-          <PostGridSkeleton />
-        ) : (
-          <PostGrid
-            posts={collectionPosts}
-            emptyTitle="Nothing here yet"
-            emptyDescription="Posts you save to this collection will show up here."
-            onRemove={setPendingRemovePostId}
-          />
-        )}
-
-        <ConfirmDialog
-          open={pendingRemovePostId !== null}
-          title={isAll ? "Remove from Saved?" : `Remove from "${title}"?`}
-          description={
-            isAll
-              ? "This post will no longer be saved."
-              : "This post will stay saved elsewhere, just not in this collection."
-          }
-          confirmLabel="Remove"
-          destructive
-          onConfirm={confirmRemove}
-          onCancel={() => setPendingRemovePostId(null)}
-        />
-
-        {!isAll && collection && (
-          <CollectionOptionsSheet
-            open={optionsOpen}
-            onClose={() => setOptionsOpen(false)}
-            collectionId={collection.id}
-            currentName={collection.name}
-            onDeleted={() => router.replace(PATHS.SAVED)}
-          />
-        )}
-      </div>
-    </RequireAuth>
+    <HydrationBoundary state={dehydrate(queryClient)}>
+      <RequireAuth>
+        <SavedCollectionContent collectionId={collectionId} />
+      </RequireAuth>
+    </HydrationBoundary>
   );
 }
 </file>
@@ -10006,102 +10002,223 @@ export function useUserProfile(username: string) {
 }
 </file>
 
-<file path="lib/serverQueries.ts">
-import { cache } from "react";
+<file path="lib/posts.ts">
 import { prisma } from "./prisma";
-import { postInclude, serializePost, getPostsByUsername } from "./posts";
-import { buildSavedBundle } from "./saved";
-import {
-  getFullCurrentUser,
-  getFollowingList,
-  getPublicUserProfile,
-  getPublicUserProfilesBatch,
-} from "./users";
-import { getLikedPostIds } from "./likes";
+import type { Post, PostMedia } from "@/types/post";
 
-const FEED_TAKE = 50; // keep in sync with app/api/posts/route.ts
+// Mirrors the MediaType enum in prisma/schema.prisma exactly — kept as a
+// plain object (not imported from the generated client) so this file has
+// no dependency on `prisma generate` having been run.
+export const MEDIA_TYPES = [
+  "IMAGE",
+  "CAROUSEL",
+  "VIDEO",
+  "BEFORE_AFTER",
+] as const;
+export type MediaType = (typeof MEDIA_TYPES)[number];
 
-export async function fetchPostsForSSR() {
+// Shape this file needs from a Prisma Post row — deliberately hand-rolled
+// rather than `Prisma.PostGetPayload<...>` so serializePost has no
+// compile-time dependency on the generated client either.
+export type PostRecord = {
+  id: string;
+  authorId: string;
+  mediaType: string;
+  imageSrc: string | null;
+  imageAlt: string | null;
+  videoSrc: string | null;
+  videoPoster: string | null;
+  beforeSrc: string | null;
+  beforeAlt: string | null;
+  afterSrc: string | null;
+  afterAlt: string | null;
+  caption: string;
+  createdAt: Date;
+  author: {
+    id: string;
+    username: string;
+    avatarSrc: string;
+    toneTag: string;
+  };
+  carouselItems: { id: string; src: string; alt: string; order: number }[];
+  products: { id: string; label: string }[];
+  _count: { likes: number; comments: number };
+};
+
+function buildMedia(post: PostRecord): PostMedia {
+  switch (post.mediaType) {
+    case "IMAGE":
+      return {
+        id: post.id,
+        type: "image",
+        src: post.imageSrc ?? "",
+        alt: post.imageAlt ?? "",
+      };
+    case "CAROUSEL":
+      return {
+        id: post.id,
+        type: "carousel",
+        items: [...post.carouselItems]
+          .sort((a, b) => a.order - b.order)
+          .map((item) => ({ src: item.src, alt: item.alt })),
+      };
+    case "VIDEO":
+      return {
+        id: post.id,
+        type: "video",
+        src: post.videoSrc ?? "",
+        poster: post.videoPoster ?? "",
+      };
+    case "BEFORE_AFTER":
+      return {
+        id: post.id,
+        type: "before_after",
+        before: { src: post.beforeSrc ?? "", alt: post.beforeAlt ?? "" },
+        after: { src: post.afterSrc ?? "", alt: post.afterAlt ?? "" },
+      };
+    default:
+      // Shouldn't happen — mediaType is validated on the way in — but
+      // fall back to something renderable rather than throwing mid-list.
+      return { id: post.id, type: "image", src: "", alt: "" };
+  }
+}
+
+// Shared shape for both GET (list) and POST (create) responses — a post
+// a person just created should look identical to one they'd get back
+// from a subsequent list fetch.
+export function serializePost(post: PostRecord): Post {
+  return {
+    id: post.id,
+    author: {
+      id: post.author.id,
+      username: post.author.username,
+      avatarSrc: post.author.avatarSrc,
+      toneTag: post.author.toneTag || undefined,
+    },
+    media: buildMedia(post),
+    products:
+      post.products.length > 0
+        ? post.products.map((p) => ({ id: p.id, label: p.label }))
+        : undefined,
+    caption: post.caption,
+    likeCount: post._count.likes,
+    commentCount: post._count.comments,
+    createdAt: post.createdAt.toISOString(),
+  };
+}
+
+// Same "did this URL actually come from our own signed upload flow"
+// check that /api/user/me and /api/user/onboarding already apply to
+// avatarSrc — a post's media URLs need the same guard, just pointed at
+// the post-media folders instead of vanity/avatars.
+export function isValidCloudinaryUrl(url: unknown, folder: string): boolean {
+  return (
+    typeof url === "string" &&
+    url.length > 0 &&
+    url.includes(`res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}/`) &&
+    url.includes(`/${folder}/`)
+  );
+}
+
+// Shared between GET (list), GET (single post), and POST (create) — a
+// post returned from any of the three needs the exact same shape, so
+// callers can drop any of them into the same cache/array without a
+// reshape. Kept as a plain object (no generated-Prisma-client import)
+// for the same decoupling reason as MEDIA_TYPES above; Prisma's
+// `include` option just needs the right shape, not the actual enum type.
+export const postInclude = {
+  author: true,
+  carouselItems: true,
+  products: true,
+  _count: { select: { likes: true, comments: true } },
+} as const;
+
+export const POST_IMAGE_FOLDER = "vanity/posts/images";
+export const POST_VIDEO_FOLDER = "vanity/posts/videos";
+
+export const MAX_CAPTION_LENGTH = 2200; // matches Instagram's own limit
+export const MAX_PRODUCT_LABEL_LENGTH = 120;
+export const MAX_PRODUCTS_PER_POST = 20;
+export const MAX_CAROUSEL_ITEMS = 10;
+
+// Same take-50-no-pagination-yet posture as HOME_FEED_TAKE below — fine
+// for a profile grid this size today, swap for real cursor pagination
+// once it matters. One constant here instead of two copies (route + SSR
+// fetcher) that could drift.
+export const PROFILE_POSTS_TAKE = 50;
+
+// No pagination yet — fine for a feed this size today. Swap this for a
+// cursor (createdAt + id) once there are enough posts for it to matter;
+// the response shape (an array under `posts`) is set up so that swap
+// doesn't force a change on the frontend beyond how it's called.
+export const HOME_FEED_TAKE = 50;
+
+// Single source of truth for "this user's posts, newest first" —
+// GET /api/user/[username]/posts (the client-side fetch useUserPosts
+// makes) and lib/serverQueries.ts's fetchUserPostsForSSR (the SSR
+// prefetch app/profile/page.tsx and app/u/[username]/page.tsx run) both
+// call one of these instead of each running their own copy of the same
+// Prisma query — same reason GET /api/user/me and fetchCurrentUserForSSR
+// both call getFullCurrentUser in lib/users.ts rather than duplicating
+// it.
+//
+// getPostsByUserId is the actual query. Callers that already resolved a
+// user row for another reason (the route's own 404 check, or the SSR
+// pages after fetchUserProfileForSSR/fetchCurrentUserForSSR already
+// returned an id) should call this directly rather than the
+// username-based wrapper below, to avoid a second redundant lookup.
+export async function getPostsByUserId(userId: string): Promise<Post[]> {
   const posts = await prisma.post.findMany({
+    where: { authorId: userId },
     include: postInclude,
     orderBy: { createdAt: "desc" },
-    take: FEED_TAKE,
+    take: PROFILE_POSTS_TAKE,
   });
   return posts.map(serializePost);
 }
 
-// Backs the post grid on both /profile and /u/[username] — same query
-// GET /api/user/[username]/posts runs (getPostsByUsername, in
-// lib/posts.ts), called directly instead of over HTTP. Called from
-// inside PostGridSection (components/profile/PostGridSection.tsx),
-// which both pages render behind a <Suspense> boundary — this is
-// deliberately the slow, heavier query (media, carousel items,
-// products, per-post like/comment counts), kept separate from the cheap
-// profile lookup above so the header can render and stream to the
-// client without waiting on this to resolve. Takes a username rather
-// than a userId: the caller (PostGridSection) doesn't necessarily have
-// a userId on hand without its own extra lookup, and getPostsByUsername
-// resolving one internally is cheap next to the query it's paired with
-// here anyway.
-export async function fetchUserPostsForSSR(username: string) {
-  return getPostsByUsername(username);
+// Convenience wrapper for the rare caller with only a username on hand
+// and no reason to look up the user row itself first. Returns [] for a
+// nonexistent username rather than null/throwing — callers that need to
+// distinguish "user doesn't exist" from "user has no posts" should do
+// their own lookup (and call getPostsByUserId directly) instead.
+export async function getPostsByUsername(username: string): Promise<Post[]> {
+  const user = await prisma.user.findUnique({
+    where: { username },
+    select: { id: true },
+  });
+  if (!user) return [];
+  return getPostsByUserId(user.id);
 }
 
-// Backs /u/[username]'s header — same lookup GET /api/user/[username]
-// runs (including the viewer-relative isFollowing/followsMe, and a real
-// postCount via _count — see lib/users.ts), called directly and awaited
-// before anything is flushed to the client, so the header renders with
-// real data (including the post count) on first paint, and a
-// nonexistent username 404s server-side instead of after mount.
-export async function fetchUserProfileForSSR(
-  username: string,
-  viewerId: string | null,
-) {
-  return getPublicUserProfile(username, viewerId);
+// Single source of truth for "the home feed" — GET /api/posts (the
+// client-side fetch usePosts makes) and lib/serverQueries.ts's
+// fetchPostsForSSR (the SSR prefetch app/(home)/page.tsx runs) both call
+// this instead of each running their own copy of the same Prisma query,
+// same reasoning as getPostsByUserId above.
+//
+// v1 algorithm: your own posts + posts from everyone you follow, newest
+// first, no ranking beyond that. The "am I this post's author, or do I
+// follow its author" check now happens in the WHERE clause instead of
+// the client filtering the full unfiltered post list against a
+// separately-fetched following list (what HomeFeed used to do) — same
+// result, but it's no longer possible for the feed to flash
+// everyone-not-just-following before the following list loads, and a
+// post from someone you unfollowed can't linger client-side.
+export async function getHomeFeedPosts(userId: string): Promise<Post[]> {
+  const posts = await prisma.post.findMany({
+    where: {
+      OR: [
+        { authorId: userId },
+        { author: { followers: { some: { followerId: userId } } } },
+      ],
+    },
+    include: postInclude,
+    orderBy: { createdAt: "desc" },
+    take: HOME_FEED_TAKE,
+  });
+  return posts.map(serializePost);
 }
-
-export async function fetchLikedPostIdsForSSR(userId: string) {
-  return getLikedPostIds(userId);
-}
-
-export async function fetchSavedBundleForSSR(userId: string) {
-  const [savedPosts, collections] = await Promise.all([
-    prisma.savedPost.findMany({
-      where: { userId },
-      select: {
-        postId: true,
-        collections: { select: { collectionId: true } },
-      },
-      orderBy: { createdAt: "desc" },
-    }),
-    prisma.collection.findMany({
-      where: { userId },
-      select: { id: true, name: true },
-      orderBy: { createdAt: "asc" },
-    }),
-  ]);
-  return buildSavedBundle(savedPosts, collections);
-}
-
-export async function fetchFollowingForSSR(username: string) {
-  return (await getFollowingList(username)) ?? [];
-}
-
-export async function fetchUserProfilesBatchForSSR(
-  usernames: string[],
-  viewerId: string,
-) {
-  return getPublicUserProfilesBatch(usernames, viewerId);
-}
-
-// Wrapped in React's cache() so calling this from both the root layout
-// (for the global currentUser hydration BottomNav etc. need on every
-// route) and a page (for its own SSR prefetches) within the same
-// request only hits the DB once — React dedupes by arguments for the
-// lifetime of a single render pass.
-export const fetchCurrentUserForSSR = cache(async (userId: string) => {
-  return getFullCurrentUser(userId);
-});
 </file>
 
 <file path="services/postService.ts">
@@ -10585,89 +10702,63 @@ export default function ExplorePage() {
 </file>
 
 <file path="app/saved/page.tsx">
-"use client";
-
-import { useState } from "react";
-import { usePosts } from "@/hooks/usePosts";
-import { useSavedPosts } from "@/hooks/useSavedPosts";
-import { getPostThumbnail } from "@/utils/postThumbnail";
-import { CollectionTile } from "@/components/saved/CollectionTile";
-import { CreateCollectionTile } from "@/components/saved/CreateCollectionTile";
-import { CreateCollectionSheet } from "@/components/saved/CreateCollectionSheet";
-import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
+import {
+  QueryClient,
+  dehydrate,
+  HydrationBoundary,
+} from "@tanstack/react-query";
+import { SavedGridContent } from "@/components/saved/SavedGridContent";
 import { RequireAuth } from "@/components/auth/RequireAuth";
+import { POSTS_QUERY_KEY, SAVED_QUERY_KEY } from "@/lib/queryKeys";
+import { getServerUserId } from "@/lib/session";
+import { fetchPostsForSSR, fetchSavedBundleForSSR } from "@/lib/serverQueries";
 
-export default function SavedPage() {
-  const { posts, isLoading: postsLoading } = usePosts();
-  const {
-    isSaved,
-    collections,
-    getPostIdsForCollection,
-    isLoading: savedLoading,
-  } = useSavedPosts();
-  const [createOpen, setCreateOpen] = useState(false);
+// Mirrors app/(home)/page.tsx's SSR-prefetch pattern. Same two queries
+// the home page prefetches (POSTS_QUERY_KEY, SAVED_QUERY_KEY) — kept
+// pointed at the exact same lib/serverQueries.ts functions (which
+// themselves run the exact same lib/posts.ts + lib/saved.ts queries as
+// GET /api/posts and GET /api/saved) so this page's SSR data and the
+// client hooks it hydrates (usePosts, useSavedPosts) can never
+// disagree about what a "saved" post is. Both are awaited before
+// anything renders, same as home: unlike profile's header/grid split,
+// there's no cheap-vs-heavy query to stream here — the grid can't
+// render anything (not even a cover image) until both have resolved.
+export default async function SavedPage() {
+  const userId = await getServerUserId();
 
-  // Real pending state now — both the feed (for post thumbnails) and the
-  // saved bundle (for what's actually saved) need to have loaded before
-  // there's anything meaningful to render.
-  const loading = postsLoading || savedLoading;
+  if (!userId) {
+    // No session: RequireAuth below is what actually gates this page —
+    // nothing to prefetch for a logged-out visitor.
+    return (
+      <RequireAuth>
+        <SavedGridContent />
+      </RequireAuth>
+    );
+  }
 
-  const allSavedPosts = posts.filter((post) => isSaved(post.id));
-  const allSavedCover = allSavedPosts[0]
-    ? getPostThumbnail(allSavedPosts[0])
-    : undefined;
+  const [posts, savedBundle] = await Promise.all([
+    fetchPostsForSSR(userId),
+    fetchSavedBundleForSSR(userId),
+  ]);
+
+  const queryClient = new QueryClient();
+  await Promise.all([
+    queryClient.prefetchQuery({
+      queryKey: POSTS_QUERY_KEY,
+      queryFn: async () => posts,
+    }),
+    queryClient.prefetchQuery({
+      queryKey: SAVED_QUERY_KEY,
+      queryFn: async () => savedBundle,
+    }),
+  ]);
 
   return (
-    <RequireAuth>
-      <div className="flex flex-col">
-        <div className="border-b border-foreground/10 px-4 py-3">
-          <p className="text-sm font-medium">Saved</p>
-        </div>
-
-        {loading ? (
-          <PostGridSkeleton />
-        ) : (
-          <div className="grid grid-cols-2 gap-2 p-3">
-            {/* Always present, same as the create tile — it's the default
-                collection, not something that only exists once it has posts */}
-            <CollectionTile
-              id="all"
-              name="All Saved"
-              coverSrc={allSavedCover}
-              count={allSavedPosts.length}
-            />
-
-            {collections.map((collection) => {
-              const postIds = getPostIdsForCollection(collection.id);
-              const collectionPosts = posts.filter((p) =>
-                postIds.includes(p.id),
-              );
-              const cover = collectionPosts[0]
-                ? getPostThumbnail(collectionPosts[0])
-                : undefined;
-              return (
-                <CollectionTile
-                  key={collection.id}
-                  id={collection.id}
-                  name={collection.name}
-                  coverSrc={cover}
-                  count={collectionPosts.length}
-                />
-              );
-            })}
-
-            {/* Always present, even with nothing saved yet — creating a
-                collection shouldn't require saving something first */}
-            <CreateCollectionTile onPress={() => setCreateOpen(true)} />
-          </div>
-        )}
-
-        <CreateCollectionSheet
-          open={createOpen}
-          onClose={() => setCreateOpen(false)}
-        />
-      </div>
-    </RequireAuth>
+    <HydrationBoundary state={dehydrate(queryClient)}>
+      <RequireAuth>
+        <SavedGridContent />
+      </RequireAuth>
+    </HydrationBoundary>
   );
 }
 </file>
@@ -11218,6 +11309,104 @@ export function useCurrentUser() {
     refetch: query.refetch,
   };
 }
+</file>
+
+<file path="lib/serverQueries.ts">
+import { cache } from "react";
+import { prisma } from "./prisma";
+import { getPostsByUsername, getHomeFeedPosts } from "./posts";
+import { buildSavedBundle } from "./saved";
+import {
+  getFullCurrentUser,
+  getFollowingList,
+  getPublicUserProfile,
+  getPublicUserProfilesBatch,
+} from "./users";
+import { getLikedPostIds } from "./likes";
+
+// Same query GET /api/posts runs (getHomeFeedPosts, in lib/posts.ts),
+// called directly instead of over HTTP — same pattern as
+// fetchUserPostsForSSR below. Home is always behind RequireAuth, but SSR
+// for that first (logged-out) paint still runs before the client-side
+// redirect fires, so a null userId — no session yet — just gets the
+// empty feed rather than every post in the app.
+export async function fetchPostsForSSR(userId: string | null) {
+  if (!userId) return [];
+  return getHomeFeedPosts(userId);
+}
+
+// Backs the post grid on both /profile and /u/[username] — same query
+// GET /api/user/[username]/posts runs (getPostsByUsername, in
+// lib/posts.ts), called directly instead of over HTTP. Called from
+// inside PostGridSection (components/profile/PostGridSection.tsx),
+// which both pages render behind a <Suspense> boundary — this is
+// deliberately the slow, heavier query (media, carousel items,
+// products, per-post like/comment counts), kept separate from the cheap
+// profile lookup above so the header can render and stream to the
+// client without waiting on this to resolve. Takes a username rather
+// than a userId: the caller (PostGridSection) doesn't necessarily have
+// a userId on hand without its own extra lookup, and getPostsByUsername
+// resolving one internally is cheap next to the query it's paired with
+// here anyway.
+export async function fetchUserPostsForSSR(username: string) {
+  return getPostsByUsername(username);
+}
+
+// Backs /u/[username]'s header — same lookup GET /api/user/[username]
+// runs (including the viewer-relative isFollowing/followsMe, and a real
+// postCount via _count — see lib/users.ts), called directly and awaited
+// before anything is flushed to the client, so the header renders with
+// real data (including the post count) on first paint, and a
+// nonexistent username 404s server-side instead of after mount.
+export async function fetchUserProfileForSSR(
+  username: string,
+  viewerId: string | null,
+) {
+  return getPublicUserProfile(username, viewerId);
+}
+
+export async function fetchLikedPostIdsForSSR(userId: string) {
+  return getLikedPostIds(userId);
+}
+
+export async function fetchSavedBundleForSSR(userId: string) {
+  const [savedPosts, collections] = await Promise.all([
+    prisma.savedPost.findMany({
+      where: { userId },
+      select: {
+        postId: true,
+        collections: { select: { collectionId: true } },
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.collection.findMany({
+      where: { userId },
+      select: { id: true, name: true },
+      orderBy: { createdAt: "asc" },
+    }),
+  ]);
+  return buildSavedBundle(savedPosts, collections);
+}
+
+export async function fetchFollowingForSSR(username: string) {
+  return (await getFollowingList(username)) ?? [];
+}
+
+export async function fetchUserProfilesBatchForSSR(
+  usernames: string[],
+  viewerId: string,
+) {
+  return getPublicUserProfilesBatch(usernames, viewerId);
+}
+
+// Wrapped in React's cache() so calling this from both the root layout
+// (for the global currentUser hydration BottomNav etc. need on every
+// route) and a page (for its own SSR prefetches) within the same
+// request only hits the DB once — React dedupes by arguments for the
+// lifetime of a single render pass.
+export const fetchCurrentUserForSSR = cache(async (userId: string) => {
+  return getFullCurrentUser(userId);
+});
 </file>
 
 <file path=".gitignore">

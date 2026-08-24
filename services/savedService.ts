@@ -1,5 +1,6 @@
 import { apiFetch } from "@/utils/apiClient";
 import { API_ROUTES } from "@/utils/apiRoutes";
+import type { Post } from "@/types/post";
 
 export type SavedCollection = {
   id: string;
@@ -8,7 +9,12 @@ export type SavedCollection = {
 };
 
 export type SavedBundleResult =
-  | { success: true; savedPostIds: string[]; collections: SavedCollection[] }
+  | {
+      success: true;
+      posts: Post[];
+      savedPostIds: string[];
+      collections: SavedCollection[];
+    }
   | { success: false; error: string };
 
 export async function getSavedBundle(): Promise<SavedBundleResult> {

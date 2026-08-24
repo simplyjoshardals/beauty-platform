@@ -1,128 +1,41 @@
-"use client";
-
-import { use, useState } from "react";
-import { notFound, useRouter } from "next/navigation";
-import { DotsThreeIcon } from "@phosphor-icons/react";
-import { usePosts } from "@/hooks/usePosts";
-import { useSavedPosts } from "@/hooks/useSavedPosts";
-import { PostGrid } from "@/components/profile/PostGrid";
-import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
-import { CollectionOptionsSheet } from "@/components/saved/CollectionOptionsSheet";
-import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
-import { PATHS } from "@/utils/paths";
 import { RequireAuth } from "@/components/auth/RequireAuth";
+import { SavedCollectionContent } from "@/components/saved/SavedCollectionContent";
 
 type Props = {
   params: Promise<{ collectionId: string }>;
 };
 
-export default function SavedCollectionPage({ params }: Props) {
-  const { collectionId } = use(params);
-  const router = useRouter();
-  const { posts, isLoading: postsLoading } = usePosts();
-  const {
-    isSaved,
-    toggleSave,
-    collections,
-    getPostIdsForCollection,
-    toggleCollectionForPost,
-    isLoading: savedLoading,
-  } = useSavedPosts();
-  const [optionsOpen, setOptionsOpen] = useState(false);
-  const [pendingRemovePostId, setPendingRemovePostId] = useState<string | null>(
-    null,
-  );
-
-  // Real pending state — same reasoning as app/saved/page.tsx.
-  const loading = postsLoading || savedLoading;
-
-  const isAll = collectionId === "all";
-  const collection = collections.find((c) => c.id === collectionId);
-
-  // "all" is always valid (it's the built-in view) — anything else must
-  // match a real collection, or this is a bad/stale link. Only decide
-  // that once the saved bundle has actually loaded — `collections` is
-  // empty during the initial fetch too, and that's not the same thing
-  // as a real 404.
-  if (!isAll && !collection && !savedLoading) {
-    notFound();
-  }
-
-  const collectionPosts = isAll
-    ? posts.filter((post) => isSaved(post.id))
-    : posts.filter((post) =>
-        getPostIdsForCollection(collectionId).includes(post.id),
-      );
-
-  const title = isAll ? "All Saved" : collection?.name;
-
-  // On "All Saved", removing means fully unsaving — which also cascades
-  // to remove it from every collection, per toggleSave's own logic. On a
-  // specific collection, removing only takes it out of THIS collection —
-  // it stays saved everywhere else it already was.
-  function confirmRemove() {
-    if (!pendingRemovePostId) return;
-    if (isAll) {
-      toggleSave(pendingRemovePostId);
-    } else {
-      toggleCollectionForPost(pendingRemovePostId, collectionId);
-    }
-    setPendingRemovePostId(null);
-  }
+// Deliberately NOT async in the data-fetching sense (no await, no
+// prefetchQuery, no HydrationBoundary) — unlike app/saved/page.tsx.
+// This route's entire data need is the exact same SAVED_QUERY_KEY
+// bundle /saved already fetched and hydrated into the client cache;
+// there is no separate per-collection query to run.
+//
+// The previous version re-ran fetchSavedBundleForSSR here on every
+// click into a collection — same data, freshly re-queried from the DB
+// for no reason, and because that's an await in an async Server
+// Component, Next suspended on it and showed loading.tsx during the
+// round-trip. That happened regardless of the client already having
+// the identical data: the RSC render and the browser's React Query
+// cache are two separate things, and a fresh server render can't see
+// what's already hydrated client-side. Not being async here means
+// there's nothing for Next to suspend on, so this renders instantly and
+// SavedCollectionContent reads straight from the cache /saved already
+// populated — no flash, no skeleton, no duplicate query.
+//
+// Trade-off: the server-side 404 check that used to live here is gone.
+// SavedCollectionContent's own client-side notFound() fallback (once
+// `collections` has loaded and collectionId genuinely isn't in it)
+// still covers a bad/stale link — it just resolves client-side now
+// instead of on the server. That only matters for a direct hit or hard
+// refresh on a bad collectionId; the normal path (clicking a tile from
+// /saved) never had a bad id to begin with.
+export default async function SavedCollectionPage({ params }: Props) {
+  const { collectionId } = await params;
 
   return (
     <RequireAuth>
-      <div className="flex flex-col">
-        <div className="flex items-center justify-between border-b border-foreground/10 px-4 py-3">
-          <p className="text-sm font-medium">{title}</p>
-          {/* Rename/delete only makes sense on a real collection, not the
-              built-in "All Saved" view */}
-          {!isAll && collection && (
-            <button
-              type="button"
-              onClick={() => setOptionsOpen(true)}
-              aria-label="Collection options"
-            >
-              <DotsThreeIcon size={20} className="text-foreground" />
-            </button>
-          )}
-        </div>
-
-        {loading ? (
-          <PostGridSkeleton />
-        ) : (
-          <PostGrid
-            posts={collectionPosts}
-            emptyTitle="Nothing here yet"
-            emptyDescription="Posts you save to this collection will show up here."
-            onRemove={setPendingRemovePostId}
-          />
-        )}
-
-        <ConfirmDialog
-          open={pendingRemovePostId !== null}
-          title={isAll ? "Remove from Saved?" : `Remove from "${title}"?`}
-          description={
-            isAll
-              ? "This post will no longer be saved."
-              : "This post will stay saved elsewhere, just not in this collection."
-          }
-          confirmLabel="Remove"
-          destructive
-          onConfirm={confirmRemove}
-          onCancel={() => setPendingRemovePostId(null)}
-        />
-
-        {!isAll && collection && (
-          <CollectionOptionsSheet
-            open={optionsOpen}
-            onClose={() => setOptionsOpen(false)}
-            collectionId={collection.id}
-            currentName={collection.name}
-            onDeleted={() => router.replace(PATHS.SAVED)}
-          />
-        )}
-      </div>
+      <SavedCollectionContent collectionId={collectionId} />
     </RequireAuth>
   );
 }
