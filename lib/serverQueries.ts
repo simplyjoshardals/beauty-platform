@@ -21,25 +21,29 @@ export async function fetchPostsForSSR() {
   return posts.map(serializePost);
 }
 
-// Backs /profile and /u/[username] — same query GET
-// /api/user/[username]/posts runs (getPostsByUsername, in
-// lib/posts.ts), called directly instead of over HTTP so the post grid
-// (and, critically, the post count in ProfileHeader) is already
-// hydrated on first paint instead of popping in after mount. Takes a
-// username rather than a userId deliberately: app/u/[username]/page.tsx
-// fetches this alongside the profile lookup in a single Promise.all, so
-// this can't depend on that profile's id being resolved first without
-// turning two independent, parallel queries into a slower sequential
-// chain. getPostsByUsername's extra indexed lookup is cheap next to
-// that cost.
+// Backs the post grid on both /profile and /u/[username] — same query
+// GET /api/user/[username]/posts runs (getPostsByUsername, in
+// lib/posts.ts), called directly instead of over HTTP. Called from
+// inside PostGridSection (components/profile/PostGridSection.tsx),
+// which both pages render behind a <Suspense> boundary — this is
+// deliberately the slow, heavier query (media, carousel items,
+// products, per-post like/comment counts), kept separate from the cheap
+// profile lookup above so the header can render and stream to the
+// client without waiting on this to resolve. Takes a username rather
+// than a userId: the caller (PostGridSection) doesn't necessarily have
+// a userId on hand without its own extra lookup, and getPostsByUsername
+// resolving one internally is cheap next to the query it's paired with
+// here anyway.
 export async function fetchUserPostsForSSR(username: string) {
   return getPostsByUsername(username);
 }
 
-// Backs /u/[username]'s ProfileHeader — same lookup GET
-// /api/user/[username] runs (including the viewer-relative
-// isFollowing/followsMe), called directly so the header + follow state
-// render on first paint instead of a skeleton.
+// Backs /u/[username]'s header — same lookup GET /api/user/[username]
+// runs (including the viewer-relative isFollowing/followsMe, and a real
+// postCount via _count — see lib/users.ts), called directly and awaited
+// before anything is flushed to the client, so the header renders with
+// real data (including the post count) on first paint, and a
+// nonexistent username 404s server-side instead of after mount.
 export async function fetchUserProfileForSSR(
   username: string,
   viewerId: string | null,

@@ -22,6 +22,11 @@ export type PublicUserProfile = {
   followingCount: number;
   isFollowing: boolean;
   followsMe: boolean;
+  // Sourced from the same _count aggregate as follower/followingCount
+  // (see lib/users.ts) — a real count off the Post table, not
+  // posts.length from a separately-fetched, heavier posts-with-media
+  // query. Lets ProfileHeader show the right number immediately.
+  postCount: number;
 };
 
 export { profileQueryKey };

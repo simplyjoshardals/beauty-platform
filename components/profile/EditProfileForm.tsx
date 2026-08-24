@@ -139,6 +139,20 @@ export function EditProfileForm() {
       return;
     }
 
+    // useUpdateProfile's invalidateQueries covers every already-mounted
+    // client component (PostCard's author snapshot, the header, etc.),
+    // but app/profile/page.tsx also computes a `username` server-side
+    // and hands it down as a prop to PostGridSection — that value is
+    // baked into this route's RSC payload and, per next.config.ts,
+    // reused for up to staleTimes.dynamic (30s), or indefinitely across
+    // a client-side back-navigation like the one below. Without a
+    // refresh, PostGridClient keeps building USER_POSTS_QUERY_KEY off
+    // the OLD username after a rename, which no longer matches any
+    // user server-side. refresh() forces that server prop to
+    // recompute before router.back() lands on it.
+    if (username.trim().toLowerCase() !== user.username) {
+      router.refresh();
+    }
     router.back();
   }
 

@@ -11,6 +11,12 @@ export type FullCurrentUser = {
   onboardingCompletedAt: string | null;
   followerCount: number;
   followingCount: number;
+  // Sourced from the same _count select as followerCount/followingCount
+  // below — a free aggregate on the one user row lookup, not derived
+  // from fetching the user's actual posts. Lets ProfileHeader show the
+  // real count immediately, without waiting on the separate (heavier,
+  // media-joined) posts query the grid itself runs.
+  postCount: number;
 };
 
 export async function getFullCurrentUser(
@@ -20,7 +26,7 @@ export async function getFullCurrentUser(
     where: { id: userId },
     include: {
       routineItems: { orderBy: { order: "asc" } },
-      _count: { select: { followers: true, following: true } },
+      _count: { select: { followers: true, following: true, posts: true } },
     },
   });
   if (!user) return null;
@@ -41,6 +47,7 @@ export async function getFullCurrentUser(
       : null,
     followerCount: user._count.followers,
     followingCount: user._count.following,
+    postCount: user._count.posts,
   };
 }
 
@@ -89,6 +96,10 @@ export type PublicUserProfile = {
   followingCount: number;
   isFollowing: boolean;
   followsMe: boolean;
+  // See the identical comment on FullCurrentUser.postCount above — same
+  // free _count aggregate, same reason: ProfileHeader shouldn't have to
+  // wait on the posts-with-media query just to show a number.
+  postCount: number;
 };
 
 export async function getPublicUserProfile(
@@ -99,7 +110,7 @@ export async function getPublicUserProfile(
     where: { username },
     include: {
       routineItems: { orderBy: { order: "asc" } },
-      _count: { select: { followers: true, following: true } },
+      _count: { select: { followers: true, following: true, posts: true } },
     },
   });
   if (!user) return null;
@@ -145,6 +156,7 @@ export async function getPublicUserProfile(
     followingCount: user._count.following,
     isFollowing,
     followsMe,
+    postCount: user._count.posts,
   };
 }
 
@@ -158,7 +170,7 @@ export async function getPublicUserProfilesBatch(
     where: { username: { in: usernames } },
     include: {
       routineItems: { orderBy: { order: "asc" } },
-      _count: { select: { followers: true, following: true } },
+      _count: { select: { followers: true, following: true, posts: true } },
     },
   });
 
@@ -200,6 +212,7 @@ export async function getPublicUserProfilesBatch(
       followingCount: user._count.following,
       isFollowing: !isSelf && followingSet.has(user.id),
       followsMe: !isSelf && followerSet.has(user.id),
+      postCount: user._count.posts,
     });
   }
   return profiles;

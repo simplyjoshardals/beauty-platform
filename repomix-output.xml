@@ -132,6 +132,7 @@ app/
         page.tsx
       following/
         page.tsx
+      loading.tsx
       not-found.tsx
       page.tsx
   favicon.ico
@@ -178,10 +179,15 @@ components/
     UsernameStep.tsx
   profile/
     EditProfileForm.tsx
+    OwnProfileHeaderClient.tsx
     PostGrid.tsx
+    PostGridClient.tsx
+    PostGridSection.tsx
     PostGridSkeleton.tsx
     ProfileHeader.tsx
+    ProfileHeaderClient.tsx
     ProfileHeaderSkeleton.tsx
+    SelfProfileRedirect.tsx
     UserListRow.tsx
     UserListRowSkeleton.tsx
     UserListSkeleton.tsx
@@ -315,27 +321,229 @@ tsconfig.json
 <files>
 This section contains the contents of the repository's files.
 
-<file path="dynamic_config_matrix.txt">
-1. RECOMMENDED CONFIGURATIONS MATRIX
+<file path="components/profile/OwnProfileHeaderClient.tsx">
+"use client";
 
-+------------------+-------------------+------------------+--------------------------------------------------------------------------+
-| Page Route       | Server Rendering  | Client staleTime | Why this configuration?                                                  |
-+------------------+-------------------+------------------+--------------------------------------------------------------------------+
-| /homefeed        | Dynamic           | 15 to 30 sec     | Allows instant back-navigation when a user views a post and returns     |
-|                  |                   |                  | to the feed.                                                             |
-+------------------+-------------------+------------------+--------------------------------------------------------------------------+
-| /explore         | Dynamic (or ISR)  | 60 sec           | Content is discovery-focused and algorithmic; absolute real-time        |
-|                  |                   |                  | precision is not critical.                                               |
-+------------------+-------------------+------------------+--------------------------------------------------------------------------+
-| /notifications   | Dynamic           | 0 sec            | Users expect notifications to disappear or mark as read instantly;     |
-|                  |                   |                  | cache will confuse them.                                                 |
-+------------------+-------------------+------------------+--------------------------------------------------------------------------+
-| /saved           | Dynamic           | 10 to 15 sec     | Keeps bookmarks highly responsive, but clears quickly if they unsave     |
-|                  |                   |                  | an item.                                                                 |
-+------------------+-------------------+------------------+--------------------------------------------------------------------------+
-| /profile         | Dynamic           | 30 sec            | Speeds up the frequent jumping between tab contents (Posts, Replies,    |
-|                  |                   |                  | Media).                                                                  |
-+------------------+-------------------+------------------+--------------------------------------------------------------------------+
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { ProfileHeader } from "@/components/profile/ProfileHeader";
+import { ProfileHeaderSkeleton } from "@/components/profile/ProfileHeaderSkeleton";
+import { ProductChips } from "@/components/feed/ProductChips";
+
+// Rendered directly (no Suspense) by app/profile/page.tsx. currentUser
+// is prefetched both globally (app/layout.tsx, for BottomNav etc.) and
+// again here for this page's own request — fetchCurrentUserForSSR is
+// wrapped in React's cache(), so that's one DB hit, not two. On a fresh
+// page load this resolves to real data immediately; the loading branch
+// below is a real (if rarely hit) fallback for client-side navigation
+// into this route, e.g. right after signing in, before hydration
+// settles.
+export function OwnProfileHeaderClient() {
+  const { user, isLoading } = useCurrentUser();
+
+  if (isLoading || !user) {
+    return (
+      <>
+        <ProfileHeaderSkeleton />
+        <div className="animate-pulse border-t border-foreground/10 px-4 py-4">
+          <div className="mb-2 h-3.5 w-16 rounded bg-foreground/10" />
+          <div className="flex gap-2">
+            <div className="h-7 w-28 shrink-0 rounded-full bg-foreground/10" />
+            <div className="h-7 w-24 shrink-0 rounded-full bg-foreground/10" />
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <ProfileHeader
+        isOwnProfile
+        username={user.username}
+        avatarSrc={user.avatarSrc}
+        bio={user.bio}
+        toneTag={user.toneTag}
+        postCount={user.postCount}
+        followerCount={user.followerCount}
+        followingCount={user.followingCount}
+      />
+
+      {user.pinnedRoutine.length > 0 && (
+        <div className="border-t border-foreground/10 px-4 py-4">
+          <p className="mb-2 text-sm font-medium">Routine</p>
+          <ProductChips products={user.pinnedRoutine} />
+        </div>
+      )}
+    </>
+  );
+}
+</file>
+
+<file path="components/profile/PostGridClient.tsx">
+"use client";
+
+import { useUserPosts } from "@/hooks/useUserPosts";
+import { PostGrid } from "@/components/profile/PostGrid";
+import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
+
+type Props = {
+  username: string;
+};
+
+// On first paint the posts query is already hydrated by PostGridSection
+// (the Server Component that renders this), so isLoading is false
+// immediately and the skeleton branch below is effectively dead code on
+// a fresh page load. It stays as a real fallback for the moment
+// isLoading is true, and useUserPosts stays a live query subscription
+// (not props) so a later mutation elsewhere — create, delete, like,
+// comment, anything that invalidates USER_POSTS_QUERY_KEY_PREFIX — has
+// something to refetch into without a full page reload.
+export function PostGridClient({ username }: Props) {
+  const { posts, isLoading } = useUserPosts(username);
+
+  if (isLoading) {
+    return <PostGridSkeleton />;
+  }
+
+  return <PostGrid posts={posts} />;
+}
+</file>
+
+<file path="components/profile/PostGridSection.tsx">
+import {
+  QueryClient,
+  dehydrate,
+  HydrationBoundary,
+} from "@tanstack/react-query";
+import { PostGridClient } from "@/components/profile/PostGridClient";
+import { USER_POSTS_QUERY_KEY } from "@/lib/queryKeys";
+import { fetchUserPostsForSSR } from "@/lib/serverQueries";
+
+type Props = {
+  username: string;
+};
+
+// Rendered inside a <Suspense fallback={<PostGridSkeleton />}> by both
+// app/profile/page.tsx and app/u/[username]/page.tsx. This is
+// deliberately the ONLY thing awaiting the posts-with-media query
+// (author, carousel items, products, per-post like/comment counts) —
+// the header above it already has everything it needs (including a
+// real postCount) from the much cheaper profile lookup those pages run
+// before this ever starts, so the header renders and streams to the
+// client without waiting on this to resolve.
+export async function PostGridSection({ username }: Props) {
+  const posts = await fetchUserPostsForSSR(username);
+
+  const queryClient = new QueryClient();
+  await queryClient.prefetchQuery({
+    queryKey: USER_POSTS_QUERY_KEY(username),
+    queryFn: async () => posts,
+  });
+
+  return (
+    <HydrationBoundary state={dehydrate(queryClient)}>
+      <PostGridClient username={username} />
+    </HydrationBoundary>
+  );
+}
+</file>
+
+<file path="components/profile/ProfileHeaderClient.tsx">
+"use client";
+
+import { useUserProfile } from "@/hooks/useUserProfile";
+import { ProfileHeader } from "@/components/profile/ProfileHeader";
+import { ProductChips } from "@/components/feed/ProductChips";
+import { useAuthGatedAction } from "@/hooks/useAuthGatedAction";
+import { AuthGateModal } from "@/components/auth/AuthGateModal";
+
+type Props = {
+  username: string;
+};
+
+// Rendered directly (no Suspense) by app/u/[username]/page.tsx — the
+// profile query is already prefetched/hydrated by the time this mounts,
+// since that page awaits it before rendering anything, so `user` is
+// non-null on first paint. The null check below only matters for a
+// client-side navigation into this route before hydration settles.
+export function ProfileHeaderClient({ username }: Props) {
+  const { user, toggleFollow } = useUserProfile(username);
+  const { gateOpen, closeGate, guard } = useAuthGatedAction();
+
+  if (!user) {
+    return null;
+  }
+
+  return (
+    <>
+      <ProfileHeader
+        isOwnProfile={false}
+        username={user.username}
+        avatarSrc={user.avatarSrc}
+        bio={user.bio}
+        toneTag={user.toneTag}
+        postCount={user.postCount}
+        followerCount={user.followerCount}
+        followingCount={user.followingCount}
+        isFollowing={user.isFollowing}
+        followsMe={user.followsMe}
+        onToggleFollow={guard(toggleFollow)}
+      />
+
+      {user.pinnedRoutine.length > 0 && (
+        <div className="border-t border-foreground/10 px-4 py-4">
+          <p className="mb-2 text-sm font-medium">Routine</p>
+          <ProductChips products={user.pinnedRoutine} />
+        </div>
+      )}
+
+      <AuthGateModal open={gateOpen} onClose={closeGate} />
+    </>
+  );
+}
+</file>
+
+<file path="components/profile/SelfProfileRedirect.tsx">
+"use client";
+
+import { useEffect, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { PATHS } from "@/utils/paths";
+
+type Props = {
+  username: string;
+  children: ReactNode;
+};
+
+// This route is for viewing OTHER people. Your own profile — with Edit
+// Profile instead of a Follow button — lives at /profile. Redirect
+// rather than rendering a nonsensical "follow yourself" state.
+// Compared against your LIVE username (not a frozen constant) — since
+// username is now editable, visiting /u/your-new-handle needs to still
+// correctly recognize it's you, right after a rename.
+//
+// currentUser is already hydrated globally (see app/layout.tsx), so
+// this resolves synchronously on first render rather than adding its
+// own loading gap — it wraps the header/grid tree without holding up
+// either one's streaming.
+export function SelfProfileRedirect({ username, children }: Props) {
+  const router = useRouter();
+  const { user: currentUser } = useCurrentUser();
+  const isSelf = username === currentUser?.username;
+
+  useEffect(() => {
+    if (isSelf) {
+      router.replace(PATHS.PROFILE);
+    }
+  }, [isSelf, router]);
+
+  if (isSelf) {
+    return null;
+  }
+
+  return <>{children}</>;
+}
 </file>
 
 <file path="app/(home)/loading.tsx">
@@ -1286,55 +1494,6 @@ export async function GET(req: NextRequest, { params }: Params) {
 }
 </file>
 
-<file path="app/api/user/[username]/posts/route.ts">
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { serializePost, postInclude } from "@/lib/posts";
-
-type Params = { params: Promise<{ username: string }> };
-
-// Same take-50-no-pagination-yet posture as GET /api/posts (see
-// app/api/posts/route.ts) — fine for a profile grid this size today,
-// swap for real cursor pagination once it matters.
-const PROFILE_POSTS_TAKE = 50;
-
-// Public read, same as GET /api/user/[username] itself — this is what
-// both /u/[username] and /profile now call for the post grid, instead
-// of pulling the whole 50-post feed via usePosts() and filtering it down
-// to one author client-side. Public rather than gated on x-user-id
-// because /u/[username] is browsable logged out (see the comment on
-// RequireAuth); /profile is behind RequireAuth on the frontend, but
-// there's no reason for this route itself to care who's asking — a
-// user's posts are the same list either way.
-export async function GET(req: NextRequest, { params }: Params) {
-  const { username } = await params;
-
-  const user = await prisma.user.findUnique({
-    where: { username },
-    select: { id: true },
-  });
-
-  if (!user) {
-    return NextResponse.json(
-      { success: false, error: "User not found." },
-      { status: 404 },
-    );
-  }
-
-  const posts = await prisma.post.findMany({
-    where: { authorId: user.id },
-    include: postInclude,
-    orderBy: { createdAt: "desc" },
-    take: PROFILE_POSTS_TAKE,
-  });
-
-  return NextResponse.json({
-    success: true,
-    posts: posts.map(serializePost),
-  });
-}
-</file>
-
 <file path="app/api/user/onboarding/route.ts">
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -1474,6 +1633,22 @@ export default function CollectionNotFound() {
       <p className="text-sm text-foreground/50">
         This collection doesn&rsquo;t exist, or the link is incorrect.
       </p>
+    </div>
+  );
+}
+</file>
+
+<file path="app/u/[username]/loading.tsx">
+import { ProfileHeaderSkeleton } from "@/components/profile/ProfileHeaderSkeleton";
+import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
+
+export default function UserProfileLoading() {
+  return (
+    <div className="flex flex-col">
+      <ProfileHeaderSkeleton />
+      <div className="border-t border-foreground/10">
+        <PostGridSkeleton />
+      </div>
     </div>
   );
 }
@@ -2870,12 +3045,25 @@ export function useLogout() {
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { updateProfile, type UpdateProfileInput } from "@/services/userService";
+import { POSTS_QUERY_KEY, USER_POSTS_QUERY_KEY_PREFIX } from "@/lib/queryKeys";
 
 // Mirrors useCompleteOnboarding: same endpoint family, same
 // invalidate-currentUser-on-success pattern, so every consumer of
 // useCurrentUser() (BottomNav's avatar, PostCard/CreatePostForm's
 // author snapshot, the profile page itself) picks up the edit
 // immediately instead of acting on stale cached data.
+//
+// currentUser isn't the only thing that goes stale, though: every Post
+// carries its own embedded author snapshot (username/avatarSrc/toneTag,
+// see types/post.ts) rather than reading it live off the author's user
+// row, and that snapshot lives in POSTS_QUERY_KEY (home feed) and every
+// USER_POSTS_QUERY_KEY(username) (profile grids) — neither of which
+// currentUser invalidating touches. Without these, a username/avatar/
+// tone tag edit updates the header instantly but every already-mounted
+// PostCard for your own posts keeps rendering the old snapshot until
+// something else happens to refetch it. Invalidating by prefix for
+// userPosts hits every cached username at once, which is broader than
+// strictly necessary but avoids having to know your OLD username here.
 export function useUpdateProfile() {
   const queryClient = useQueryClient();
 
@@ -2884,6 +3072,10 @@ export function useUpdateProfile() {
     onSuccess: (result) => {
       if (result?.success) {
         queryClient.invalidateQueries({ queryKey: ["currentUser"] });
+        queryClient.invalidateQueries({ queryKey: POSTS_QUERY_KEY });
+        queryClient.invalidateQueries({
+          queryKey: USER_POSTS_QUERY_KEY_PREFIX,
+        });
       }
     },
   });
@@ -2959,44 +3151,6 @@ export function useUsernameAvailability(
   }
 
   return { status };
-}
-</file>
-
-<file path="hooks/useUserPosts.ts">
-"use client";
-
-import { useQuery } from "@tanstack/react-query";
-import { getUserPosts } from "@/services/postService";
-
-// Shared prefix so a post mutation elsewhere (create, delete, like,
-// comment — see usePosts/useCreatePost/useLikedPosts/useComments) can
-// invalidate every per-user posts query at once without knowing which
-// usernames are actually cached. React Query's invalidateQueries matches
-// by prefix, so passing this alone (no username) hits every
-// ["userPosts", username] entry in the cache.
-export const USER_POSTS_QUERY_KEY_PREFIX = ["userPosts"] as const;
-
-// Backs the post grid on both /profile and /u/[username] — a direct
-// fetch of just this user's posts (see app/api/user/[username]/posts/route.ts)
-// instead of pulling the whole feed via usePosts() and filtering it down
-// to one author client-side. Undefined username (e.g. own profile before
-// useCurrentUser resolves) just holds the query off via `enabled` rather
-// than firing a request for "undefined".
-export function useUserPosts(username: string | undefined) {
-  const query = useQuery({
-    queryKey: [...USER_POSTS_QUERY_KEY_PREFIX, username],
-    queryFn: async () => {
-      const result = await getUserPosts(username as string);
-      if (!result?.success) return [];
-      return result.posts;
-    },
-    enabled: Boolean(username),
-  });
-
-  return {
-    posts: query.data ?? [],
-    isLoading: query.isLoading,
-  };
 }
 </file>
 
@@ -3157,26 +3311,6 @@ export const prisma: PrismaClient =
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
 </file>
 
-<file path="lib/queryKeys.ts">
-// Plain constants/functions only — deliberately NOT "use client", so
-// Server Components (app/page.tsx's SSR prefetch) can import the real
-// values instead of a client-reference stub. Client hooks import from
-// here too, so there's exactly one definition of each key.
-export const POSTS_QUERY_KEY = ["posts"] as const;
-export const LIKES_QUERY_KEY = ["likes"] as const;
-export const SAVED_QUERY_KEY = ["saved"] as const;
-
-export function followingQueryKey(username: string | undefined) {
-  return ["following", username] as const;
-}
-
-export function profileQueryKey(username: string) {
-  return ["userProfile", username] as const;
-}
-
-export const CURRENT_USER_QUERY_KEY = ["currentUser"] as const;
-</file>
-
 <file path="lib/saved.ts">
 export const MAX_COLLECTION_NAME_LENGTH = 60;
 
@@ -3240,6 +3374,12 @@ export type FullCurrentUser = {
   onboardingCompletedAt: string | null;
   followerCount: number;
   followingCount: number;
+  // Sourced from the same _count select as followerCount/followingCount
+  // below — a free aggregate on the one user row lookup, not derived
+  // from fetching the user's actual posts. Lets ProfileHeader show the
+  // real count immediately, without waiting on the separate (heavier,
+  // media-joined) posts query the grid itself runs.
+  postCount: number;
 };
 
 export async function getFullCurrentUser(
@@ -3249,7 +3389,7 @@ export async function getFullCurrentUser(
     where: { id: userId },
     include: {
       routineItems: { orderBy: { order: "asc" } },
-      _count: { select: { followers: true, following: true } },
+      _count: { select: { followers: true, following: true, posts: true } },
     },
   });
   if (!user) return null;
@@ -3270,6 +3410,7 @@ export async function getFullCurrentUser(
       : null,
     followerCount: user._count.followers,
     followingCount: user._count.following,
+    postCount: user._count.posts,
   };
 }
 
@@ -3318,6 +3459,10 @@ export type PublicUserProfile = {
   followingCount: number;
   isFollowing: boolean;
   followsMe: boolean;
+  // See the identical comment on FullCurrentUser.postCount above — same
+  // free _count aggregate, same reason: ProfileHeader shouldn't have to
+  // wait on the posts-with-media query just to show a number.
+  postCount: number;
 };
 
 export async function getPublicUserProfile(
@@ -3328,7 +3473,7 @@ export async function getPublicUserProfile(
     where: { username },
     include: {
       routineItems: { orderBy: { order: "asc" } },
-      _count: { select: { followers: true, following: true } },
+      _count: { select: { followers: true, following: true, posts: true } },
     },
   });
   if (!user) return null;
@@ -3374,6 +3519,7 @@ export async function getPublicUserProfile(
     followingCount: user._count.following,
     isFollowing,
     followsMe,
+    postCount: user._count.posts,
   };
 }
 
@@ -3387,7 +3533,7 @@ export async function getPublicUserProfilesBatch(
     where: { username: { in: usernames } },
     include: {
       routineItems: { orderBy: { order: "asc" } },
-      _count: { select: { followers: true, following: true } },
+      _count: { select: { followers: true, following: true, posts: true } },
     },
   });
 
@@ -3429,6 +3575,7 @@ export async function getPublicUserProfilesBatch(
       followingCount: user._count.following,
       isFollowing: !isSelf && followingSet.has(user.id),
       followsMe: !isSelf && followerSet.has(user.id),
+      postCount: user._count.posts,
     });
   }
   return profiles;
@@ -4262,6 +4409,29 @@ This version has breaking changes — APIs, conventions, and file structure may 
 @AGENTS.md
 </file>
 
+<file path="dynamic_config_matrix.txt">
+1. RECOMMENDED CONFIGURATIONS MATRIX
+
++------------------+-------------------+------------------+--------------------------------------------------------------------------+
+| Page Route       | Server Rendering  | Client staleTime | Why this configuration?                                                  |
++------------------+-------------------+------------------+--------------------------------------------------------------------------+
+| /homefeed        | Dynamic           | 15 to 30 sec     | Allows instant back-navigation when a user views a post and returns     |
+|                  |                   |                  | to the feed.                                                             |
++------------------+-------------------+------------------+--------------------------------------------------------------------------+
+| /explore         | Dynamic (or ISR)  | 60 sec           | Content is discovery-focused and algorithmic; absolute real-time        |
+|                  |                   |                  | precision is not critical.                                               |
++------------------+-------------------+------------------+--------------------------------------------------------------------------+
+| /notifications   | Dynamic           | 0 sec            | Users expect notifications to disappear or mark as read instantly;     |
+|                  |                   |                  | cache will confuse them.                                                 |
++------------------+-------------------+------------------+--------------------------------------------------------------------------+
+| /saved           | Dynamic           | 10 to 15 sec     | Keeps bookmarks highly responsive, but clears quickly if they unsave     |
+|                  |                   |                  | an item.                                                                 |
++------------------+-------------------+------------------+--------------------------------------------------------------------------+
+| /profile         | Dynamic           | 30 sec            | Speeds up the frequent jumping between tab contents (Posts, Replies,    |
+|                  |                   |                  | Media).                                                                  |
++------------------+-------------------+------------------+--------------------------------------------------------------------------+
+</file>
+
 <file path="eslint.config.mjs">
 import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
@@ -4443,120 +4613,6 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
     "**/*.mts"
   ],
   "exclude": ["node_modules"]
-}
-</file>
-
-<file path="app/(home)/page.tsx">
-import {
-  QueryClient,
-  dehydrate,
-  HydrationBoundary,
-} from "@tanstack/react-query";
-import { HomeFeed } from "@/components/feed/HomeFeed";
-import { HomeFeedSkeleton } from "@/components/feed/HomeFeedSkeleton";
-import { RequireAuth } from "@/components/auth/RequireAuth";
-import {
-  POSTS_QUERY_KEY,
-  LIKES_QUERY_KEY,
-  SAVED_QUERY_KEY,
-  followingQueryKey,
-  profileQueryKey,
-} from "@/lib/queryKeys";
-import { getServerUserId } from "@/lib/session";
-import {
-  fetchPostsForSSR,
-  fetchLikedPostIdsForSSR,
-  fetchSavedBundleForSSR,
-  fetchFollowingForSSR,
-  fetchUserProfilesBatchForSSR,
-  fetchCurrentUserForSSR,
-} from "@/lib/serverQueries";
-
-export default async function HomeFeedPage() {
-  const pageStart = performance.now();
-
-  const userId = await getServerUserId();
-
-  const [currentUser, posts] = await Promise.all([
-    userId ? fetchCurrentUserForSSR(userId) : Promise.resolve(null),
-    fetchPostsForSSR(),
-  ]);
-
-  const viewer = currentUser
-    ? { id: currentUser.id, username: currentUser.username }
-    : null;
-  const queryClient = new QueryClient();
-
-  const prefetches: Promise<unknown>[] = [
-    queryClient.prefetchQuery({
-      queryKey: POSTS_QUERY_KEY,
-      queryFn: async () => posts,
-    }),
-  ];
-
-  if (viewer) {
-    prefetches.push(
-      timed("likes", () =>
-        queryClient.prefetchQuery({
-          queryKey: LIKES_QUERY_KEY,
-          queryFn: async () => ({
-            likedPostIds: await fetchLikedPostIdsForSSR(viewer.id),
-          }),
-        }),
-      ),
-      timed("saved", () =>
-        queryClient.prefetchQuery({
-          queryKey: SAVED_QUERY_KEY,
-          queryFn: () => fetchSavedBundleForSSR(viewer.id),
-        }),
-      ),
-      timed("following", () =>
-        queryClient.prefetchQuery({
-          queryKey: followingQueryKey(viewer.username),
-          queryFn: () => fetchFollowingForSSR(viewer.username),
-        }),
-      ),
-    );
-  }
-
-  const authors = [...new Set(posts.map((p) => p.author.username))];
-  if (viewer) {
-    prefetches.push(
-      timed(`profiles batch (${authors.length} authors)`, () =>
-        fetchUserProfilesBatchForSSR(authors, viewer.id).then((profiles) => {
-          for (const [username, profile] of profiles) {
-            queryClient.setQueryData(profileQueryKey(username), profile);
-          }
-        }),
-      ),
-    );
-  }
-
-  const prefetchStart = performance.now();
-  await Promise.all(prefetches);
-  console.log(
-    `[home] Promise.all total: ${(performance.now() - prefetchStart).toFixed(1)}ms`,
-  );
-  console.log(
-    `[home] full page function: ${(performance.now() - pageStart).toFixed(1)}ms`,
-  );
-
-  return (
-    <HydrationBoundary state={dehydrate(queryClient)}>
-      <RequireAuth>
-        <div className="min-h-dvh">
-          <HomeFeed />
-        </div>
-      </RequireAuth>
-    </HydrationBoundary>
-  );
-}
-
-async function timed<T>(label: string, fn: () => Promise<T>): Promise<T> {
-  const start = performance.now();
-  const result = await fn();
-  console.log(`[home] ${label}: ${(performance.now() - start).toFixed(1)}ms`);
-  return result;
 }
 </file>
 
@@ -5197,6 +5253,47 @@ export async function GET(req: NextRequest, { params }: Params) {
   }
 
   return NextResponse.json({ success: true, users });
+}
+</file>
+
+<file path="app/api/user/[username]/posts/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { getPostsByUserId } from "@/lib/posts";
+
+type Params = { params: Promise<{ username: string }> };
+
+// Public read, same as GET /api/user/[username] itself — this is what
+// both /u/[username] and /profile now call for the post grid, instead
+// of pulling the whole 50-post feed via usePosts() and filtering it down
+// to one author client-side. Public rather than gated on x-user-id
+// because /u/[username] is browsable logged out (see the comment on
+// RequireAuth); /profile is behind RequireAuth on the frontend, but
+// there's no reason for this route itself to care who's asking — a
+// user's posts are the same list either way.
+//
+// The actual posts query lives in getPostsByUserId (lib/posts.ts),
+// shared with lib/serverQueries.ts's fetchUserPostsForSSR — this route
+// just still owns its own user lookup, since it needs the id either way
+// to 404 on a nonexistent username.
+export async function GET(req: NextRequest, { params }: Params) {
+  const { username } = await params;
+
+  const user = await prisma.user.findUnique({
+    where: { username },
+    select: { id: true },
+  });
+
+  if (!user) {
+    return NextResponse.json(
+      { success: false, error: "User not found." },
+      { status: 404 },
+    );
+  }
+
+  const posts = await getPostsByUserId(user.id);
+
+  return NextResponse.json({ success: true, posts });
 }
 </file>
 
@@ -6885,6 +6982,47 @@ export function useSavedPosts() {
 }
 </file>
 
+<file path="hooks/useUserPosts.ts">
+"use client";
+
+import { useQuery } from "@tanstack/react-query";
+import { getUserPosts } from "@/services/postService";
+import {
+  USER_POSTS_QUERY_KEY,
+  USER_POSTS_QUERY_KEY_PREFIX,
+} from "@/lib/queryKeys";
+
+// Re-exported for existing callers (post mutations invalidating by
+// prefix) — the actual definition now lives in lib/queryKeys.ts so a
+// Server Component (app/profile/page.tsx, app/u/[username]/page.tsx)
+// can construct the exact same key for SSR prefetching without
+// importing this "use client" file.
+export { USER_POSTS_QUERY_KEY_PREFIX };
+
+// Backs the post grid on both /profile and /u/[username] — a direct
+// fetch of just this user's posts (see app/api/user/[username]/posts/route.ts)
+// instead of pulling the whole feed via usePosts() and filtering it down
+// to one author client-side. Undefined username (e.g. own profile before
+// useCurrentUser resolves) just holds the query off via `enabled` rather
+// than firing a request for "undefined".
+export function useUserPosts(username: string | undefined) {
+  const query = useQuery({
+    queryKey: USER_POSTS_QUERY_KEY(username),
+    queryFn: async () => {
+      const result = await getUserPosts(username as string);
+      if (!result?.success) return [];
+      return result.posts;
+    },
+    enabled: Boolean(username),
+  });
+
+  return {
+    posts: query.data ?? [],
+    isLoading: query.isLoading,
+  };
+}
+</file>
+
 <file path="lib/auth.ts">
 import jwt from "jsonwebtoken";
 import { nanoid } from "nanoid";
@@ -7129,210 +7267,39 @@ export function clearSessionCookies(response: NextResponse) {
 }
 </file>
 
-<file path="lib/posts.ts">
-import type { Post, PostMedia } from "@/types/post";
+<file path="lib/queryKeys.ts">
+// Plain constants/functions only — deliberately NOT "use client", so
+// Server Components (app/page.tsx's SSR prefetch) can import the real
+// values instead of a client-reference stub. Client hooks import from
+// here too, so there's exactly one definition of each key.
+export const POSTS_QUERY_KEY = ["posts"] as const;
+export const LIKES_QUERY_KEY = ["likes"] as const;
+export const SAVED_QUERY_KEY = ["saved"] as const;
 
-// Mirrors the MediaType enum in prisma/schema.prisma exactly — kept as a
-// plain object (not imported from the generated client) so this file has
-// no dependency on `prisma generate` having been run.
-export const MEDIA_TYPES = [
-  "IMAGE",
-  "CAROUSEL",
-  "VIDEO",
-  "BEFORE_AFTER",
-] as const;
-export type MediaType = (typeof MEDIA_TYPES)[number];
-
-// Shape this file needs from a Prisma Post row — deliberately hand-rolled
-// rather than `Prisma.PostGetPayload<...>` so serializePost has no
-// compile-time dependency on the generated client either.
-export type PostRecord = {
-  id: string;
-  authorId: string;
-  mediaType: string;
-  imageSrc: string | null;
-  imageAlt: string | null;
-  videoSrc: string | null;
-  videoPoster: string | null;
-  beforeSrc: string | null;
-  beforeAlt: string | null;
-  afterSrc: string | null;
-  afterAlt: string | null;
-  caption: string;
-  createdAt: Date;
-  author: {
-    id: string;
-    username: string;
-    avatarSrc: string;
-    toneTag: string;
-  };
-  carouselItems: { id: string; src: string; alt: string; order: number }[];
-  products: { id: string; label: string }[];
-  _count: { likes: number; comments: number };
-};
-
-function buildMedia(post: PostRecord): PostMedia {
-  switch (post.mediaType) {
-    case "IMAGE":
-      return {
-        id: post.id,
-        type: "image",
-        src: post.imageSrc ?? "",
-        alt: post.imageAlt ?? "",
-      };
-    case "CAROUSEL":
-      return {
-        id: post.id,
-        type: "carousel",
-        items: [...post.carouselItems]
-          .sort((a, b) => a.order - b.order)
-          .map((item) => ({ src: item.src, alt: item.alt })),
-      };
-    case "VIDEO":
-      return {
-        id: post.id,
-        type: "video",
-        src: post.videoSrc ?? "",
-        poster: post.videoPoster ?? "",
-      };
-    case "BEFORE_AFTER":
-      return {
-        id: post.id,
-        type: "before_after",
-        before: { src: post.beforeSrc ?? "", alt: post.beforeAlt ?? "" },
-        after: { src: post.afterSrc ?? "", alt: post.afterAlt ?? "" },
-      };
-    default:
-      // Shouldn't happen — mediaType is validated on the way in — but
-      // fall back to something renderable rather than throwing mid-list.
-      return { id: post.id, type: "image", src: "", alt: "" };
-  }
+export function followingQueryKey(username: string | undefined) {
+  return ["following", username] as const;
 }
 
-// Shared shape for both GET (list) and POST (create) responses — a post
-// a person just created should look identical to one they'd get back
-// from a subsequent list fetch.
-export function serializePost(post: PostRecord): Post {
-  return {
-    id: post.id,
-    author: {
-      id: post.author.id,
-      username: post.author.username,
-      avatarSrc: post.author.avatarSrc,
-      toneTag: post.author.toneTag || undefined,
-    },
-    media: buildMedia(post),
-    products:
-      post.products.length > 0
-        ? post.products.map((p) => ({ id: p.id, label: p.label }))
-        : undefined,
-    caption: post.caption,
-    likeCount: post._count.likes,
-    commentCount: post._count.comments,
-    createdAt: post.createdAt.toISOString(),
-  };
+export function profileQueryKey(username: string) {
+  return ["userProfile", username] as const;
 }
 
-// Same "did this URL actually come from our own signed upload flow"
-// check that /api/user/me and /api/user/onboarding already apply to
-// avatarSrc — a post's media URLs need the same guard, just pointed at
-// the post-media folders instead of vanity/avatars.
-export function isValidCloudinaryUrl(url: unknown, folder: string): boolean {
-  return (
-    typeof url === "string" &&
-    url.length > 0 &&
-    url.includes(`res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}/`) &&
-    url.includes(`/${folder}/`)
-  );
+export const CURRENT_USER_QUERY_KEY = ["currentUser"] as const;
+
+// Shared prefix so a post mutation elsewhere (create, delete, like,
+// comment) can invalidate every per-user posts query at once without
+// knowing which usernames are cached — invalidateQueries matches by
+// prefix, so USER_POSTS_QUERY_KEY_PREFIX alone hits every entry.
+// USER_POSTS_QUERY_KEY(username) is the full key useUserPosts queries
+// with client-side, and what a Server Component prefetches into —
+// kept here (not in hooks/useUserPosts.ts) so both sides, and
+// app/profile/page.tsx + app/u/[username]/page.tsx, construct the
+// exact same key from one definition.
+export const USER_POSTS_QUERY_KEY_PREFIX = ["userPosts"] as const;
+
+export function USER_POSTS_QUERY_KEY(username: string | undefined) {
+  return [...USER_POSTS_QUERY_KEY_PREFIX, username] as const;
 }
-
-// Shared between GET (list), GET (single post), and POST (create) — a
-// post returned from any of the three needs the exact same shape, so
-// callers can drop any of them into the same cache/array without a
-// reshape. Kept as a plain object (no generated-Prisma-client import)
-// for the same decoupling reason as MEDIA_TYPES above; Prisma's
-// `include` option just needs the right shape, not the actual enum type.
-export const postInclude = {
-  author: true,
-  carouselItems: true,
-  products: true,
-  _count: { select: { likes: true, comments: true } },
-} as const;
-
-export const POST_IMAGE_FOLDER = "vanity/posts/images";
-export const POST_VIDEO_FOLDER = "vanity/posts/videos";
-
-export const MAX_CAPTION_LENGTH = 2200; // matches Instagram's own limit
-export const MAX_PRODUCT_LABEL_LENGTH = 120;
-export const MAX_PRODUCTS_PER_POST = 20;
-export const MAX_CAROUSEL_ITEMS = 10;
-</file>
-
-<file path="lib/serverQueries.ts">
-import { cache } from "react";
-import { prisma } from "./prisma";
-import { postInclude, serializePost } from "./posts";
-import { buildSavedBundle } from "./saved";
-import {
-  getFullCurrentUser,
-  getFollowingList,
-  getPublicUserProfilesBatch,
-} from "./users";
-import { getLikedPostIds } from "./likes";
-
-const FEED_TAKE = 50; // keep in sync with app/api/posts/route.ts
-
-export async function fetchPostsForSSR() {
-  const posts = await prisma.post.findMany({
-    include: postInclude,
-    orderBy: { createdAt: "desc" },
-    take: FEED_TAKE,
-  });
-  return posts.map(serializePost);
-}
-
-export async function fetchLikedPostIdsForSSR(userId: string) {
-  return getLikedPostIds(userId);
-}
-
-export async function fetchSavedBundleForSSR(userId: string) {
-  const [savedPosts, collections] = await Promise.all([
-    prisma.savedPost.findMany({
-      where: { userId },
-      select: {
-        postId: true,
-        collections: { select: { collectionId: true } },
-      },
-      orderBy: { createdAt: "desc" },
-    }),
-    prisma.collection.findMany({
-      where: { userId },
-      select: { id: true, name: true },
-      orderBy: { createdAt: "asc" },
-    }),
-  ]);
-  return buildSavedBundle(savedPosts, collections);
-}
-
-export async function fetchFollowingForSSR(username: string) {
-  return (await getFollowingList(username)) ?? [];
-}
-
-export async function fetchUserProfilesBatchForSSR(
-  usernames: string[],
-  viewerId: string,
-) {
-  return getPublicUserProfilesBatch(usernames, viewerId);
-}
-
-// Wrapped in React's cache() so calling this from both the root layout
-// (for the global currentUser hydration BottomNav etc. need on every
-// route) and a page (for its own SSR prefetches) within the same
-// request only hits the DB once — React dedupes by arguments for the
-// lifetime of a single render pass.
-export const fetchCurrentUserForSSR = cache(async (userId: string) => {
-  return getFullCurrentUser(userId);
-});
 </file>
 
 <file path="lib/session.ts">
@@ -7939,6 +7906,120 @@ export function validateUsername(value: string): string | null {
   }
 
   return null;
+}
+</file>
+
+<file path="app/(home)/page.tsx">
+import {
+  QueryClient,
+  dehydrate,
+  HydrationBoundary,
+} from "@tanstack/react-query";
+import { HomeFeed } from "@/components/feed/HomeFeed";
+import { HomeFeedSkeleton } from "@/components/feed/HomeFeedSkeleton";
+import { RequireAuth } from "@/components/auth/RequireAuth";
+import {
+  POSTS_QUERY_KEY,
+  LIKES_QUERY_KEY,
+  SAVED_QUERY_KEY,
+  followingQueryKey,
+  profileQueryKey,
+} from "@/lib/queryKeys";
+import { getServerUserId } from "@/lib/session";
+import {
+  fetchPostsForSSR,
+  fetchLikedPostIdsForSSR,
+  fetchSavedBundleForSSR,
+  fetchFollowingForSSR,
+  fetchUserProfilesBatchForSSR,
+  fetchCurrentUserForSSR,
+} from "@/lib/serverQueries";
+
+export default async function HomeFeedPage() {
+  const pageStart = performance.now();
+
+  const userId = await getServerUserId();
+
+  const [currentUser, posts] = await Promise.all([
+    userId ? fetchCurrentUserForSSR(userId) : Promise.resolve(null),
+    fetchPostsForSSR(),
+  ]);
+
+  const viewer = currentUser
+    ? { id: currentUser.id, username: currentUser.username }
+    : null;
+  const queryClient = new QueryClient();
+
+  const prefetches: Promise<unknown>[] = [
+    queryClient.prefetchQuery({
+      queryKey: POSTS_QUERY_KEY,
+      queryFn: async () => posts,
+    }),
+  ];
+
+  if (viewer) {
+    prefetches.push(
+      timed("likes", () =>
+        queryClient.prefetchQuery({
+          queryKey: LIKES_QUERY_KEY,
+          queryFn: async () => ({
+            likedPostIds: await fetchLikedPostIdsForSSR(viewer.id),
+          }),
+        }),
+      ),
+      timed("saved", () =>
+        queryClient.prefetchQuery({
+          queryKey: SAVED_QUERY_KEY,
+          queryFn: () => fetchSavedBundleForSSR(viewer.id),
+        }),
+      ),
+      timed("following", () =>
+        queryClient.prefetchQuery({
+          queryKey: followingQueryKey(viewer.username),
+          queryFn: () => fetchFollowingForSSR(viewer.username),
+        }),
+      ),
+    );
+  }
+
+  const authors = [...new Set(posts.map((p) => p.author.username))];
+  if (viewer) {
+    prefetches.push(
+      timed(`profiles batch (${authors.length} authors)`, () =>
+        fetchUserProfilesBatchForSSR(authors, viewer.id).then((profiles) => {
+          for (const [username, profile] of profiles) {
+            queryClient.setQueryData(profileQueryKey(username), profile);
+          }
+        }),
+      ),
+    );
+  }
+
+  const prefetchStart = performance.now();
+  await Promise.all(prefetches);
+  console.log(
+    `[home] Promise.all total: ${(performance.now() - prefetchStart).toFixed(1)}ms`,
+  );
+  console.log(
+    `[home] full page function: ${(performance.now() - pageStart).toFixed(1)}ms`,
+  );
+
+  return (
+    <HydrationBoundary state={dehydrate(queryClient)}>
+      <RequireAuth>
+        <div className="min-h-dvh">
+          <HomeFeed />
+        </div>
+      </RequireAuth>
+    </HydrationBoundary>
+  );
+}
+
+async function timed<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  const start = performance.now();
+  const result = await fn();
+  console.log(`[home] ${label}: ${(performance.now() - start).toFixed(1)}ms`);
+  return result;
 }
 </file>
 
@@ -8921,6 +9002,11 @@ export type PublicUserProfile = {
   followingCount: number;
   isFollowing: boolean;
   followsMe: boolean;
+  // Sourced from the same _count aggregate as follower/followingCount
+  // (see lib/users.ts) — a real count off the Post table, not
+  // posts.length from a separately-fetched, heavier posts-with-media
+  // query. Lets ProfileHeader show the right number immediately.
+  postCount: number;
 };
 
 export { profileQueryKey };
@@ -9083,6 +9169,288 @@ export function useUserProfile(username: string) {
     toggleFollow,
   };
 }
+</file>
+
+<file path="lib/posts.ts">
+import { prisma } from "./prisma";
+import type { Post, PostMedia } from "@/types/post";
+
+// Mirrors the MediaType enum in prisma/schema.prisma exactly — kept as a
+// plain object (not imported from the generated client) so this file has
+// no dependency on `prisma generate` having been run.
+export const MEDIA_TYPES = [
+  "IMAGE",
+  "CAROUSEL",
+  "VIDEO",
+  "BEFORE_AFTER",
+] as const;
+export type MediaType = (typeof MEDIA_TYPES)[number];
+
+// Shape this file needs from a Prisma Post row — deliberately hand-rolled
+// rather than `Prisma.PostGetPayload<...>` so serializePost has no
+// compile-time dependency on the generated client either.
+export type PostRecord = {
+  id: string;
+  authorId: string;
+  mediaType: string;
+  imageSrc: string | null;
+  imageAlt: string | null;
+  videoSrc: string | null;
+  videoPoster: string | null;
+  beforeSrc: string | null;
+  beforeAlt: string | null;
+  afterSrc: string | null;
+  afterAlt: string | null;
+  caption: string;
+  createdAt: Date;
+  author: {
+    id: string;
+    username: string;
+    avatarSrc: string;
+    toneTag: string;
+  };
+  carouselItems: { id: string; src: string; alt: string; order: number }[];
+  products: { id: string; label: string }[];
+  _count: { likes: number; comments: number };
+};
+
+function buildMedia(post: PostRecord): PostMedia {
+  switch (post.mediaType) {
+    case "IMAGE":
+      return {
+        id: post.id,
+        type: "image",
+        src: post.imageSrc ?? "",
+        alt: post.imageAlt ?? "",
+      };
+    case "CAROUSEL":
+      return {
+        id: post.id,
+        type: "carousel",
+        items: [...post.carouselItems]
+          .sort((a, b) => a.order - b.order)
+          .map((item) => ({ src: item.src, alt: item.alt })),
+      };
+    case "VIDEO":
+      return {
+        id: post.id,
+        type: "video",
+        src: post.videoSrc ?? "",
+        poster: post.videoPoster ?? "",
+      };
+    case "BEFORE_AFTER":
+      return {
+        id: post.id,
+        type: "before_after",
+        before: { src: post.beforeSrc ?? "", alt: post.beforeAlt ?? "" },
+        after: { src: post.afterSrc ?? "", alt: post.afterAlt ?? "" },
+      };
+    default:
+      // Shouldn't happen — mediaType is validated on the way in — but
+      // fall back to something renderable rather than throwing mid-list.
+      return { id: post.id, type: "image", src: "", alt: "" };
+  }
+}
+
+// Shared shape for both GET (list) and POST (create) responses — a post
+// a person just created should look identical to one they'd get back
+// from a subsequent list fetch.
+export function serializePost(post: PostRecord): Post {
+  return {
+    id: post.id,
+    author: {
+      id: post.author.id,
+      username: post.author.username,
+      avatarSrc: post.author.avatarSrc,
+      toneTag: post.author.toneTag || undefined,
+    },
+    media: buildMedia(post),
+    products:
+      post.products.length > 0
+        ? post.products.map((p) => ({ id: p.id, label: p.label }))
+        : undefined,
+    caption: post.caption,
+    likeCount: post._count.likes,
+    commentCount: post._count.comments,
+    createdAt: post.createdAt.toISOString(),
+  };
+}
+
+// Same "did this URL actually come from our own signed upload flow"
+// check that /api/user/me and /api/user/onboarding already apply to
+// avatarSrc — a post's media URLs need the same guard, just pointed at
+// the post-media folders instead of vanity/avatars.
+export function isValidCloudinaryUrl(url: unknown, folder: string): boolean {
+  return (
+    typeof url === "string" &&
+    url.length > 0 &&
+    url.includes(`res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}/`) &&
+    url.includes(`/${folder}/`)
+  );
+}
+
+// Shared between GET (list), GET (single post), and POST (create) — a
+// post returned from any of the three needs the exact same shape, so
+// callers can drop any of them into the same cache/array without a
+// reshape. Kept as a plain object (no generated-Prisma-client import)
+// for the same decoupling reason as MEDIA_TYPES above; Prisma's
+// `include` option just needs the right shape, not the actual enum type.
+export const postInclude = {
+  author: true,
+  carouselItems: true,
+  products: true,
+  _count: { select: { likes: true, comments: true } },
+} as const;
+
+export const POST_IMAGE_FOLDER = "vanity/posts/images";
+export const POST_VIDEO_FOLDER = "vanity/posts/videos";
+
+export const MAX_CAPTION_LENGTH = 2200; // matches Instagram's own limit
+export const MAX_PRODUCT_LABEL_LENGTH = 120;
+export const MAX_PRODUCTS_PER_POST = 20;
+export const MAX_CAROUSEL_ITEMS = 10;
+
+// Same take-50-no-pagination-yet posture as FEED_TAKE in
+// app/api/posts/route.ts — fine for a profile grid this size today,
+// swap for real cursor pagination once it matters. One constant here
+// instead of two copies (route + SSR fetcher) that could drift.
+export const PROFILE_POSTS_TAKE = 50;
+
+// Single source of truth for "this user's posts, newest first" —
+// GET /api/user/[username]/posts (the client-side fetch useUserPosts
+// makes) and lib/serverQueries.ts's fetchUserPostsForSSR (the SSR
+// prefetch app/profile/page.tsx and app/u/[username]/page.tsx run) both
+// call one of these instead of each running their own copy of the same
+// Prisma query — same reason GET /api/user/me and fetchCurrentUserForSSR
+// both call getFullCurrentUser in lib/users.ts rather than duplicating
+// it.
+//
+// getPostsByUserId is the actual query. Callers that already resolved a
+// user row for another reason (the route's own 404 check, or the SSR
+// pages after fetchUserProfileForSSR/fetchCurrentUserForSSR already
+// returned an id) should call this directly rather than the
+// username-based wrapper below, to avoid a second redundant lookup.
+export async function getPostsByUserId(userId: string): Promise<Post[]> {
+  const posts = await prisma.post.findMany({
+    where: { authorId: userId },
+    include: postInclude,
+    orderBy: { createdAt: "desc" },
+    take: PROFILE_POSTS_TAKE,
+  });
+  return posts.map(serializePost);
+}
+
+// Convenience wrapper for the rare caller with only a username on hand
+// and no reason to look up the user row itself first. Returns [] for a
+// nonexistent username rather than null/throwing — callers that need to
+// distinguish "user doesn't exist" from "user has no posts" should do
+// their own lookup (and call getPostsByUserId directly) instead.
+export async function getPostsByUsername(username: string): Promise<Post[]> {
+  const user = await prisma.user.findUnique({
+    where: { username },
+    select: { id: true },
+  });
+  if (!user) return [];
+  return getPostsByUserId(user.id);
+}
+</file>
+
+<file path="lib/serverQueries.ts">
+import { cache } from "react";
+import { prisma } from "./prisma";
+import { postInclude, serializePost, getPostsByUsername } from "./posts";
+import { buildSavedBundle } from "./saved";
+import {
+  getFullCurrentUser,
+  getFollowingList,
+  getPublicUserProfile,
+  getPublicUserProfilesBatch,
+} from "./users";
+import { getLikedPostIds } from "./likes";
+
+const FEED_TAKE = 50; // keep in sync with app/api/posts/route.ts
+
+export async function fetchPostsForSSR() {
+  const posts = await prisma.post.findMany({
+    include: postInclude,
+    orderBy: { createdAt: "desc" },
+    take: FEED_TAKE,
+  });
+  return posts.map(serializePost);
+}
+
+// Backs the post grid on both /profile and /u/[username] — same query
+// GET /api/user/[username]/posts runs (getPostsByUsername, in
+// lib/posts.ts), called directly instead of over HTTP. Called from
+// inside PostGridSection (components/profile/PostGridSection.tsx),
+// which both pages render behind a <Suspense> boundary — this is
+// deliberately the slow, heavier query (media, carousel items,
+// products, per-post like/comment counts), kept separate from the cheap
+// profile lookup above so the header can render and stream to the
+// client without waiting on this to resolve. Takes a username rather
+// than a userId: the caller (PostGridSection) doesn't necessarily have
+// a userId on hand without its own extra lookup, and getPostsByUsername
+// resolving one internally is cheap next to the query it's paired with
+// here anyway.
+export async function fetchUserPostsForSSR(username: string) {
+  return getPostsByUsername(username);
+}
+
+// Backs /u/[username]'s header — same lookup GET /api/user/[username]
+// runs (including the viewer-relative isFollowing/followsMe, and a real
+// postCount via _count — see lib/users.ts), called directly and awaited
+// before anything is flushed to the client, so the header renders with
+// real data (including the post count) on first paint, and a
+// nonexistent username 404s server-side instead of after mount.
+export async function fetchUserProfileForSSR(
+  username: string,
+  viewerId: string | null,
+) {
+  return getPublicUserProfile(username, viewerId);
+}
+
+export async function fetchLikedPostIdsForSSR(userId: string) {
+  return getLikedPostIds(userId);
+}
+
+export async function fetchSavedBundleForSSR(userId: string) {
+  const [savedPosts, collections] = await Promise.all([
+    prisma.savedPost.findMany({
+      where: { userId },
+      select: {
+        postId: true,
+        collections: { select: { collectionId: true } },
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.collection.findMany({
+      where: { userId },
+      select: { id: true, name: true },
+      orderBy: { createdAt: "asc" },
+    }),
+  ]);
+  return buildSavedBundle(savedPosts, collections);
+}
+
+export async function fetchFollowingForSSR(username: string) {
+  return (await getFollowingList(username)) ?? [];
+}
+
+export async function fetchUserProfilesBatchForSSR(
+  usernames: string[],
+  viewerId: string,
+) {
+  return getPublicUserProfilesBatch(usernames, viewerId);
+}
+
+// Wrapped in React's cache() so calling this from both the root layout
+// (for the global currentUser hydration BottomNav etc. need on every
+// route) and a page (for its own SSR prefetches) within the same
+// request only hits the DB once — React dedupes by arguments for the
+// lifetime of a single render pass.
+export const fetchCurrentUserForSSR = cache(async (userId: string) => {
+  return getFullCurrentUser(userId);
+});
 </file>
 
 <file path="types/post.ts">
@@ -9669,12 +10037,18 @@ export type CurrentUser = {
   toneTag: string;
   pinnedRoutine: ProductTag[];
   onboardingCompletedAt: string | null;
-  // Real counts off the Follow table now (see app/api/user/me/route.ts),
+  // Real counts off the Follow/Post tables now (see app/api/user/me/route.ts),
   // same _count pattern GET /api/user/[username] already used for
   // someone else's profile — not the CURRENT_USER_PROFILE mock /
   // FollowProvider's local state this used to read.
   followerCount: number;
   followingCount: number;
+  // Same _count aggregate as follower/followingCount, sourced from the
+  // single user-row lookup — not derived from the length of a
+  // separately-fetched posts array, so it's available on the same
+  // render as the rest of the header instead of arriving after the
+  // (heavier) posts query resolves.
+  postCount: number;
 };
 
 // Replaces AuthProvider's isAuthenticated boolean entirely. Session
@@ -10940,116 +11314,6 @@ next-env.d.ts
 }
 </file>
 
-<file path="app/u/[username]/page.tsx">
-"use client";
-
-import { use, useEffect } from "react";
-import { useRouter, notFound } from "next/navigation";
-import { useUserPosts } from "@/hooks/useUserPosts";
-import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { useUserProfile } from "@/hooks/useUserProfile";
-import { PATHS } from "@/utils/paths";
-import { ProfileHeader } from "@/components/profile/ProfileHeader";
-import { ProfileHeaderSkeleton } from "@/components/profile/ProfileHeaderSkeleton";
-import { PostGrid } from "@/components/profile/PostGrid";
-import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
-import { ProductChips } from "@/components/feed/ProductChips";
-import { useAuthGatedAction } from "@/hooks/useAuthGatedAction";
-import { AuthGateModal } from "@/components/auth/AuthGateModal";
-
-type Props = {
-  params: Promise<{ username: string }>;
-};
-
-export default function UserProfilePage({ params }: Props) {
-  const { username } = use(params);
-  const router = useRouter();
-  const { user: currentUser } = useCurrentUser();
-  const {
-    user,
-    isLoading: profileLoading,
-    toggleFollow,
-  } = useUserProfile(username);
-  const { posts: userPosts, isLoading: postsLoading } = useUserPosts(username);
-  const { gateOpen, closeGate, guard } = useAuthGatedAction();
-
-  // This route is for viewing OTHER people. Your own profile — with Edit
-  // Profile instead of a Follow button — lives at /profile. Redirect
-  // rather than rendering a nonsensical "follow yourself" state.
-  // Compared against your LIVE username (not a frozen constant) — since
-  // username is now editable, visiting /u/your-new-handle needs to still
-  // correctly recognize it's you, right after a rename.
-  const isSelf = username === currentUser?.username;
-
-  useEffect(() => {
-    if (isSelf) {
-      router.replace(PATHS.PROFILE);
-    }
-  }, [isSelf, router]);
-
-  if (isSelf) {
-    return null;
-  }
-
-  // profileLoading reflects the real GET /api/user/[username] request,
-  // not a simulated timeout — once it resolves, user === null means the
-  // fetch didn't succeed (nonexistent username, or a network failure),
-  // so there's no fabricated fallback profile rendered with a working
-  // Follow button for nobody. This is the only thing the full-page
-  // skeleton waits on now: postsLoading (GET /api/user/[username]/posts,
-  // via useUserPosts) is a separate, independent request, so it no
-  // longer holds up the header too — it just gates the grid further
-  // down, whichever of the two finishes first.
-  if (profileLoading) {
-    return (
-      <div className="flex flex-col">
-        <ProfileHeaderSkeleton />
-        <div className="border-t border-foreground/10">
-          <PostGridSkeleton />
-        </div>
-      </div>
-    );
-  }
-
-  if (!user) {
-    notFound();
-  }
-
-  return (
-    <div className="flex flex-col">
-      <ProfileHeader
-        isOwnProfile={false}
-        username={user.username}
-        avatarSrc={user.avatarSrc}
-        bio={user.bio}
-        toneTag={user.toneTag}
-        // Falls back to 0 while the posts request is still in flight
-        // rather than holding up the header render for a count.
-        postCount={postsLoading ? 0 : userPosts.length}
-        followerCount={user.followerCount}
-        followingCount={user.followingCount}
-        isFollowing={user.isFollowing}
-        followsMe={user.followsMe}
-        onToggleFollow={guard(toggleFollow)}
-      />
-
-      {user.pinnedRoutine.length > 0 && (
-        <div className="border-t border-foreground/10 px-4 py-4">
-          <p className="mb-2 text-sm font-medium">Routine</p>
-          <ProductChips products={user.pinnedRoutine} />
-        </div>
-      )}
-
-      <div className="border-t border-foreground/10">
-        {postsLoading ? <PostGridSkeleton /> : <PostGrid posts={userPosts} />}
-      </div>
-
-      <AuthGateModal open={gateOpen} onClose={closeGate} />
-    </div>
-  );
-}
-</file>
-
 <file path="components/create/CreatePostForm.tsx">
 "use client";
 
@@ -11984,6 +12248,20 @@ export function EditProfileForm() {
       return;
     }
 
+    // useUpdateProfile's invalidateQueries covers every already-mounted
+    // client component (PostCard's author snapshot, the header, etc.),
+    // but app/profile/page.tsx also computes a `username` server-side
+    // and hands it down as a prop to PostGridSection — that value is
+    // baked into this route's RSC payload and, per next.config.ts,
+    // reused for up to staleTimes.dynamic (30s), or indefinitely across
+    // a client-side back-navigation like the one below. Without a
+    // refresh, PostGridClient keeps building USER_POSTS_QUERY_KEY off
+    // the OLD username after a rename, which no longer matches any
+    // user server-side. refresh() forces that server prop to
+    // recompute before router.back() lands on it.
+    if (username.trim().toLowerCase() !== user.username) {
+      router.refresh();
+    }
     router.back();
   }
 
@@ -12291,6 +12569,75 @@ export const PATHS = {
   AUTH_VERIFY: (token: string) => `/auth/verify/${token}`,
   ONBOARDING: "/onboarding",
 };
+</file>
+
+<file path="app/u/[username]/page.tsx">
+import { Suspense } from "react";
+import { notFound } from "next/navigation";
+import {
+  QueryClient,
+  dehydrate,
+  HydrationBoundary,
+} from "@tanstack/react-query";
+import { ProfileHeaderClient } from "@/components/profile/ProfileHeaderClient";
+import { PostGridSection } from "@/components/profile/PostGridSection";
+import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
+import { SelfProfileRedirect } from "@/components/profile/SelfProfileRedirect";
+import { profileQueryKey } from "@/lib/queryKeys";
+import { getServerUserId } from "@/lib/session";
+import { fetchUserProfileForSSR } from "@/lib/serverQueries";
+
+type Props = {
+  params: Promise<{ username: string }>;
+};
+
+// Two-tier SSR: the profile lookup (single indexed row, now including a
+// real postCount via _count — see lib/users.ts) is awaited here, before
+// anything is flushed to the client, so ProfileHeaderClient renders with
+// real data on first paint AND a nonexistent username produces a true
+// server-side 404 (not a client-side check-after-mount). The heavier
+// posts-with-media query — author, carousel items, products, per-post
+// like/comment counts — runs separately inside PostGridSection, wrapped
+// in Suspense, so it streams in behind the header instead of either
+// blocking it (the previous version of this page awaited both in
+// parallel) or loading client-side (the version before that).
+//
+// The "redirect to /profile if this is you" check still has to happen
+// client-side (SelfProfileRedirect) — it depends on the VIEWER's live
+// useCurrentUser() session, which this Server Component doesn't (and
+// shouldn't) assume matches the x-user-id on this particular request
+// forever. That check resolves synchronously (currentUser is already
+// hydrated globally) and doesn't block either the header or the grid.
+export default async function UserProfilePage({ params }: Props) {
+  const { username } = await params;
+  const viewerId = await getServerUserId();
+
+  const profile = await fetchUserProfileForSSR(username, viewerId);
+  if (!profile) {
+    notFound();
+  }
+
+  const queryClient = new QueryClient();
+  await queryClient.prefetchQuery({
+    queryKey: profileQueryKey(username),
+    queryFn: async () => profile,
+  });
+
+  return (
+    <HydrationBoundary state={dehydrate(queryClient)}>
+      <SelfProfileRedirect username={username}>
+        <div className="flex flex-col">
+          <ProfileHeaderClient username={username} />
+          <div className="border-t border-foreground/10">
+            <Suspense fallback={<PostGridSkeleton />}>
+              <PostGridSection username={username} />
+            </Suspense>
+          </div>
+        </div>
+      </SelfProfileRedirect>
+    </HydrationBoundary>
+  );
+}
 </file>
 
 <file path="components/shared/TopNav.tsx">
@@ -12735,73 +13082,83 @@ export const config = {
 </file>
 
 <file path="app/profile/page.tsx">
-"use client";
-
-import { useUserPosts } from "@/hooks/useUserPosts";
-import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { ProfileHeader } from "@/components/profile/ProfileHeader";
-import { ProfileHeaderSkeleton } from "@/components/profile/ProfileHeaderSkeleton";
-import { PostGrid } from "@/components/profile/PostGrid";
+import { Suspense } from "react";
+import {
+  QueryClient,
+  dehydrate,
+  HydrationBoundary,
+} from "@tanstack/react-query";
+import { OwnProfileHeaderClient } from "@/components/profile/OwnProfileHeaderClient";
+import { PostGridSection } from "@/components/profile/PostGridSection";
 import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
-import { ProductChips } from "@/components/feed/ProductChips";
 import { RequireAuth } from "@/components/auth/RequireAuth";
+import { CURRENT_USER_QUERY_KEY } from "@/lib/queryKeys";
+import { getServerUserId } from "@/lib/session";
+import { fetchCurrentUserForSSR } from "@/lib/serverQueries";
 
-export default function ProfilePage() {
-  const { user, isLoading } = useCurrentUser();
-  // Fetched directly for just this user (GET /api/user/[username]/posts)
-  // rather than pulled out of the whole feed via usePosts() and filtered
-  // client-side — same per-user endpoint /u/[username] uses (see
-  // hooks/useUserPosts.ts). Undefined username while user is still
-  // loading just holds the query off via `enabled`.
-  const { posts: myPosts, isLoading: postsLoading } = useUserPosts(
-    user?.username,
-  );
+// Mirrors app/(home)/page.tsx's SSR-prefetch pattern, but streamed
+// rather than fully blocking: currentUser (now including a real
+// postCount via _count — see lib/users.ts) is cheap enough to await
+// before rendering anything, so OwnProfileHeaderClient renders with
+// real data on first paint. The heavier posts-with-media query —
+// previously fetched client-side after mount, which is what left the
+// post count at 0 and the grid empty for a beat after the header had
+// already shown — now runs inside PostGridSection, wrapped in Suspense,
+// so it streams in behind the header instead of either blocking it or
+// loading client-side.
+//
+// currentUser itself is also prefetched once in app/layout.tsx for the
+// shared chrome (BottomNav etc.) — fetchCurrentUserForSSR is wrapped in
+// React's cache(), so calling it again here for the same userId within
+// the same request dedupes to that one DB hit, not a second one.
+export default async function ProfilePage() {
+  const userId = await getServerUserId();
+  const queryClient = new QueryClient();
 
-  const content =
-    isLoading || !user ? (
-      <div className="flex flex-col">
-        <ProfileHeaderSkeleton />
-        <div className="animate-pulse border-t border-foreground/10 px-4 py-4">
-          <div className="mb-2 h-3.5 w-16 rounded bg-foreground/10" />
-          <div className="flex gap-2">
-            <div className="h-7 w-28 shrink-0 rounded-full bg-foreground/10" />
-            <div className="h-7 w-24 shrink-0 rounded-full bg-foreground/10" />
-          </div>
-        </div>
-        <div className="border-t border-foreground/10">
-          <PostGridSkeleton />
-        </div>
-      </div>
-    ) : (
-      <div className="flex flex-col">
-        <ProfileHeader
-          isOwnProfile
-          username={user.username}
-          avatarSrc={user.avatarSrc}
-          bio={user.bio}
-          toneTag={user.toneTag}
-          // Falls back to 0 while posts are still loading rather than
-          // holding up the whole header for a count — matches the grid
-          // below, which shows its own skeleton in the meantime.
-          postCount={postsLoading ? 0 : myPosts.length}
-          followerCount={user.followerCount}
-          followingCount={user.followingCount}
-        />
-
-        {user.pinnedRoutine.length > 0 && (
-          <div className="border-t border-foreground/10 px-4 py-4">
-            <p className="mb-2 text-sm font-medium">Routine</p>
-            <ProductChips products={user.pinnedRoutine} />
-          </div>
-        )}
-
-        <div className="border-t border-foreground/10">
-          {postsLoading ? <PostGridSkeleton /> : <PostGrid posts={myPosts} />}
-        </div>
-      </div>
+  if (!userId) {
+    // No session: RequireAuth below is what actually gates this page —
+    // nothing to prefetch for a logged-out visitor.
+    return (
+      <RequireAuth>
+        <ProfilePageContent username={undefined} />
+      </RequireAuth>
     );
+  }
 
-  return <RequireAuth>{content}</RequireAuth>;
+  const currentUser = await fetchCurrentUserForSSR(userId);
+
+  await queryClient.prefetchQuery({
+    queryKey: CURRENT_USER_QUERY_KEY,
+    queryFn: async () => currentUser,
+  });
+
+  return (
+    <HydrationBoundary state={dehydrate(queryClient)}>
+      <RequireAuth>
+        <ProfilePageContent username={currentUser?.username} />
+      </RequireAuth>
+    </HydrationBoundary>
+  );
+}
+
+function ProfilePageContent({ username }: { username: string | undefined }) {
+  return (
+    <div className="flex flex-col">
+      <OwnProfileHeaderClient />
+      <div className="border-t border-foreground/10">
+        {username ? (
+          <Suspense fallback={<PostGridSkeleton />}>
+            <PostGridSection username={username} />
+          </Suspense>
+        ) : (
+          // userId pointed at a session with no matching user row —
+          // same edge case the pre-split page silently sat in forever;
+          // not something this pass changes the behavior of.
+          <PostGridSkeleton />
+        )}
+      </div>
+    </div>
+  );
 }
 </file>
 
