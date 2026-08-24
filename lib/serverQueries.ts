@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { prisma } from "./prisma";
 import { postInclude, serializePost } from "./posts";
 import { buildSavedBundle } from "./saved";
@@ -53,6 +54,11 @@ export async function fetchUserProfilesBatchForSSR(
   return getPublicUserProfilesBatch(usernames, viewerId);
 }
 
-export async function fetchCurrentUserForSSR(userId: string) {
+// Wrapped in React's cache() so calling this from both the root layout
+// (for the global currentUser hydration BottomNav etc. need on every
+// route) and a page (for its own SSR prefetches) within the same
+// request only hits the DB once — React dedupes by arguments for the
+// lifetime of a single render pass.
+export const fetchCurrentUserForSSR = cache(async (userId: string) => {
   return getFullCurrentUser(userId);
-}
+});

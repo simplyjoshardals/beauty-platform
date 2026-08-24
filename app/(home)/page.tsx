@@ -10,7 +10,6 @@ import {
   POSTS_QUERY_KEY,
   LIKES_QUERY_KEY,
   SAVED_QUERY_KEY,
-  CURRENT_USER_QUERY_KEY,
   followingQueryKey,
   profileQueryKey,
 } from "@/lib/queryKeys";
@@ -45,15 +44,6 @@ export default async function HomeFeedPage() {
       queryFn: async () => posts,
     }),
   ];
-
-  if (currentUser) {
-    prefetches.push(
-      queryClient.prefetchQuery({
-        queryKey: CURRENT_USER_QUERY_KEY,
-        queryFn: async () => currentUser,
-      }),
-    );
-  }
 
   if (viewer) {
     prefetches.push(
