@@ -1,68 +1,61 @@
-"use client";
-
-import { useUserPosts } from "@/hooks/useUserPosts";
-import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { ProfileHeader } from "@/components/profile/ProfileHeader";
-import { ProfileHeaderSkeleton } from "@/components/profile/ProfileHeaderSkeleton";
-import { PostGrid } from "@/components/profile/PostGrid";
-import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
-import { ProductChips } from "@/components/feed/ProductChips";
+import {
+  QueryClient,
+  dehydrate,
+  HydrationBoundary,
+} from "@tanstack/react-query";
+import { ProfileView } from "@/components/profile/ProfileView";
 import { RequireAuth } from "@/components/auth/RequireAuth";
+import { CURRENT_USER_QUERY_KEY, USER_POSTS_QUERY_KEY } from "@/lib/queryKeys";
+import { getServerUserId } from "@/lib/session";
+import {
+  fetchCurrentUserForSSR,
+  fetchUserPostsForSSR,
+} from "@/lib/serverQueries";
 
-export default function ProfilePage() {
-  const { user, isLoading } = useCurrentUser();
-  // Fetched directly for just this user (GET /api/user/[username]/posts)
-  // rather than pulled out of the whole feed via usePosts() and filtered
-  // client-side — same per-user endpoint /u/[username] uses (see
-  // hooks/useUserPosts.ts). Undefined username while user is still
-  // loading just holds the query off via `enabled`.
-  const { posts: myPosts, isLoading: postsLoading } = useUserPosts(
-    user?.username,
-  );
+// Mirrors app/(home)/page.tsx's SSR-prefetch pattern. currentUser itself
+// is already prefetched once in app/layout.tsx for the shared chrome
+// (BottomNav etc.) — fetchCurrentUserForSSR is wrapped in React's
+// cache(), so calling it again here for the same userId within the same
+// request dedupes to that one DB hit, not a second one. What's new here
+// is prefetching this viewer's OWN posts, which previously only ever
+// loaded client-side after mount — that's what used to leave the post
+// count at 0 (and the grid skeleton showing) for a beat after the
+// header had already rendered.
+export default async function ProfilePage() {
+  const userId = await getServerUserId();
+  const queryClient = new QueryClient();
 
-  const content =
-    isLoading || !user ? (
-      <div className="flex flex-col">
-        <ProfileHeaderSkeleton />
-        <div className="animate-pulse border-t border-foreground/10 px-4 py-4">
-          <div className="mb-2 h-3.5 w-16 rounded bg-foreground/10" />
-          <div className="flex gap-2">
-            <div className="h-7 w-28 shrink-0 rounded-full bg-foreground/10" />
-            <div className="h-7 w-24 shrink-0 rounded-full bg-foreground/10" />
-          </div>
-        </div>
-        <div className="border-t border-foreground/10">
-          <PostGridSkeleton />
-        </div>
-      </div>
-    ) : (
-      <div className="flex flex-col">
-        <ProfileHeader
-          isOwnProfile
-          username={user.username}
-          avatarSrc={user.avatarSrc}
-          bio={user.bio}
-          toneTag={user.toneTag}
-          // Falls back to 0 while posts are still loading rather than
-          // holding up the whole header for a count — matches the grid
-          // below, which shows its own skeleton in the meantime.
-          postCount={postsLoading ? 0 : myPosts.length}
-          followerCount={user.followerCount}
-          followingCount={user.followingCount}
-        />
-
-        {user.pinnedRoutine.length > 0 && (
-          <div className="border-t border-foreground/10 px-4 py-4">
-            <p className="mb-2 text-sm font-medium">Routine</p>
-            <ProductChips products={user.pinnedRoutine} />
-          </div>
-        )}
-
-        <div className="border-t border-foreground/10">
-          {postsLoading ? <PostGridSkeleton /> : <PostGrid posts={myPosts} />}
-        </div>
-      </div>
+  if (!userId) {
+    // No session: RequireAuth (inside ProfileView's tree, below) is
+    // what actually gates this page — nothing to prefetch for a
+    // logged-out visitor, just render straight through to it.
+    return (
+      <RequireAuth>
+        <ProfileView />
+      </RequireAuth>
     );
+  }
 
-  return <RequireAuth>{content}</RequireAuth>;
+  const currentUser = await fetchCurrentUserForSSR(userId);
+
+  await Promise.all([
+    queryClient.prefetchQuery({
+      queryKey: CURRENT_USER_QUERY_KEY,
+      queryFn: async () => currentUser,
+    }),
+    currentUser
+      ? queryClient.prefetchQuery({
+          queryKey: USER_POSTS_QUERY_KEY(currentUser.username),
+          queryFn: () => fetchUserPostsForSSR(currentUser.username),
+        })
+      : Promise.resolve(),
+  ]);
+
+  return (
+    <HydrationBoundary state={dehydrate(queryClient)}>
+      <RequireAuth>
+        <ProfileView />
+      </RequireAuth>
+    </HydrationBoundary>
+  );
 }

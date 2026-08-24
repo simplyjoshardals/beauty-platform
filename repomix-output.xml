@@ -41,6 +41,9 @@ The content is organized as follows:
 
 <directory_structure>
 app/
+  (home)/
+    loading.tsx
+    page.tsx
   api/
     auth/
       logout/
@@ -134,9 +137,7 @@ app/
   favicon.ico
   globals.css
   layout.tsx
-  loading.tsx
   not-found.tsx
-  page.tsx
   providers.tsx
 components/
   auth/
@@ -299,6 +300,7 @@ utils/
 .gitignore
 AGENTS.md
 CLAUDE.md
+dynamic_config_matrix.txt
 eslint.config.mjs
 next.config.ts
 package.json
@@ -312,6 +314,41 @@ tsconfig.json
 
 <files>
 This section contains the contents of the repository's files.
+
+<file path="dynamic_config_matrix.txt">
+1. RECOMMENDED CONFIGURATIONS MATRIX
+
++------------------+-------------------+------------------+--------------------------------------------------------------------------+
+| Page Route       | Server Rendering  | Client staleTime | Why this configuration?                                                  |
++------------------+-------------------+------------------+--------------------------------------------------------------------------+
+| /homefeed        | Dynamic           | 15 to 30 sec     | Allows instant back-navigation when a user views a post and returns     |
+|                  |                   |                  | to the feed.                                                             |
++------------------+-------------------+------------------+--------------------------------------------------------------------------+
+| /explore         | Dynamic (or ISR)  | 60 sec           | Content is discovery-focused and algorithmic; absolute real-time        |
+|                  |                   |                  | precision is not critical.                                               |
++------------------+-------------------+------------------+--------------------------------------------------------------------------+
+| /notifications   | Dynamic           | 0 sec            | Users expect notifications to disappear or mark as read instantly;     |
+|                  |                   |                  | cache will confuse them.                                                 |
++------------------+-------------------+------------------+--------------------------------------------------------------------------+
+| /saved           | Dynamic           | 10 to 15 sec     | Keeps bookmarks highly responsive, but clears quickly if they unsave     |
+|                  |                   |                  | an item.                                                                 |
++------------------+-------------------+------------------+--------------------------------------------------------------------------+
+| /profile         | Dynamic           | 30 sec            | Speeds up the frequent jumping between tab contents (Posts, Replies,    |
+|                  |                   |                  | Media).                                                                  |
++------------------+-------------------+------------------+--------------------------------------------------------------------------+
+</file>
+
+<file path="app/(home)/loading.tsx">
+import { HomeFeedSkeleton } from "@/components/feed/HomeFeedSkeleton";
+
+export default function HomeLoading() {
+  return (
+    <div className="min-h-dvh">
+      <HomeFeedSkeleton />
+    </div>
+  );
+}
+</file>
 
 <file path="app/api/auth/logout/route.ts">
 import { NextRequest, NextResponse } from "next/server";
@@ -1450,18 +1487,6 @@ export default function UserNotFound() {
       <p className="text-sm text-foreground/50">
         This account doesn&rsquo;t exist, or the link is incorrect.
       </p>
-    </div>
-  );
-}
-</file>
-
-<file path="app/loading.tsx">
-import { HomeFeedSkeleton } from "@/components/feed/HomeFeedSkeleton";
-
-export default function HomeLoading() {
-  return (
-    <div className="min-h-dvh">
-      <HomeFeedSkeleton />
     </div>
   );
 }
@@ -3201,98 +3226,6 @@ export function buildSavedBundle(
 }
 </file>
 
-<file path="lib/serverQueries.ts">
-import { prisma } from "./prisma";
-import { postInclude, serializePost } from "./posts";
-import { buildSavedBundle } from "./saved";
-import {
-  getFullCurrentUser,
-  getFollowingList,
-  getPublicUserProfilesBatch,
-} from "./users";
-import { getLikedPostIds } from "./likes";
-
-const FEED_TAKE = 50; // keep in sync with app/api/posts/route.ts
-
-export async function fetchPostsForSSR() {
-  const posts = await prisma.post.findMany({
-    include: postInclude,
-    orderBy: { createdAt: "desc" },
-    take: FEED_TAKE,
-  });
-  return posts.map(serializePost);
-}
-
-export async function fetchLikedPostIdsForSSR(userId: string) {
-  return getLikedPostIds(userId);
-}
-
-export async function fetchSavedBundleForSSR(userId: string) {
-  const [savedPosts, collections] = await Promise.all([
-    prisma.savedPost.findMany({
-      where: { userId },
-      select: {
-        postId: true,
-        collections: { select: { collectionId: true } },
-      },
-      orderBy: { createdAt: "desc" },
-    }),
-    prisma.collection.findMany({
-      where: { userId },
-      select: { id: true, name: true },
-      orderBy: { createdAt: "asc" },
-    }),
-  ]);
-  return buildSavedBundle(savedPosts, collections);
-}
-
-export async function fetchFollowingForSSR(username: string) {
-  return (await getFollowingList(username)) ?? [];
-}
-
-export async function fetchUserProfilesBatchForSSR(
-  usernames: string[],
-  viewerId: string,
-) {
-  return getPublicUserProfilesBatch(usernames, viewerId);
-}
-
-export async function fetchCurrentUserForSSR(userId: string) {
-  return getFullCurrentUser(userId);
-}
-</file>
-
-<file path="lib/session.ts">
-import { headers } from "next/headers";
-import { prisma } from "./prisma";
-
-// Identity now comes from proxy.ts, which runs before every request —
-// page or API — verifies the access token, or silently refreshes it via
-// the refresh token if it's expired, and forwards the result as
-// x-user-id. Reading that header here (instead of re-verifying the raw
-// accessToken cookie the way this used to) is what lets a Server
-// Component see an already-refreshed session, since middleware can set
-// a new cookie during the request and this can't.
-export async function getServerUserId(): Promise<string | null> {
-  return (await headers()).get("x-user-id");
-}
-
-// Minimal, fast read used ONLY to paint the bottom nav's profile tab
-// correctly on first server render, so it doesn't flash from the
-// generic icon to the real avatar after a refresh.
-export async function getServerNavUser(): Promise<{
-  avatarSrc: string;
-} | null> {
-  const userId = await getServerUserId();
-  if (!userId) return null;
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { avatarSrc: true },
-  });
-  return user ?? null;
-}
-</file>
-
 <file path="lib/users.ts">
 import { prisma } from "./prisma";
 
@@ -4510,6 +4443,120 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
     "**/*.mts"
   ],
   "exclude": ["node_modules"]
+}
+</file>
+
+<file path="app/(home)/page.tsx">
+import {
+  QueryClient,
+  dehydrate,
+  HydrationBoundary,
+} from "@tanstack/react-query";
+import { HomeFeed } from "@/components/feed/HomeFeed";
+import { HomeFeedSkeleton } from "@/components/feed/HomeFeedSkeleton";
+import { RequireAuth } from "@/components/auth/RequireAuth";
+import {
+  POSTS_QUERY_KEY,
+  LIKES_QUERY_KEY,
+  SAVED_QUERY_KEY,
+  followingQueryKey,
+  profileQueryKey,
+} from "@/lib/queryKeys";
+import { getServerUserId } from "@/lib/session";
+import {
+  fetchPostsForSSR,
+  fetchLikedPostIdsForSSR,
+  fetchSavedBundleForSSR,
+  fetchFollowingForSSR,
+  fetchUserProfilesBatchForSSR,
+  fetchCurrentUserForSSR,
+} from "@/lib/serverQueries";
+
+export default async function HomeFeedPage() {
+  const pageStart = performance.now();
+
+  const userId = await getServerUserId();
+
+  const [currentUser, posts] = await Promise.all([
+    userId ? fetchCurrentUserForSSR(userId) : Promise.resolve(null),
+    fetchPostsForSSR(),
+  ]);
+
+  const viewer = currentUser
+    ? { id: currentUser.id, username: currentUser.username }
+    : null;
+  const queryClient = new QueryClient();
+
+  const prefetches: Promise<unknown>[] = [
+    queryClient.prefetchQuery({
+      queryKey: POSTS_QUERY_KEY,
+      queryFn: async () => posts,
+    }),
+  ];
+
+  if (viewer) {
+    prefetches.push(
+      timed("likes", () =>
+        queryClient.prefetchQuery({
+          queryKey: LIKES_QUERY_KEY,
+          queryFn: async () => ({
+            likedPostIds: await fetchLikedPostIdsForSSR(viewer.id),
+          }),
+        }),
+      ),
+      timed("saved", () =>
+        queryClient.prefetchQuery({
+          queryKey: SAVED_QUERY_KEY,
+          queryFn: () => fetchSavedBundleForSSR(viewer.id),
+        }),
+      ),
+      timed("following", () =>
+        queryClient.prefetchQuery({
+          queryKey: followingQueryKey(viewer.username),
+          queryFn: () => fetchFollowingForSSR(viewer.username),
+        }),
+      ),
+    );
+  }
+
+  const authors = [...new Set(posts.map((p) => p.author.username))];
+  if (viewer) {
+    prefetches.push(
+      timed(`profiles batch (${authors.length} authors)`, () =>
+        fetchUserProfilesBatchForSSR(authors, viewer.id).then((profiles) => {
+          for (const [username, profile] of profiles) {
+            queryClient.setQueryData(profileQueryKey(username), profile);
+          }
+        }),
+      ),
+    );
+  }
+
+  const prefetchStart = performance.now();
+  await Promise.all(prefetches);
+  console.log(
+    `[home] Promise.all total: ${(performance.now() - prefetchStart).toFixed(1)}ms`,
+  );
+  console.log(
+    `[home] full page function: ${(performance.now() - pageStart).toFixed(1)}ms`,
+  );
+
+  return (
+    <HydrationBoundary state={dehydrate(queryClient)}>
+      <RequireAuth>
+        <div className="min-h-dvh">
+          <HomeFeed />
+        </div>
+      </RequireAuth>
+    </HydrationBoundary>
+  );
+}
+
+async function timed<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  const start = performance.now();
+  const result = await fn();
+  console.log(`[home] ${label}: ${(performance.now() - start).toFixed(1)}ms`);
+  return result;
 }
 </file>
 
@@ -7221,6 +7268,88 @@ export const MAX_PRODUCTS_PER_POST = 20;
 export const MAX_CAROUSEL_ITEMS = 10;
 </file>
 
+<file path="lib/serverQueries.ts">
+import { cache } from "react";
+import { prisma } from "./prisma";
+import { postInclude, serializePost } from "./posts";
+import { buildSavedBundle } from "./saved";
+import {
+  getFullCurrentUser,
+  getFollowingList,
+  getPublicUserProfilesBatch,
+} from "./users";
+import { getLikedPostIds } from "./likes";
+
+const FEED_TAKE = 50; // keep in sync with app/api/posts/route.ts
+
+export async function fetchPostsForSSR() {
+  const posts = await prisma.post.findMany({
+    include: postInclude,
+    orderBy: { createdAt: "desc" },
+    take: FEED_TAKE,
+  });
+  return posts.map(serializePost);
+}
+
+export async function fetchLikedPostIdsForSSR(userId: string) {
+  return getLikedPostIds(userId);
+}
+
+export async function fetchSavedBundleForSSR(userId: string) {
+  const [savedPosts, collections] = await Promise.all([
+    prisma.savedPost.findMany({
+      where: { userId },
+      select: {
+        postId: true,
+        collections: { select: { collectionId: true } },
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.collection.findMany({
+      where: { userId },
+      select: { id: true, name: true },
+      orderBy: { createdAt: "asc" },
+    }),
+  ]);
+  return buildSavedBundle(savedPosts, collections);
+}
+
+export async function fetchFollowingForSSR(username: string) {
+  return (await getFollowingList(username)) ?? [];
+}
+
+export async function fetchUserProfilesBatchForSSR(
+  usernames: string[],
+  viewerId: string,
+) {
+  return getPublicUserProfilesBatch(usernames, viewerId);
+}
+
+// Wrapped in React's cache() so calling this from both the root layout
+// (for the global currentUser hydration BottomNav etc. need on every
+// route) and a page (for its own SSR prefetches) within the same
+// request only hits the DB once — React dedupes by arguments for the
+// lifetime of a single render pass.
+export const fetchCurrentUserForSSR = cache(async (userId: string) => {
+  return getFullCurrentUser(userId);
+});
+</file>
+
+<file path="lib/session.ts">
+import { headers } from "next/headers";
+
+// Identity now comes from proxy.ts, which runs before every request —
+// page or API — verifies the access token, or silently refreshes it via
+// the refresh token if it's expired, and forwards the result as
+// x-user-id. Reading that header here (instead of re-verifying the raw
+// accessToken cookie the way this used to) is what lets a Server
+// Component see an already-refreshed session, since middleware can set
+// a new cookie during the request and this can't.
+export async function getServerUserId(): Promise<string | null> {
+  return (await headers()).get("x-user-id");
+}
+</file>
+
 <file path="prisma/schema.prisma">
 generator client {
   provider = "prisma-client"
@@ -7811,23 +7940,6 @@ export function validateUsername(value: string): string | null {
 
   return null;
 }
-</file>
-
-<file path="next.config.ts">
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
-  images: {
-    remotePatterns: [
-      {
-        protocol: "https",
-        hostname: "res.cloudinary.com",
-      },
-    ],
-  },
-};
-
-export default nextConfig;
 </file>
 
 <file path="app/create/page.tsx">
@@ -9005,6 +9117,37 @@ export type Post = {
   comments?: Comment[]; // seed/existing comments, if any
   createdAt: string; // ISO — used for chronological sort
 };
+</file>
+
+<file path="next.config.ts">
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  images: {
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "res.cloudinary.com",
+      },
+    ],
+  },
+  experimental: {
+    // Dynamic routes (anything touching cookies()/headers() — which is
+    // every route now, via the layout's getServerUserId() call) default
+    // to a 0s client cache: every nav re-runs the full server render.
+    // This gives a short reuse window instead, so tapping back to a
+    // page you just left (e.g. Home via the bottom nav) is instant
+    // rather than a full round trip. Data can be up to this many
+    // seconds stale on a quick revisit — fine for a feed; call
+    // router.refresh() after mutations (new post, etc.) if you need to
+    // force a fresh render regardless of this window.
+    staleTimes: {
+      dynamic: 30,
+    },
+  },
+};
+
+export default nextConfig;
 </file>
 
 <file path="app/p/[postId]/page.tsx">
@@ -12150,130 +12293,6 @@ export const PATHS = {
 };
 </file>
 
-<file path="app/page.tsx">
-import {
-  QueryClient,
-  dehydrate,
-  HydrationBoundary,
-} from "@tanstack/react-query";
-import { HomeFeed } from "@/components/feed/HomeFeed";
-import { HomeFeedSkeleton } from "@/components/feed/HomeFeedSkeleton";
-import { RequireAuth } from "@/components/auth/RequireAuth";
-import {
-  POSTS_QUERY_KEY,
-  LIKES_QUERY_KEY,
-  SAVED_QUERY_KEY,
-  CURRENT_USER_QUERY_KEY,
-  followingQueryKey,
-  profileQueryKey,
-} from "@/lib/queryKeys";
-import { getServerUserId } from "@/lib/session";
-import {
-  fetchPostsForSSR,
-  fetchLikedPostIdsForSSR,
-  fetchSavedBundleForSSR,
-  fetchFollowingForSSR,
-  fetchUserProfilesBatchForSSR,
-  fetchCurrentUserForSSR,
-} from "@/lib/serverQueries";
-
-export default async function HomeFeedPage() {
-  const pageStart = performance.now();
-
-  const userId = await getServerUserId();
-
-  const [currentUser, posts] = await Promise.all([
-    userId ? fetchCurrentUserForSSR(userId) : Promise.resolve(null),
-    fetchPostsForSSR(),
-  ]);
-
-  const viewer = currentUser
-    ? { id: currentUser.id, username: currentUser.username }
-    : null;
-  const queryClient = new QueryClient();
-
-  const prefetches: Promise<unknown>[] = [
-    queryClient.prefetchQuery({
-      queryKey: POSTS_QUERY_KEY,
-      queryFn: async () => posts,
-    }),
-  ];
-
-  if (currentUser) {
-    prefetches.push(
-      queryClient.prefetchQuery({
-        queryKey: CURRENT_USER_QUERY_KEY,
-        queryFn: async () => currentUser,
-      }),
-    );
-  }
-
-  if (viewer) {
-    prefetches.push(
-      timed("likes", () =>
-        queryClient.prefetchQuery({
-          queryKey: LIKES_QUERY_KEY,
-          queryFn: async () => ({
-            likedPostIds: await fetchLikedPostIdsForSSR(viewer.id),
-          }),
-        }),
-      ),
-      timed("saved", () =>
-        queryClient.prefetchQuery({
-          queryKey: SAVED_QUERY_KEY,
-          queryFn: () => fetchSavedBundleForSSR(viewer.id),
-        }),
-      ),
-      timed("following", () =>
-        queryClient.prefetchQuery({
-          queryKey: followingQueryKey(viewer.username),
-          queryFn: () => fetchFollowingForSSR(viewer.username),
-        }),
-      ),
-    );
-  }
-
-  const authors = [...new Set(posts.map((p) => p.author.username))];
-  if (viewer) {
-    prefetches.push(
-      timed(`profiles batch (${authors.length} authors)`, () =>
-        fetchUserProfilesBatchForSSR(authors, viewer.id).then((profiles) => {
-          for (const [username, profile] of profiles) {
-            queryClient.setQueryData(profileQueryKey(username), profile);
-          }
-        }),
-      ),
-    );
-  }
-
-  const prefetchStart = performance.now();
-  await Promise.all(prefetches);
-  console.log(
-    `[home] Promise.all total: ${(performance.now() - prefetchStart).toFixed(1)}ms`,
-  );
-  console.log(
-    `[home] full page function: ${(performance.now() - pageStart).toFixed(1)}ms`,
-  );
-
-  return (
-    <HydrationBoundary state={dehydrate(queryClient)}>
-      <RequireAuth fallback={<HomeFeedSkeleton />}>
-        <div className="min-h-dvh">
-          <HomeFeed />
-        </div>
-      </RequireAuth>
-    </HydrationBoundary>
-  );
-}
-
-async function timed<T>(label: string, fn: () => Promise<T>): Promise<T> {
-  const start = performance.now();
-  const result = await fn();
-  console.log(`[home] ${label}: ${(performance.now() - start).toFixed(1)}ms`);
-  return result;
-}
-</file>
-
 <file path="components/shared/TopNav.tsx">
 "use client";
 
@@ -13302,13 +13321,20 @@ export function BottomNav({
 <file path="app/layout.tsx">
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
+import {
+  QueryClient,
+  dehydrate,
+  HydrationBoundary,
+} from "@tanstack/react-query";
 import "./globals.css";
 import { BottomNav } from "@/components/shared/BottomNav";
 import { TopNav } from "@/components/shared/TopNav";
 import { FollowProvider } from "@/context/FollowProvider";
 import { NotificationsProvider } from "@/context/NotificationsProvider";
 import { Providers } from "./providers";
-import { getServerNavUser } from "@/lib/session";
+import { getServerUserId } from "@/lib/session";
+import { fetchCurrentUserForSSR } from "@/lib/serverQueries";
+import { CURRENT_USER_QUERY_KEY } from "@/lib/queryKeys";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -13353,7 +13379,21 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const navUser = await getServerNavUser();
+  const userId = await getServerUserId();
+  const currentUser = userId ? await fetchCurrentUserForSSR(userId) : null;
+
+  // Prefetched here — not just on the Home page — because BottomNav
+  // (and anything else that calls useCurrentUser() outside a page's own
+  // HydrationBoundary) lives in this layout and renders on every route.
+  // A page-level prefetch only ever covered that one page's tree; this
+  // covers the shared chrome too, on Explore/Saved/Profile/etc as well.
+  const queryClient = new QueryClient();
+  await queryClient.prefetchQuery({
+    queryKey: CURRENT_USER_QUERY_KEY,
+    queryFn: async () => currentUser,
+  });
+
+  const navUser = currentUser ? { avatarSrc: currentUser.avatarSrc } : null;
 
   return (
     <html
@@ -13366,15 +13406,17 @@ export default async function RootLayout({
       </head>
       <body className="min-h-full flex flex-col">
         <Providers>
-          <FollowProvider>
-            <NotificationsProvider>
-              <TopNav />
-              <main className="mx-auto w-full max-w-lg flex-1 pt-[calc(3.5rem+env(safe-area-inset-top))] pb-[calc(3.5rem+env(safe-area-inset-bottom))]">
-                {children}
-              </main>
-              <BottomNav initialUser={navUser} />
-            </NotificationsProvider>
-          </FollowProvider>
+          <HydrationBoundary state={dehydrate(queryClient)}>
+            <FollowProvider>
+              <NotificationsProvider>
+                <TopNav />
+                <main className="mx-auto w-full max-w-lg flex-1 pt-[calc(3.5rem+env(safe-area-inset-top))] pb-[calc(3.5rem+env(safe-area-inset-bottom))]">
+                  {children}
+                </main>
+                <BottomNav initialUser={navUser} />
+              </NotificationsProvider>
+            </FollowProvider>
+          </HydrationBoundary>
         </Providers>
       </body>
     </html>

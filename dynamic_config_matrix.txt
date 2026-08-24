@@ -1,0 +1,20 @@
+1. RECOMMENDED CONFIGURATIONS MATRIX
+
++------------------+-------------------+------------------+--------------------------------------------------------------------------+
+| Page Route       | Server Rendering  | Client staleTime | Why this configuration?                                                  |
++------------------+-------------------+------------------+--------------------------------------------------------------------------+
+| /homefeed        | Dynamic           | 15 to 30 sec     | Allows instant back-navigation when a user views a post and returns     |
+|                  |                   |                  | to the feed.                                                             |
++------------------+-------------------+------------------+--------------------------------------------------------------------------+
+| /explore         | Dynamic (or ISR)  | 60 sec           | Content is discovery-focused and algorithmic; absolute real-time        |
+|                  |                   |                  | precision is not critical.                                               |
++------------------+-------------------+------------------+--------------------------------------------------------------------------+
+| /notifications   | Dynamic           | 0 sec            | Users expect notifications to disappear or mark as read instantly;     |
+|                  |                   |                  | cache will confuse them.                                                 |
++------------------+-------------------+------------------+--------------------------------------------------------------------------+
+| /saved           | Dynamic           | 10 to 15 sec     | Keeps bookmarks highly responsive, but clears quickly if they unsave     |
+|                  |                   |                  | an item.                                                                 |
++------------------+-------------------+------------------+--------------------------------------------------------------------------+
+| /profile         | Dynamic           | 30 sec            | Speeds up the frequent jumping between tab contents (Posts, Replies,    |
+|                  |                   |                  | Media).                                                                  |
++------------------+-------------------+------------------+--------------------------------------------------------------------------+

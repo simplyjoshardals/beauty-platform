@@ -2,14 +2,17 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { getUserPosts } from "@/services/postService";
+import {
+  USER_POSTS_QUERY_KEY,
+  USER_POSTS_QUERY_KEY_PREFIX,
+} from "@/lib/queryKeys";
 
-// Shared prefix so a post mutation elsewhere (create, delete, like,
-// comment — see usePosts/useCreatePost/useLikedPosts/useComments) can
-// invalidate every per-user posts query at once without knowing which
-// usernames are actually cached. React Query's invalidateQueries matches
-// by prefix, so passing this alone (no username) hits every
-// ["userPosts", username] entry in the cache.
-export const USER_POSTS_QUERY_KEY_PREFIX = ["userPosts"] as const;
+// Re-exported for existing callers (post mutations invalidating by
+// prefix) — the actual definition now lives in lib/queryKeys.ts so a
+// Server Component (app/profile/page.tsx, app/u/[username]/page.tsx)
+// can construct the exact same key for SSR prefetching without
+// importing this "use client" file.
+export { USER_POSTS_QUERY_KEY_PREFIX };
 
 // Backs the post grid on both /profile and /u/[username] — a direct
 // fetch of just this user's posts (see app/api/user/[username]/posts/route.ts)
@@ -19,7 +22,7 @@ export const USER_POSTS_QUERY_KEY_PREFIX = ["userPosts"] as const;
 // than firing a request for "undefined".
 export function useUserPosts(username: string | undefined) {
   const query = useQuery({
-    queryKey: [...USER_POSTS_QUERY_KEY_PREFIX, username],
+    queryKey: USER_POSTS_QUERY_KEY(username),
     queryFn: async () => {
       const result = await getUserPosts(username as string);
       if (!result?.success) return [];

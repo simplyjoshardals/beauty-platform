@@ -1,13 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { serializePost, postInclude } from "@/lib/posts";
+import { getPostsByUserId } from "@/lib/posts";
 
 type Params = { params: Promise<{ username: string }> };
-
-// Same take-50-no-pagination-yet posture as GET /api/posts (see
-// app/api/posts/route.ts) — fine for a profile grid this size today,
-// swap for real cursor pagination once it matters.
-const PROFILE_POSTS_TAKE = 50;
 
 // Public read, same as GET /api/user/[username] itself — this is what
 // both /u/[username] and /profile now call for the post grid, instead
@@ -17,6 +12,11 @@ const PROFILE_POSTS_TAKE = 50;
 // RequireAuth); /profile is behind RequireAuth on the frontend, but
 // there's no reason for this route itself to care who's asking — a
 // user's posts are the same list either way.
+//
+// The actual posts query lives in getPostsByUserId (lib/posts.ts),
+// shared with lib/serverQueries.ts's fetchUserPostsForSSR — this route
+// just still owns its own user lookup, since it needs the id either way
+// to 404 on a nonexistent username.
 export async function GET(req: NextRequest, { params }: Params) {
   const { username } = await params;
 
@@ -32,15 +32,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     );
   }
 
-  const posts = await prisma.post.findMany({
-    where: { authorId: user.id },
-    include: postInclude,
-    orderBy: { createdAt: "desc" },
-    take: PROFILE_POSTS_TAKE,
-  });
+  const posts = await getPostsByUserId(user.id);
 
-  return NextResponse.json({
-    success: true,
-    posts: posts.map(serializePost),
-  });
+  return NextResponse.json({ success: true, posts });
 }

@@ -1,10 +1,11 @@
 import { cache } from "react";
 import { prisma } from "./prisma";
-import { postInclude, serializePost } from "./posts";
+import { postInclude, serializePost, getPostsByUsername } from "./posts";
 import { buildSavedBundle } from "./saved";
 import {
   getFullCurrentUser,
   getFollowingList,
+  getPublicUserProfile,
   getPublicUserProfilesBatch,
 } from "./users";
 import { getLikedPostIds } from "./likes";
@@ -18,6 +19,32 @@ export async function fetchPostsForSSR() {
     take: FEED_TAKE,
   });
   return posts.map(serializePost);
+}
+
+// Backs /profile and /u/[username] — same query GET
+// /api/user/[username]/posts runs (getPostsByUsername, in
+// lib/posts.ts), called directly instead of over HTTP so the post grid
+// (and, critically, the post count in ProfileHeader) is already
+// hydrated on first paint instead of popping in after mount. Takes a
+// username rather than a userId deliberately: app/u/[username]/page.tsx
+// fetches this alongside the profile lookup in a single Promise.all, so
+// this can't depend on that profile's id being resolved first without
+// turning two independent, parallel queries into a slower sequential
+// chain. getPostsByUsername's extra indexed lookup is cheap next to
+// that cost.
+export async function fetchUserPostsForSSR(username: string) {
+  return getPostsByUsername(username);
+}
+
+// Backs /u/[username]'s ProfileHeader — same lookup GET
+// /api/user/[username] runs (including the viewer-relative
+// isFollowing/followsMe), called directly so the header + follow state
+// render on first paint instead of a skeleton.
+export async function fetchUserProfileForSSR(
+  username: string,
+  viewerId: string | null,
+) {
+  return getPublicUserProfile(username, viewerId);
 }
 
 export async function fetchLikedPostIdsForSSR(userId: string) {

@@ -1,3 +1,4 @@
+import { prisma } from "./prisma";
 import type { Post, PostMedia } from "@/types/post";
 
 // Mirrors the MediaType enum in prisma/schema.prisma exactly — kept as a
@@ -134,3 +135,47 @@ export const MAX_CAPTION_LENGTH = 2200; // matches Instagram's own limit
 export const MAX_PRODUCT_LABEL_LENGTH = 120;
 export const MAX_PRODUCTS_PER_POST = 20;
 export const MAX_CAROUSEL_ITEMS = 10;
+
+// Same take-50-no-pagination-yet posture as FEED_TAKE in
+// app/api/posts/route.ts — fine for a profile grid this size today,
+// swap for real cursor pagination once it matters. One constant here
+// instead of two copies (route + SSR fetcher) that could drift.
+export const PROFILE_POSTS_TAKE = 50;
+
+// Single source of truth for "this user's posts, newest first" —
+// GET /api/user/[username]/posts (the client-side fetch useUserPosts
+// makes) and lib/serverQueries.ts's fetchUserPostsForSSR (the SSR
+// prefetch app/profile/page.tsx and app/u/[username]/page.tsx run) both
+// call one of these instead of each running their own copy of the same
+// Prisma query — same reason GET /api/user/me and fetchCurrentUserForSSR
+// both call getFullCurrentUser in lib/users.ts rather than duplicating
+// it.
+//
+// getPostsByUserId is the actual query. Callers that already resolved a
+// user row for another reason (the route's own 404 check, or the SSR
+// pages after fetchUserProfileForSSR/fetchCurrentUserForSSR already
+// returned an id) should call this directly rather than the
+// username-based wrapper below, to avoid a second redundant lookup.
+export async function getPostsByUserId(userId: string): Promise<Post[]> {
+  const posts = await prisma.post.findMany({
+    where: { authorId: userId },
+    include: postInclude,
+    orderBy: { createdAt: "desc" },
+    take: PROFILE_POSTS_TAKE,
+  });
+  return posts.map(serializePost);
+}
+
+// Convenience wrapper for the rare caller with only a username on hand
+// and no reason to look up the user row itself first. Returns [] for a
+// nonexistent username rather than null/throwing — callers that need to
+// distinguish "user doesn't exist" from "user has no posts" should do
+// their own lookup (and call getPostsByUserId directly) instead.
+export async function getPostsByUsername(username: string): Promise<Post[]> {
+  const user = await prisma.user.findUnique({
+    where: { username },
+    select: { id: true },
+  });
+  if (!user) return [];
+  return getPostsByUserId(user.id);
+}

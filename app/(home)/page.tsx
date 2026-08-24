@@ -94,7 +94,7 @@ export default async function HomeFeedPage() {
 
   return (
     <HydrationBoundary state={dehydrate(queryClient)}>
-      <RequireAuth fallback={<HomeFeedSkeleton />}>
+      <RequireAuth>
         <div className="min-h-dvh">
           <HomeFeed />
         </div>

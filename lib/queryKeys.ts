@@ -15,3 +15,18 @@ export function profileQueryKey(username: string) {
 }
 
 export const CURRENT_USER_QUERY_KEY = ["currentUser"] as const;
+
+// Shared prefix so a post mutation elsewhere (create, delete, like,
+// comment) can invalidate every per-user posts query at once without
+// knowing which usernames are cached — invalidateQueries matches by
+// prefix, so USER_POSTS_QUERY_KEY_PREFIX alone hits every entry.
+// USER_POSTS_QUERY_KEY(username) is the full key useUserPosts queries
+// with client-side, and what a Server Component prefetches into —
+// kept here (not in hooks/useUserPosts.ts) so both sides, and
+// app/profile/page.tsx + app/u/[username]/page.tsx, construct the
+// exact same key from one definition.
+export const USER_POSTS_QUERY_KEY_PREFIX = ["userPosts"] as const;
+
+export function USER_POSTS_QUERY_KEY(username: string | undefined) {
+  return [...USER_POSTS_QUERY_KEY_PREFIX, username] as const;
+}
