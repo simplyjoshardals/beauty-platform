@@ -5,6 +5,7 @@ import {
   serializePost,
   postInclude,
   isValidCloudinaryUrl,
+  getHomeFeedPosts,
   POST_IMAGE_FOLDER,
   POST_VIDEO_FOLDER,
   MAX_CAPTION_LENGTH,
@@ -14,23 +15,29 @@ import {
 } from "@/lib/posts";
 import { getCloudinaryVideoThumbnail } from "@/utils/cloudinaryVideoThumbnail";
 
-// No pagination yet — fine for a feed this size today. Swap this for a
-// cursor (createdAt + id) once there are enough posts for it to matter;
-// the response shape (an array under `posts`) is set up so that swap
-// doesn't force a change on the frontend beyond how it's called.
-const FEED_TAKE = 50;
+// x-user-id is set by proxy.ts. GET /api/posts is a protected route (see
+// proxy.ts's isProtectedRoute/isPublicGet — the feed list itself is
+// never public), so by the time a request reaches here proxy has already
+// enforced a hard 401 for a missing/invalid session; the check below is
+// just defense in depth, not the primary gate.
+//
+// v1 home feed algorithm lives in getHomeFeedPosts (lib/posts.ts): your
+// own posts + everyone you follow, newest first — filtered in the WHERE
+// clause instead of the client fetching every post and filtering
+// against a separately-fetched following list (what HomeFeed used to
+// do).
+export async function GET(req: NextRequest) {
+  const userId = req.headers.get("x-user-id");
+  if (!userId) {
+    return NextResponse.json(
+      { success: false, error: "Unauthorized" },
+      { status: 401 },
+    );
+  }
 
-export async function GET() {
-  const posts = await prisma.post.findMany({
-    include: postInclude,
-    orderBy: { createdAt: "desc" },
-    take: FEED_TAKE,
-  });
+  const posts = await getHomeFeedPosts(userId);
 
-  return NextResponse.json({
-    success: true,
-    posts: posts.map(serializePost),
-  });
+  return NextResponse.json({ success: true, posts });
 }
 
 type ProductInput = { label: string };

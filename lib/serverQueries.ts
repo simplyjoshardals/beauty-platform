@@ -1,6 +1,6 @@
 import { cache } from "react";
 import { prisma } from "./prisma";
-import { postInclude, serializePost, getPostsByUsername } from "./posts";
+import { getPostsByUsername, getHomeFeedPosts } from "./posts";
 import { buildSavedBundle } from "./saved";
 import {
   getFullCurrentUser,
@@ -10,15 +10,15 @@ import {
 } from "./users";
 import { getLikedPostIds } from "./likes";
 
-const FEED_TAKE = 50; // keep in sync with app/api/posts/route.ts
-
-export async function fetchPostsForSSR() {
-  const posts = await prisma.post.findMany({
-    include: postInclude,
-    orderBy: { createdAt: "desc" },
-    take: FEED_TAKE,
-  });
-  return posts.map(serializePost);
+// Same query GET /api/posts runs (getHomeFeedPosts, in lib/posts.ts),
+// called directly instead of over HTTP — same pattern as
+// fetchUserPostsForSSR below. Home is always behind RequireAuth, but SSR
+// for that first (logged-out) paint still runs before the client-side
+// redirect fires, so a null userId — no session yet — just gets the
+// empty feed rather than every post in the app.
+export async function fetchPostsForSSR(userId: string | null) {
+  if (!userId) return [];
+  return getHomeFeedPosts(userId);
 }
 
 // Backs the post grid on both /profile and /u/[username] — same query

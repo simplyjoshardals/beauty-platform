@@ -4,7 +4,6 @@ import {
   HydrationBoundary,
 } from "@tanstack/react-query";
 import { HomeFeed } from "@/components/feed/HomeFeed";
-import { HomeFeedSkeleton } from "@/components/feed/HomeFeedSkeleton";
 import { RequireAuth } from "@/components/auth/RequireAuth";
 import {
   POSTS_QUERY_KEY,
@@ -30,7 +29,7 @@ export default async function HomeFeedPage() {
 
   const [currentUser, posts] = await Promise.all([
     userId ? fetchCurrentUserForSSR(userId) : Promise.resolve(null),
-    fetchPostsForSSR(),
+    fetchPostsForSSR(userId),
   ]);
 
   const viewer = currentUser

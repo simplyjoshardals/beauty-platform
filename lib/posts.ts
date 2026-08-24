@@ -136,11 +136,17 @@ export const MAX_PRODUCT_LABEL_LENGTH = 120;
 export const MAX_PRODUCTS_PER_POST = 20;
 export const MAX_CAROUSEL_ITEMS = 10;
 
-// Same take-50-no-pagination-yet posture as FEED_TAKE in
-// app/api/posts/route.ts — fine for a profile grid this size today,
-// swap for real cursor pagination once it matters. One constant here
-// instead of two copies (route + SSR fetcher) that could drift.
+// Same take-50-no-pagination-yet posture as HOME_FEED_TAKE below — fine
+// for a profile grid this size today, swap for real cursor pagination
+// once it matters. One constant here instead of two copies (route + SSR
+// fetcher) that could drift.
 export const PROFILE_POSTS_TAKE = 50;
+
+// No pagination yet — fine for a feed this size today. Swap this for a
+// cursor (createdAt + id) once there are enough posts for it to matter;
+// the response shape (an array under `posts`) is set up so that swap
+// doesn't force a change on the frontend beyond how it's called.
+export const HOME_FEED_TAKE = 50;
 
 // Single source of truth for "this user's posts, newest first" —
 // GET /api/user/[username]/posts (the client-side fetch useUserPosts
@@ -178,4 +184,33 @@ export async function getPostsByUsername(username: string): Promise<Post[]> {
   });
   if (!user) return [];
   return getPostsByUserId(user.id);
+}
+
+// Single source of truth for "the home feed" — GET /api/posts (the
+// client-side fetch usePosts makes) and lib/serverQueries.ts's
+// fetchPostsForSSR (the SSR prefetch app/(home)/page.tsx runs) both call
+// this instead of each running their own copy of the same Prisma query,
+// same reasoning as getPostsByUserId above.
+//
+// v1 algorithm: your own posts + posts from everyone you follow, newest
+// first, no ranking beyond that. The "am I this post's author, or do I
+// follow its author" check now happens in the WHERE clause instead of
+// the client filtering the full unfiltered post list against a
+// separately-fetched following list (what HomeFeed used to do) — same
+// result, but it's no longer possible for the feed to flash
+// everyone-not-just-following before the following list loads, and a
+// post from someone you unfollowed can't linger client-side.
+export async function getHomeFeedPosts(userId: string): Promise<Post[]> {
+  const posts = await prisma.post.findMany({
+    where: {
+      OR: [
+        { authorId: userId },
+        { author: { followers: { some: { followerId: userId } } } },
+      ],
+    },
+    include: postInclude,
+    orderBy: { createdAt: "desc" },
+    take: HOME_FEED_TAKE,
+  });
+  return posts.map(serializePost);
 }
