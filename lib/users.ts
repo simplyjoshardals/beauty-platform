@@ -58,10 +58,70 @@ export type FollowingListUser = {
   toneTag: string;
 };
 
+// Same shape searchUsers returns (see below) — isFollowing/followsMe are
+// the viewer's relationship to EACH ROW, not to the list's owner (e.g.
+// on someone else's Followers page, isFollowing is true for a row when
+// the viewer follows that row's user, regardless of whether the page
+// owner does). isSelf mirrors searchUsers too, so UserListRow's
+// existing isSelf check (currently derived from useCurrentUser) could
+// eventually read this instead — not required for this fix, just kept
+// for parity.
+export type FollowListUserWithRelationship = FollowingListUser & {
+  isFollowing: boolean;
+  followsMe: boolean;
+  isSelf: boolean;
+};
+
+// Attaches the viewer's relationship to each row in a batch — the same
+// two-query pattern searchUsers uses below, factored out since
+// getFollowingList and getFollowersList both need it now. Two queries
+// for the whole page, not one per row, regardless of how many rows are
+// on it.
+async function attachViewerRelationship(
+  users: FollowingListUser[],
+  viewerId: string | null,
+): Promise<FollowListUserWithRelationship[]> {
+  if (!viewerId || users.length === 0) {
+    return users.map((u) => ({
+      ...u,
+      isFollowing: false,
+      followsMe: false,
+      isSelf: false,
+    }));
+  }
+
+  const ids = users.map((u) => u.id);
+  const [followingRows, followerRows] = await Promise.all([
+    prisma.follow.findMany({
+      where: { followerId: viewerId, followingId: { in: ids } },
+      select: { followingId: true },
+    }),
+    prisma.follow.findMany({
+      where: { followingId: viewerId, followerId: { in: ids } },
+      select: { followerId: true },
+    }),
+  ]);
+  const followingSet = new Set(followingRows.map((f) => f.followingId));
+  const followerSet = new Set(followerRows.map((f) => f.followerId));
+
+  return users.map((u) => ({
+    ...u,
+    isFollowing: followingSet.has(u.id),
+    followsMe: followerSet.has(u.id),
+    isSelf: u.id === viewerId,
+  }));
+}
+
+// viewerId is who's LOOKING at this list (may differ from the `username`
+// whose following list this is — e.g. viewing someone else's Following
+// page). Passing null skips the relationship lookup entirely (every row
+// comes back isFollowing: false / followsMe: false) — used when there's
+// no session, same as searchUsers would have nothing to compute either.
 export async function getFollowingList(
   username: string,
-  search?: string,
-): Promise<FollowingListUser[] | null> {
+  search: string | undefined,
+  viewerId: string | null,
+): Promise<FollowListUserWithRelationship[] | null> {
   const target = await prisma.user.findUnique({
     where: { username },
     select: { id: true },
@@ -82,20 +142,25 @@ export async function getFollowingList(
       },
     },
   });
-  return follows.map((f) => f.following);
+  return attachViewerRelationship(
+    follows.map((f) => f.following),
+    viewerId,
+  );
 }
 
 // Mirrors getFollowingList exactly, just the reverse Follow direction
 // (followingId = target, not followerId) — same optional case-insensitive
-// ?search=, same null-on-missing-user contract. Backs both
+// ?search=, same null-on-missing-user contract, same batched
+// isFollowing/followsMe attached via attachViewerRelationship. Backs both
 // GET /api/user/[username]/followers (see that route) and the SSR
 // prefetch for /profile/followers and /u/[username]/followers (see
 // lib/serverQueries.ts's fetchFollowersForSSR) — one query, not two
 // separate implementations of the same lookup.
 export async function getFollowersList(
   username: string,
-  search?: string,
-): Promise<FollowingListUser[] | null> {
+  search: string | undefined,
+  viewerId: string | null,
+): Promise<FollowListUserWithRelationship[] | null> {
   const target = await prisma.user.findUnique({
     where: { username },
     select: { id: true },
@@ -116,7 +181,10 @@ export async function getFollowersList(
       },
     },
   });
-  return follows.map((f) => f.follower);
+  return attachViewerRelationship(
+    follows.map((f) => f.follower),
+    viewerId,
+  );
 }
 
 // Backs GET /api/explore/users — Explore's "search people" box.

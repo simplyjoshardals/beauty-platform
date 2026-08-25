@@ -89,21 +89,37 @@ export async function fetchSavedBundleForSSR(userId: string) {
 // refetch — any later search the visitor types runs as its own
 // client-side fetch instead (see UserListWithSearch's server-search
 // mode).
-export async function fetchFollowingForSSR(username: string, search?: string) {
-  return (await getFollowingList(username, search)) ?? [];
+//
+// viewerId is who's LOOKING at the page (may be null for a logged-out
+// SSR pass, may differ from `username` on /u/[username]/following) — it
+// flows straight into getFollowingList's batched
+// isFollowing/followsMe/isSelf computation, same as GET
+// /api/user/[username]/following does for a client-side fetch, so the
+// SSR-rendered rows carry the same relationship state.
+export async function fetchFollowingForSSR(
+  username: string,
+  viewerId: string | null,
+  search?: string,
+) {
+  return (await getFollowingList(username, search, viewerId)) ?? [];
 }
 
 // Backs /profile/followers and /u/[username]/followers — same query GET
 // /api/user/[username]/followers runs (getFollowersList, in
 // lib/users.ts), called directly instead of over HTTP, same convention
-// as fetchFollowingForSSR above. Only ever called with `search`
+// (including the viewerId → batched relationship state passthrough) as
+// fetchFollowingForSSR above. Only ever called with `search`
 // omitted: that's the one cache entry (followersQueryKey(username, ""))
 // a fresh client mount always agrees with, so the server-rendered list
 // hydrates without an immediate refetch — any later search the visitor
 // types runs as its own client-side fetch instead (see
 // UserListWithSearch's server-search mode).
-export async function fetchFollowersForSSR(username: string, search?: string) {
-  return (await getFollowersList(username, search)) ?? [];
+export async function fetchFollowersForSSR(
+  username: string,
+  viewerId: string | null,
+  search?: string,
+) {
+  return (await getFollowersList(username, search, viewerId)) ?? [];
 }
 
 export async function fetchUserProfilesBatchForSSR(

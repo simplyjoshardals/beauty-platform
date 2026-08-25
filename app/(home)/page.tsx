@@ -63,7 +63,7 @@ export default async function HomeFeedPage() {
       timed("following", () =>
         queryClient.prefetchQuery({
           queryKey: followingQueryKey(viewer.username),
-          queryFn: () => fetchFollowingForSSR(viewer.username),
+          queryFn: () => fetchFollowingForSSR(viewer.username, viewer.id),
         }),
       ),
     );

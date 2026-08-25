@@ -6,12 +6,11 @@ import {
 } from "@tanstack/react-query";
 import { RequireAuth } from "@/components/auth/RequireAuth";
 import { FollowingListSection } from "@/components/profile/FollowingListSection";
-import { followingQueryKey, profileQueryKey } from "@/lib/queryKeys";
+import { followingQueryKey } from "@/lib/queryKeys";
 import { getServerUserId } from "@/lib/session";
 import {
   fetchUserProfileForSSR,
   fetchFollowingForSSR,
-  fetchUserProfilesBatchForSSR,
 } from "@/lib/serverQueries";
 
 type Props = {
@@ -27,10 +26,10 @@ type Props = {
 //  - only the unsearched page (followingQueryKey(username, "")) is
 //    prefetched — the one cache entry FollowingListSection's fresh
 //    mount is guaranteed to agree with,
-//  - every visible row's own profile (isFollowing/followsMe — see
-//    UserListRow's useUserProfile call) is batch-prefetched too, so the
-//    follow buttons are correct on first paint instead of flashing
-//    Follow-then-Following.
+//  - fetchFollowingForSSR returns each row's isFollowing/followsMe
+//    already computed (batched, server-side — see lib/users.ts's
+//    getFollowingList), so the follow buttons are correct on first
+//    paint instead of flashing Follow-then-Following.
 export default async function UserFollowingPage({ params }: Props) {
   const { username } = await params;
   const viewerId = await getServerUserId();
@@ -41,35 +40,14 @@ export default async function UserFollowingPage({ params }: Props) {
   }
 
   const queryClient = new QueryClient();
-  const prefetches: Promise<unknown>[] = [];
 
   if (viewerId) {
-    const following = await fetchFollowingForSSR(username);
-    prefetches.push(
-      queryClient.prefetchQuery({
-        queryKey: followingQueryKey(username, ""),
-        queryFn: async () => following,
-      }),
-    );
-
-    const followingUsernames = [...new Set(following.map((f) => f.username))];
-    if (followingUsernames.length > 0) {
-      prefetches.push(
-        fetchUserProfilesBatchForSSR(followingUsernames, viewerId).then(
-          (profiles) => {
-            for (const [rowUsername, rowProfile] of profiles) {
-              queryClient.setQueryData(
-                profileQueryKey(rowUsername),
-                rowProfile,
-              );
-            }
-          },
-        ),
-      );
-    }
+    const following = await fetchFollowingForSSR(username, viewerId);
+    await queryClient.prefetchQuery({
+      queryKey: followingQueryKey(username, ""),
+      queryFn: async () => following,
+    });
   }
-
-  await Promise.all(prefetches);
 
   return (
     <HydrationBoundary state={dehydrate(queryClient)}>

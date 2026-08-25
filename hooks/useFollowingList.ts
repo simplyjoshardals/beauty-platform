@@ -9,7 +9,19 @@ import { followingQueryKey } from "@/lib/queryKeys";
 // plus the real id the backend returns — kept for parity with other
 // real-data hooks (useUserProfile's PublicUserProfile, useCurrentUser's
 // CurrentUser) even though the list UI itself doesn't use it yet.
-export type FollowingUser = MockUser & { id: string };
+export type FollowingUser = MockUser & {
+  id: string;
+  // The viewer's relationship to THIS row, computed batched server-side
+  // (see lib/users.ts's getFollowingList / attachViewerRelationship) —
+  // same fields GET /api/explore/users already returns via searchUsers.
+  // UserListWithSearch passes these straight through to UserListRow as
+  // initialFollowing/initialFollowsMe so the Follow/Following button is
+  // correct on first paint, no per-row flash while that row's own
+  // profile fetch resolves.
+  isFollowing: boolean;
+  followsMe: boolean;
+  isSelf: boolean;
+};
 
 // Backs both Following pages — /profile/following (own) and
 // /u/[username]/following (someone else's).
@@ -40,7 +52,10 @@ export function useFollowingList(
   const query = useQuery({
     queryKey: followingQueryKey(username, search),
     queryFn: async () => {
-      const result = await getFollowing(username as string, search || undefined);
+      const result = await getFollowing(
+        username as string,
+        search || undefined,
+      );
       if (!result?.success) return [];
       return result.users as FollowingUser[];
     },

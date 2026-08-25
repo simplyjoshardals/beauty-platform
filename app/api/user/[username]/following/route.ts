@@ -13,8 +13,14 @@ type Params = { params: Promise<{ username: string }> };
 //
 // Returns the users the given username follows, most recent first. Only
 // the fields UserListRow actually renders are selected — id (React key /
-// self-follow check upstream), username, avatarSrc, toneTag — nothing
-// else off the target rows leaks through.
+// self-follow check upstream), username, avatarSrc, toneTag — plus the
+// viewer's isFollowing/followsMe/isSelf relationship to each row,
+// computed batched (two queries for the whole page, not one per row —
+// see lib/users.ts's attachViewerRelationship) the same way
+// GET /api/explore/users does via searchUsers. That's what lets
+// UserListRow render the correct Follow/Following label on first paint
+// instead of flashing "Follow" until each row's own profile fetch
+// resolves.
 //
 // Accepts an optional ?search= for a case-insensitive username filter —
 // used by both Following pages' server-side search (see
@@ -32,7 +38,7 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   const search = req.nextUrl.searchParams.get("search")?.trim();
 
-  const users = await getFollowingList(username, search);
+  const users = await getFollowingList(username, search, viewerId);
   if (users === null) {
     return NextResponse.json(
       { success: false, error: "User not found." },

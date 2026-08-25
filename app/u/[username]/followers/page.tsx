@@ -6,12 +6,11 @@ import {
 } from "@tanstack/react-query";
 import { RequireAuth } from "@/components/auth/RequireAuth";
 import { FollowersListSection } from "@/components/profile/FollowersListSection";
-import { followersQueryKey, profileQueryKey } from "@/lib/queryKeys";
+import { followersQueryKey } from "@/lib/queryKeys";
 import { getServerUserId } from "@/lib/session";
 import {
   fetchUserProfileForSSR,
   fetchFollowersForSSR,
-  fetchUserProfilesBatchForSSR,
 } from "@/lib/serverQueries";
 
 type Props = {
@@ -34,6 +33,14 @@ type Props = {
 // the server-rendered list hydrates without an extra client fetch. Any
 // search the visitor types after that runs as its own client-side fetch
 // (see UserListWithSearch's server-search mode).
+//
+// fetchFollowersForSSR returns each row's isFollowing/followsMe already
+// computed (batched, server-side — see lib/users.ts's getFollowersList),
+// so the follow buttons are correct on first paint instead of flashing
+// Follow-then-Following — no separate per-row profile prefetch needed
+// for that anymore (contrast with app/(home)/page.tsx's post-author
+// batch prefetch, which is solving a different problem: those rows
+// don't come from a relationship-list endpoint at all).
 export default async function UserFollowersPage({ params }: Props) {
   const { username } = await params;
   const viewerId = await getServerUserId();
@@ -44,43 +51,14 @@ export default async function UserFollowersPage({ params }: Props) {
   }
 
   const queryClient = new QueryClient();
-  const prefetches: Promise<unknown>[] = [];
 
   if (viewerId) {
-    const followers = await fetchFollowersForSSR(username);
-    prefetches.push(
-      queryClient.prefetchQuery({
-        queryKey: followersQueryKey(username, ""),
-        queryFn: async () => followers,
-      }),
-    );
-
-    // Same batch prefetch app/(home)/page.tsx does for post authors —
-    // without this, each row's own useUserProfile(username) call (see
-    // UserListRow) starts with nothing cached, so isFollowing/followsMe
-    // default to false for a beat before that row's own fetch resolves:
-    // a visible Follow-then-Following flash on every row that's
-    // actually already followed. Prefetching all of them here means the
-    // whole list — follow-button state included — is correct on the
-    // very first paint, not just the usernames/avatars.
-    const followerUsernames = [...new Set(followers.map((f) => f.username))];
-    if (followerUsernames.length > 0) {
-      prefetches.push(
-        fetchUserProfilesBatchForSSR(followerUsernames, viewerId).then(
-          (profiles) => {
-            for (const [rowUsername, rowProfile] of profiles) {
-              queryClient.setQueryData(
-                profileQueryKey(rowUsername),
-                rowProfile,
-              );
-            }
-          },
-        ),
-      );
-    }
+    const followers = await fetchFollowersForSSR(username, viewerId);
+    await queryClient.prefetchQuery({
+      queryKey: followersQueryKey(username, ""),
+      queryFn: async () => followers,
+    });
   }
-
-  await Promise.all(prefetches);
 
   return (
     <HydrationBoundary state={dehydrate(queryClient)}>

@@ -5,10 +5,16 @@ import { MagnifyingGlassIcon } from "@phosphor-icons/react";
 import { UserListRow } from "./UserListRow";
 import { UserListSkeleton } from "./UserListSkeleton";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
-import type { MockUser } from "@/data/mockUsers";
+import type { FollowingUser } from "@/hooks/useFollowingList";
 
 type Props = {
-  users: MockUser[];
+  // FollowingUser (MockUser + id + isFollowing/followsMe/isSelf) rather
+  // than plain MockUser — both useFollowingList and useFollowersList now
+  // return the viewer's relationship to each row, computed batched
+  // server-side (see lib/users.ts's getFollowingList/getFollowersList),
+  // same as Explore's search results. Passed straight through to
+  // UserListRow below as initial state.
+  users: FollowingUser[];
   emptyLabel: string; // shown when the list itself has nobody in it at all
   // Real backend loading state (from useFollowingList/useFollowersList) —
   // when supplied, this replaces the simulated timer below entirely
@@ -116,7 +122,7 @@ export function UserListWithSearch({
       ) : filtered.length === 0 ? (
         hasQuery ? (
           <p className="px-4 py-10 text-center text-sm text-foreground/50">
-            No results for &ldquo;{query}&rdquo;
+            No results for “{query}”
           </p>
         ) : (
           <p className="px-4 py-10 text-center text-sm text-foreground/50">
@@ -124,7 +130,14 @@ export function UserListWithSearch({
           </p>
         )
       ) : (
-        filtered.map((user) => <UserListRow key={user.username} user={user} />)
+        filtered.map((user) => (
+          <UserListRow
+            key={user.username}
+            user={user}
+            initialFollowing={user.isFollowing}
+            initialFollowsMe={user.followsMe}
+          />
+        ))
       )}
     </>
   );
