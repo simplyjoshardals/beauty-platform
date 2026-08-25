@@ -214,3 +214,83 @@ export async function getHomeFeedPosts(userId: string): Promise<Post[]> {
   });
   return posts.map(serializePost);
 }
+
+// v1 explore algorithm — a "hot" ranking (same shape as the classic HN/
+// Reddit score: engagement over a recency decay), scoped to accounts the
+// viewer doesn't already see in Home. Home is recency-only because its
+// candidate set (you + who you follow) is already the relevance filter;
+// Explore's candidate set is everyone ELSE, which is far bigger and has
+// no such built-in relevance signal, so pure recency would just be "the
+// most recent posts from strangers" — mostly noise. Ranking by
+// engagement surfaces what's actually resonating instead.
+//
+// Weighting: a comment is worth more than a like (COMMENT_WEIGHT >
+// LIKE_WEIGHT) — leaving a comment takes more effort than tapping like,
+// so it's a stronger signal a post is worth surfacing to someone new.
+// The "+ 1" keeps a brand-new, zero-engagement post from scoring exactly
+// 0 (which would make every untouched post tie and fall back to
+// undefined ordering) — it still ranks near the bottom of its age
+// bracket, but a fresh post has a chance rather than none. GRAVITY_HOURS
+// avoids a divide-by-near-zero spike for posts seconds old; GRAVITY
+// controls how fast old posts fall off, same role as HN's own gravity
+// constant.
+const EXPLORE_LIKE_WEIGHT = 1;
+const EXPLORE_COMMENT_WEIGHT = 3;
+const EXPLORE_GRAVITY = 1.5;
+const EXPLORE_GRAVITY_HOURS = 2;
+
+function hotScore(
+  likeCount: number,
+  commentCount: number,
+  createdAt: Date,
+): number {
+  const ageHours = (Date.now() - createdAt.getTime()) / (1000 * 60 * 60);
+  const engagement =
+    likeCount * EXPLORE_LIKE_WEIGHT + commentCount * EXPLORE_COMMENT_WEIGHT;
+  return (
+    (engagement + 1) /
+    Math.pow(ageHours + EXPLORE_GRAVITY_HOURS, EXPLORE_GRAVITY)
+  );
+}
+
+// Wider than HOME_FEED_TAKE on purpose: this is the candidate pool the
+// hot-score rank runs over, not the number of posts shown. Pulled
+// newest-first (an index can serve that — `createdAt` is already
+// indexed via @@index([authorId, createdAt]) — "ORDER BY computed
+// score" can't), then ranked and cut down to EXPLORE_FEED_TAKE in
+// memory. Fine at this scale, same posture as HOME_FEED_TAKE's own
+// comment; revisit (materialized score column, cron-refreshed, real
+// pagination) once the candidate pool is too big to pull in one query.
+export const EXPLORE_CANDIDATE_TAKE = 200;
+export const EXPLORE_FEED_TAKE = 50;
+
+// Single source of truth for "explore" — GET /api/explore (the
+// client-side fetch useExplorePosts makes) and lib/serverQueries.ts's
+// fetchExplorePostsForSSR (the SSR prefetch app/explore/page.tsx runs)
+// both call this instead of each running their own copy, same
+// convention as getHomeFeedPosts/getPostsByUserId above.
+//
+// Candidate set explicitly excludes the viewer's own posts AND posts
+// from anyone they already follow — those already show on Home/their
+// own profile, so surfacing them again here would just be Home with
+// extra steps. What's left is genuinely undiscovered accounts, ranked
+// by hotScore above rather than plain recency.
+export async function getExploreFeedPosts(userId: string): Promise<Post[]> {
+  const candidates = await prisma.post.findMany({
+    where: {
+      authorId: { not: userId },
+      author: { followers: { none: { followerId: userId } } },
+    },
+    include: postInclude,
+    orderBy: { createdAt: "desc" },
+    take: EXPLORE_CANDIDATE_TAKE,
+  });
+
+  const ranked = [...candidates].sort(
+    (a, b) =>
+      hotScore(b._count.likes, b._count.comments, b.createdAt) -
+      hotScore(a._count.likes, a._count.comments, a.createdAt),
+  );
+
+  return ranked.slice(0, EXPLORE_FEED_TAKE).map(serializePost);
+}

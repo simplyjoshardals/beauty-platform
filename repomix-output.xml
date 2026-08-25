@@ -331,152 +331,6 @@ tsconfig.json
 <files>
 This section contains the contents of the repository's files.
 
-<file path="app/profile/followers/loading.tsx">
-import { UserListSkeleton } from "@/components/profile/UserListSkeleton";
-
-// Route-level fallback for /profile/followers — same role as
-// app/u/[username]/followers/loading.tsx (see its own comment), just
-// for the "own followers" page instead of someone else's.
-export default function FollowersLoading() {
-  return (
-    <div className="flex flex-col">
-      <div className="border-b border-foreground/10 px-4 py-3">
-        <p className="text-sm font-medium">Followers</p>
-      </div>
-      <UserListSkeleton />
-    </div>
-  );
-}
-</file>
-
-<file path="app/profile/following/loading.tsx">
-import { UserListSkeleton } from "@/components/profile/UserListSkeleton";
-
-// Route-level fallback for /profile/following — same role as
-// app/profile/followers/loading.tsx (see its own comment), just for the
-// "own following" page instead of someone else's.
-export default function FollowingLoading() {
-  return (
-    <div className="flex flex-col">
-      <div className="border-b border-foreground/10 px-4 py-3">
-        <p className="text-sm font-medium">Following</p>
-      </div>
-      <UserListSkeleton />
-    </div>
-  );
-}
-</file>
-
-<file path="app/u/[username]/followers/loading.tsx">
-import { UserListSkeleton } from "@/components/profile/UserListSkeleton";
-
-// Route-level fallback for /u/[username]/followers, same role
-// app/(home)/loading.tsx, app/u/[username]/loading.tsx, and
-// app/saved/loading.tsx play for their own routes — shown during the
-// initial navigation Suspense boundary, before the Server Component in
-// page.tsx has resolved (the profile lookup, and — for a logged-in
-// viewer — the followers list + row-profile prefetch). Mirrors that
-// page's own header markup so there's no layout shift when the real
-// content swaps in.
-export default function UserFollowersLoading() {
-  return (
-    <div className="flex flex-col">
-      <div className="border-b border-foreground/10 px-4 py-3">
-        <p className="text-sm font-medium">Followers</p>
-      </div>
-      <UserListSkeleton />
-    </div>
-  );
-}
-</file>
-
-<file path="app/u/[username]/following/loading.tsx">
-import { UserListSkeleton } from "@/components/profile/UserListSkeleton";
-
-// Route-level fallback for /u/[username]/following — same role as
-// app/u/[username]/followers/loading.tsx (see its own comment), just
-// for the reverse Follow direction.
-export default function UserFollowingLoading() {
-  return (
-    <div className="flex flex-col">
-      <div className="border-b border-foreground/10 px-4 py-3">
-        <p className="text-sm font-medium">Following</p>
-      </div>
-      <UserListSkeleton />
-    </div>
-  );
-}
-</file>
-
-<file path="components/profile/FollowersListSection.tsx">
-"use client";
-
-import { useState } from "react";
-import { useFollowersList } from "@/hooks/useFollowersList";
-import { UserListWithSearch } from "./UserListWithSearch";
-
-// Owns the (debounced, server-side) search string for a Followers list —
-// split out from the page itself since the pages
-// (app/u/[username]/followers/page.tsx, app/profile/followers/page.tsx)
-// are now Server Components doing their own SSR prefetch, and Server
-// Components can't hold state. useFollowersList's `search` param
-// round-trips to GET /api/user/[username]/followers?search=..., so
-// filtering happens in the DB query (lib/users.ts's getFollowersList),
-// not by filtering an already-fetched list client-side.
-export function FollowersListSection({
-  username,
-}: {
-  username: string | undefined;
-}) {
-  const [search, setSearch] = useState("");
-  const { users: followers, isLoading } = useFollowersList(username, search);
-
-  return (
-    <UserListWithSearch
-      users={followers}
-      emptyLabel="No followers yet."
-      isLoading={isLoading}
-      onSearchChange={setSearch}
-    />
-  );
-}
-</file>
-
-<file path="components/profile/FollowingListSection.tsx">
-"use client";
-
-import { useState } from "react";
-import { useFollowingList } from "@/hooks/useFollowingList";
-import { UserListWithSearch } from "./UserListWithSearch";
-
-// Mirrors FollowersListSection exactly, just the reverse Follow
-// direction. Owns the (debounced, server-side) search string for a
-// Following list — split out from the page itself since the pages
-// (app/u/[username]/following/page.tsx, app/profile/following/page.tsx)
-// are now Server Components doing their own SSR prefetch, and Server
-// Components can't hold state. useFollowingList's `search` param
-// round-trips to GET /api/user/[username]/following?search=..., so
-// filtering happens in the DB query (lib/users.ts's getFollowingList),
-// not by filtering an already-fetched list client-side.
-export function FollowingListSection({
-  username,
-}: {
-  username: string | undefined;
-}) {
-  const [search, setSearch] = useState("");
-  const { users: following, isLoading } = useFollowingList(username, search);
-
-  return (
-    <UserListWithSearch
-      users={following}
-      emptyLabel="Not following anyone yet."
-      isLoading={isLoading}
-      onSearchChange={setSearch}
-    />
-  );
-}
-</file>
-
 <file path="app/(home)/loading.tsx">
 import { HomeFeedSkeleton } from "@/components/feed/HomeFeedSkeleton";
 
@@ -1277,44 +1131,6 @@ export async function POST(req: NextRequest, { params }: Params) {
 }
 </file>
 
-<file path="app/api/user/[username]/followers/route.ts">
-import { NextRequest, NextResponse } from "next/server";
-import { getFollowersList } from "@/lib/users";
-
-type Params = { params: Promise<{ username: string }> };
-
-// Mirrors app/api/user/[username]/following/route.ts exactly, just the
-// reverse Follow direction — same auth posture (not part of proxy.ts's
-// public-GET carve-out, plus the explicit x-user-id check below as
-// defense-in-depth), same optional ?search=, and now the same
-// lib/users.ts-backed query (getFollowersList) instead of an inline
-// prisma call duplicating it. That single implementation is what the
-// SSR prefetch for /profile/followers and /u/[username]/followers calls
-// directly too (see lib/serverQueries.ts's fetchFollowersForSSR).
-export async function GET(req: NextRequest, { params }: Params) {
-  const viewerId = req.headers.get("x-user-id");
-  if (!viewerId) {
-    return NextResponse.json(
-      { success: false, error: "Unauthorized" },
-      { status: 401 },
-    );
-  }
-
-  const { username } = await params;
-  const search = req.nextUrl.searchParams.get("search")?.trim();
-
-  const users = await getFollowersList(username, search);
-  if (users === null) {
-    return NextResponse.json(
-      { success: false, error: "User not found." },
-      { status: 404 },
-    );
-  }
-
-  return NextResponse.json({ success: true, users });
-}
-</file>
-
 <file path="app/api/user/onboarding/route.ts">
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -1446,6 +1262,42 @@ export async function GET(req: NextRequest) {
 }
 </file>
 
+<file path="app/profile/followers/loading.tsx">
+import { UserListSkeleton } from "@/components/profile/UserListSkeleton";
+
+// Route-level fallback for /profile/followers — same role as
+// app/u/[username]/followers/loading.tsx (see its own comment), just
+// for the "own followers" page instead of someone else's.
+export default function FollowersLoading() {
+  return (
+    <div className="flex flex-col">
+      <div className="border-b border-foreground/10 px-4 py-3">
+        <p className="text-sm font-medium">Followers</p>
+      </div>
+      <UserListSkeleton />
+    </div>
+  );
+}
+</file>
+
+<file path="app/profile/following/loading.tsx">
+import { UserListSkeleton } from "@/components/profile/UserListSkeleton";
+
+// Route-level fallback for /profile/following — same role as
+// app/profile/followers/loading.tsx (see its own comment), just for the
+// "own following" page instead of someone else's.
+export default function FollowingLoading() {
+  return (
+    <div className="flex flex-col">
+      <div className="border-b border-foreground/10 px-4 py-3">
+        <p className="text-sm font-medium">Following</p>
+      </div>
+      <UserListSkeleton />
+    </div>
+  );
+}
+</file>
+
 <file path="app/saved/[collectionId]/loading.tsx">
 // Next wraps every route segment's page.tsx (and any child segments
 // below it that don't provide their own loading.tsx) in a Suspense
@@ -1499,6 +1351,47 @@ export default function SavedLoading() {
         <p className="text-sm font-medium">Saved</p>
       </div>
       <PostGridSkeleton />
+    </div>
+  );
+}
+</file>
+
+<file path="app/u/[username]/followers/loading.tsx">
+import { UserListSkeleton } from "@/components/profile/UserListSkeleton";
+
+// Route-level fallback for /u/[username]/followers, same role
+// app/(home)/loading.tsx, app/u/[username]/loading.tsx, and
+// app/saved/loading.tsx play for their own routes — shown during the
+// initial navigation Suspense boundary, before the Server Component in
+// page.tsx has resolved (the profile lookup, and — for a logged-in
+// viewer — the followers list + row-profile prefetch). Mirrors that
+// page's own header markup so there's no layout shift when the real
+// content swaps in.
+export default function UserFollowersLoading() {
+  return (
+    <div className="flex flex-col">
+      <div className="border-b border-foreground/10 px-4 py-3">
+        <p className="text-sm font-medium">Followers</p>
+      </div>
+      <UserListSkeleton />
+    </div>
+  );
+}
+</file>
+
+<file path="app/u/[username]/following/loading.tsx">
+import { UserListSkeleton } from "@/components/profile/UserListSkeleton";
+
+// Route-level fallback for /u/[username]/following — same role as
+// app/u/[username]/followers/loading.tsx (see its own comment), just
+// for the reverse Follow direction.
+export default function UserFollowingLoading() {
+  return (
+    <div className="flex flex-col">
+      <div className="border-b border-foreground/10 px-4 py-3">
+        <p className="text-sm font-medium">Following</p>
+      </div>
+      <UserListSkeleton />
     </div>
   );
 }
@@ -2225,6 +2118,75 @@ export function AboutStep({
         />
       </div>
     </div>
+  );
+}
+</file>
+
+<file path="components/profile/FollowersListSection.tsx">
+"use client";
+
+import { useState } from "react";
+import { useFollowersList } from "@/hooks/useFollowersList";
+import { UserListWithSearch } from "./UserListWithSearch";
+
+// Owns the (debounced, server-side) search string for a Followers list —
+// split out from the page itself since the pages
+// (app/u/[username]/followers/page.tsx, app/profile/followers/page.tsx)
+// are now Server Components doing their own SSR prefetch, and Server
+// Components can't hold state. useFollowersList's `search` param
+// round-trips to GET /api/user/[username]/followers?search=..., so
+// filtering happens in the DB query (lib/users.ts's getFollowersList),
+// not by filtering an already-fetched list client-side.
+export function FollowersListSection({
+  username,
+}: {
+  username: string | undefined;
+}) {
+  const [search, setSearch] = useState("");
+  const { users: followers, isLoading } = useFollowersList(username, search);
+
+  return (
+    <UserListWithSearch
+      users={followers}
+      emptyLabel="No followers yet."
+      isLoading={isLoading}
+      onSearchChange={setSearch}
+    />
+  );
+}
+</file>
+
+<file path="components/profile/FollowingListSection.tsx">
+"use client";
+
+import { useState } from "react";
+import { useFollowingList } from "@/hooks/useFollowingList";
+import { UserListWithSearch } from "./UserListWithSearch";
+
+// Mirrors FollowersListSection exactly, just the reverse Follow
+// direction. Owns the (debounced, server-side) search string for a
+// Following list — split out from the page itself since the pages
+// (app/u/[username]/following/page.tsx, app/profile/following/page.tsx)
+// are now Server Components doing their own SSR prefetch, and Server
+// Components can't hold state. useFollowingList's `search` param
+// round-trips to GET /api/user/[username]/following?search=..., so
+// filtering happens in the DB query (lib/users.ts's getFollowingList),
+// not by filtering an already-fetched list client-side.
+export function FollowingListSection({
+  username,
+}: {
+  username: string | undefined;
+}) {
+  const [search, setSearch] = useState("");
+  const { users: following, isLoading } = useFollowingList(username, search);
+
+  return (
+    <UserListWithSearch
+      users={following}
+      emptyLabel="Not following anyone yet."
+      isLoading={isLoading}
+      onSearchChange={setSearch}
+    />
   );
 }
 </file>
@@ -3287,59 +3249,6 @@ export function useDebouncedValue<T>(value: T, delayMs: number): T {
   }, [value, delayMs]);
 
   return debounced;
-}
-</file>
-
-<file path="hooks/useFollowersList.ts">
-"use client";
-
-import { useQuery } from "@tanstack/react-query";
-import { getFollowers } from "@/services/userService";
-import { followersQueryKey } from "@/lib/queryKeys";
-import type { FollowingUser } from "./useFollowingList";
-
-// Mirrors useFollowingList exactly, just the reverse Follow direction.
-// Reuses its FollowingUser type — same shape (MockUser + real id) since
-// both the following and followers rows render through the same
-// UserListRow/UserListWithSearch.
-
-// The real key now lives in lib/queryKeys.ts (not here) — same reasoning
-// as followingQueryKey: a Server Component (app/u/[username]/followers/
-// page.tsx, app/profile/followers/page.tsx) needs the real function to
-// construct a matching key for its SSR prefetch, not a "use client"
-// stub. Re-exported from here so useUserProfile's existing import keeps
-// working unchanged.
-export { followersQueryKey };
-
-// Search now round-trips to the server — GET .../followers?search=...
-// (see lib/users.ts's getFollowersList) — instead of filtering an
-// already-fetched full list client-side, the way Following still does.
-// `search` is part of the query key, so each distinct search string is
-// its own cache entry; UserListWithSearch's server-search mode debounces
-// keystrokes before this hook ever re-fires, and the "" entry (no
-// search) is what the SSR prefetch on both Followers pages warms ahead
-// of the first client render.
-export function useFollowersList(
-  username: string | undefined,
-  search: string = "",
-) {
-  const query = useQuery({
-    queryKey: followersQueryKey(username, search),
-    queryFn: async () => {
-      const result = await getFollowers(
-        username as string,
-        search || undefined,
-      );
-      if (!result?.success) return [];
-      return result.users as FollowingUser[];
-    },
-    enabled: Boolean(username),
-  });
-
-  return {
-    users: query.data ?? [],
-    isLoading: query.isLoading,
-  };
 }
 </file>
 
@@ -5056,28 +4965,20 @@ export async function POST(req: NextRequest) {
 }
 </file>
 
-<file path="app/api/user/[username]/following/route.ts">
+<file path="app/api/user/[username]/followers/route.ts">
 import { NextRequest, NextResponse } from "next/server";
-import { getFollowingList } from "@/lib/users";
+import { getFollowersList } from "@/lib/users";
 
 type Params = { params: Promise<{ username: string }> };
 
-// Requires authentication — unlike GET /api/user/[username] and its
-// /posts sibling, this route is deliberately NOT part of proxy.ts's
-// public-GET carve-out (see isPublicUserGet there), so an unauthenticated
-// request never even reaches this handler with a usable session. The
-// x-user-id check below is defense-in-depth, mirroring the same explicit
-// check in follow/route.ts, rather than the only thing standing between
-// this data and a logged-out caller.
-//
-// Returns the users the given username follows, most recent first. Only
-// the fields UserListRow actually renders are selected — id (React key /
-// self-follow check upstream), username, avatarSrc, toneTag — nothing
-// else off the target rows leaks through.
-//
-// Accepts an optional ?search= for a case-insensitive username filter —
-// used by both Following pages' server-side search (see
-// hooks/useFollowingList.ts), same as its followers/route.ts sibling.
+// Mirrors app/api/user/[username]/following/route.ts exactly, just the
+// reverse Follow direction — same auth posture (not part of proxy.ts's
+// public-GET carve-out, plus the explicit x-user-id check below as
+// defense-in-depth), same optional ?search=, and now the same
+// lib/users.ts-backed query (getFollowersList) instead of an inline
+// prisma call duplicating it. That single implementation is what the
+// SSR prefetch for /profile/followers and /u/[username]/followers calls
+// directly too (see lib/serverQueries.ts's fetchFollowersForSSR).
 export async function GET(req: NextRequest, { params }: Params) {
   const viewerId = req.headers.get("x-user-id");
   if (!viewerId) {
@@ -5088,10 +4989,9 @@ export async function GET(req: NextRequest, { params }: Params) {
   }
 
   const { username } = await params;
-
   const search = req.nextUrl.searchParams.get("search")?.trim();
 
-  const users = await getFollowingList(username, search);
+  const users = await getFollowersList(username, search);
   if (users === null) {
     return NextResponse.json(
       { success: false, error: "User not found." },
@@ -5234,197 +5134,6 @@ export default function EditProfilePage() {
     <RequireAuth>
       <EditProfileForm />
     </RequireAuth>
-  );
-}
-</file>
-
-<file path="app/u/[username]/followers/page.tsx">
-import { notFound } from "next/navigation";
-import {
-  QueryClient,
-  dehydrate,
-  HydrationBoundary,
-} from "@tanstack/react-query";
-import { RequireAuth } from "@/components/auth/RequireAuth";
-import { FollowersListSection } from "@/components/profile/FollowersListSection";
-import { followersQueryKey, profileQueryKey } from "@/lib/queryKeys";
-import { getServerUserId } from "@/lib/session";
-import {
-  fetchUserProfileForSSR,
-  fetchFollowersForSSR,
-  fetchUserProfilesBatchForSSR,
-} from "@/lib/serverQueries";
-
-type Props = {
-  params: Promise<{ username: string }>;
-};
-
-// Same two-tier SSR posture as app/u/[username]/page.tsx: the profile
-// lookup (public, cheap — same lib/users.ts row GET /api/user/[username]
-// runs) is awaited here so a nonexistent username produces a real
-// server-side 404 regardless of the viewer's auth state. The followers
-// list itself stays gated behind RequireAuth — this route (and its API)
-// requires a session no matter whose followers are being viewed — so
-// it's only ever prefetched when there IS a viewer session; a logged-out
-// visitor still gets the correct 404 check but sees the sign-in gate in
-// place of a list, same as the client-side version did.
-//
-// Only the unsearched page (followersQueryKey(username, "")) is
-// prefetched — that's the one cache entry FollowersListSection's fresh
-// mount (search state starting at "") is guaranteed to agree with, so
-// the server-rendered list hydrates without an extra client fetch. Any
-// search the visitor types after that runs as its own client-side fetch
-// (see UserListWithSearch's server-search mode).
-export default async function UserFollowersPage({ params }: Props) {
-  const { username } = await params;
-  const viewerId = await getServerUserId();
-
-  const profile = await fetchUserProfileForSSR(username, viewerId);
-  if (!profile) {
-    notFound();
-  }
-
-  const queryClient = new QueryClient();
-  const prefetches: Promise<unknown>[] = [];
-
-  if (viewerId) {
-    const followers = await fetchFollowersForSSR(username);
-    prefetches.push(
-      queryClient.prefetchQuery({
-        queryKey: followersQueryKey(username, ""),
-        queryFn: async () => followers,
-      }),
-    );
-
-    // Same batch prefetch app/(home)/page.tsx does for post authors —
-    // without this, each row's own useUserProfile(username) call (see
-    // UserListRow) starts with nothing cached, so isFollowing/followsMe
-    // default to false for a beat before that row's own fetch resolves:
-    // a visible Follow-then-Following flash on every row that's
-    // actually already followed. Prefetching all of them here means the
-    // whole list — follow-button state included — is correct on the
-    // very first paint, not just the usernames/avatars.
-    const followerUsernames = [...new Set(followers.map((f) => f.username))];
-    if (followerUsernames.length > 0) {
-      prefetches.push(
-        fetchUserProfilesBatchForSSR(followerUsernames, viewerId).then(
-          (profiles) => {
-            for (const [rowUsername, rowProfile] of profiles) {
-              queryClient.setQueryData(
-                profileQueryKey(rowUsername),
-                rowProfile,
-              );
-            }
-          },
-        ),
-      );
-    }
-  }
-
-  await Promise.all(prefetches);
-
-  return (
-    <HydrationBoundary state={dehydrate(queryClient)}>
-      <RequireAuth>
-        <div className="flex flex-col">
-          <div className="border-b border-foreground/10 px-4 py-3">
-            <p className="text-sm font-medium">Followers</p>
-          </div>
-
-          <FollowersListSection username={username} />
-        </div>
-      </RequireAuth>
-    </HydrationBoundary>
-  );
-}
-</file>
-
-<file path="app/u/[username]/following/page.tsx">
-import { notFound } from "next/navigation";
-import {
-  QueryClient,
-  dehydrate,
-  HydrationBoundary,
-} from "@tanstack/react-query";
-import { RequireAuth } from "@/components/auth/RequireAuth";
-import { FollowingListSection } from "@/components/profile/FollowingListSection";
-import { followingQueryKey, profileQueryKey } from "@/lib/queryKeys";
-import { getServerUserId } from "@/lib/session";
-import {
-  fetchUserProfileForSSR,
-  fetchFollowingForSSR,
-  fetchUserProfilesBatchForSSR,
-} from "@/lib/serverQueries";
-
-type Props = {
-  params: Promise<{ username: string }>;
-};
-
-// Mirrors app/u/[username]/followers/page.tsx exactly, just the reverse
-// Follow direction — see that file's own comments for the full
-// reasoning behind each piece:
-//  - the profile lookup 404s server-side regardless of viewer auth,
-//  - the list itself only prefetches when there's a viewer session
-//    (RequireAuth is what actually gates it),
-//  - only the unsearched page (followingQueryKey(username, "")) is
-//    prefetched — the one cache entry FollowingListSection's fresh
-//    mount is guaranteed to agree with,
-//  - every visible row's own profile (isFollowing/followsMe — see
-//    UserListRow's useUserProfile call) is batch-prefetched too, so the
-//    follow buttons are correct on first paint instead of flashing
-//    Follow-then-Following.
-export default async function UserFollowingPage({ params }: Props) {
-  const { username } = await params;
-  const viewerId = await getServerUserId();
-
-  const profile = await fetchUserProfileForSSR(username, viewerId);
-  if (!profile) {
-    notFound();
-  }
-
-  const queryClient = new QueryClient();
-  const prefetches: Promise<unknown>[] = [];
-
-  if (viewerId) {
-    const following = await fetchFollowingForSSR(username);
-    prefetches.push(
-      queryClient.prefetchQuery({
-        queryKey: followingQueryKey(username, ""),
-        queryFn: async () => following,
-      }),
-    );
-
-    const followingUsernames = [...new Set(following.map((f) => f.username))];
-    if (followingUsernames.length > 0) {
-      prefetches.push(
-        fetchUserProfilesBatchForSSR(followingUsernames, viewerId).then(
-          (profiles) => {
-            for (const [rowUsername, rowProfile] of profiles) {
-              queryClient.setQueryData(
-                profileQueryKey(rowUsername),
-                rowProfile,
-              );
-            }
-          },
-        ),
-      );
-    }
-  }
-
-  await Promise.all(prefetches);
-
-  return (
-    <HydrationBoundary state={dehydrate(queryClient)}>
-      <RequireAuth>
-        <div className="flex flex-col">
-          <div className="border-b border-foreground/10 px-4 py-3">
-            <p className="text-sm font-medium">Following</p>
-          </div>
-
-          <FollowingListSection username={username} />
-        </div>
-      </RequireAuth>
-    </HydrationBoundary>
   );
 }
 </file>
@@ -6458,50 +6167,46 @@ export function useAuthGatedAction() {
 }
 </file>
 
-<file path="hooks/useFollowingList.ts">
+<file path="hooks/useFollowersList.ts">
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { getFollowing } from "@/services/userService";
-import type { MockUser } from "@/data/mockUsers";
-import { followingQueryKey } from "@/lib/queryKeys";
+import { getFollowers } from "@/services/userService";
+import { followersQueryKey } from "@/lib/queryKeys";
+import type { FollowingUser } from "./useFollowingList";
 
-// Same shape UserListWithSearch/UserListRow already render (MockUser),
-// plus the real id the backend returns — kept for parity with other
-// real-data hooks (useUserProfile's PublicUserProfile, useCurrentUser's
-// CurrentUser) even though the list UI itself doesn't use it yet.
-export type FollowingUser = MockUser & { id: string };
+// Mirrors useFollowingList exactly, just the reverse Follow direction.
+// Reuses its FollowingUser type — same shape (MockUser + real id) since
+// both the following and followers rows render through the same
+// UserListRow/UserListWithSearch.
 
-// Backs both Following pages — /profile/following (own) and
-// /u/[username]/following (someone else's).
-//
-// Pass undefined to hold the query off entirely — used by
-// /u/[username]/following so the request isn't fired until the viewer's
-// auth state is actually known (the endpoint requires a session; there's
-// no reason to attempt it, and risk apiFetch's 401 handling kicking in,
-// for a visitor who isn't signed in at all).
-// Exported so useUserProfile can reach into this exact cache entry when
-// a follow/unfollow happens elsewhere (PostCard, ProfileHeader) — that's
-// what lets toggling follow from a post card optimistically update this
-// list without this hook needing to know anything about who's doing it.
-export { followingQueryKey };
+// The real key now lives in lib/queryKeys.ts (not here) — same reasoning
+// as followingQueryKey: a Server Component (app/u/[username]/followers/
+// page.tsx, app/profile/followers/page.tsx) needs the real function to
+// construct a matching key for its SSR prefetch, not a "use client"
+// stub. Re-exported from here so useUserProfile's existing import keeps
+// working unchanged.
+export { followersQueryKey };
 
-// Search round-trips to the server — GET .../following?search=... (see
-// lib/users.ts's getFollowingList) — instead of filtering an
-// already-fetched full list client-side. `search` is part of the query
-// key, so each distinct search string is its own cache entry;
-// UserListWithSearch's server-search mode debounces keystrokes before
-// this hook ever re-fires, and the "" entry (no search) is what the SSR
-// prefetch on both Following pages warms ahead of the first client
-// render.
-export function useFollowingList(
+// Search now round-trips to the server — GET .../followers?search=...
+// (see lib/users.ts's getFollowersList) — instead of filtering an
+// already-fetched full list client-side, the way Following still does.
+// `search` is part of the query key, so each distinct search string is
+// its own cache entry; UserListWithSearch's server-search mode debounces
+// keystrokes before this hook ever re-fires, and the "" entry (no
+// search) is what the SSR prefetch on both Followers pages warms ahead
+// of the first client render.
+export function useFollowersList(
   username: string | undefined,
   search: string = "",
 ) {
   const query = useQuery({
-    queryKey: followingQueryKey(username, search),
+    queryKey: followersQueryKey(username, search),
     queryFn: async () => {
-      const result = await getFollowing(username as string, search || undefined);
+      const result = await getFollowers(
+        username as string,
+        search || undefined,
+      );
       if (!result?.success) return [];
       return result.users as FollowingUser[];
     },
@@ -6933,64 +6638,6 @@ export function clearSessionCookies(response: NextResponse) {
 }
 </file>
 
-<file path="lib/queryKeys.ts">
-// Plain constants/functions only — deliberately NOT "use client", so
-// Server Components (app/page.tsx's SSR prefetch) can import the real
-// values instead of a client-reference stub. Client hooks import from
-// here too, so there's exactly one definition of each key.
-export const POSTS_QUERY_KEY = ["posts"] as const;
-export const LIKES_QUERY_KEY = ["likes"] as const;
-export const SAVED_QUERY_KEY = ["saved"] as const;
-
-// Following now round-trips search to the server too (see
-// fetchFollowingForSSR / useFollowingList), same as Followers below —
-// `search` is part of the key so each distinct search string is its own
-// cache entry. Defaults to "" (not omitted) so a Server Component's SSR
-// prefetch (app/u/[username]/following/page.tsx,
-// app/profile/following/page.tsx — always prefetching the unsearched
-// page) and a fresh client mount (whose search state also starts as "")
-// construct the exact same key and the server-rendered list hydrates
-// without an extra client fetch. useUserProfile's optimistic follow/
-// unfollow patches also call this with just a username, so they land on
-// that same "" entry — the one guaranteed to be mounted/visible.
-export function followingQueryKey(
-  username: string | undefined,
-  search: string = "",
-) {
-  return ["following", username, search] as const;
-}
-
-// Mirrors followingQueryKey above exactly, just the reverse Follow
-// direction.
-export function followersQueryKey(
-  username: string | undefined,
-  search: string = "",
-) {
-  return ["followers", username, search] as const;
-}
-
-export function profileQueryKey(username: string) {
-  return ["userProfile", username] as const;
-}
-
-export const CURRENT_USER_QUERY_KEY = ["currentUser"] as const;
-
-// Shared prefix so a post mutation elsewhere (create, delete, like,
-// comment) can invalidate every per-user posts query at once without
-// knowing which usernames are cached — invalidateQueries matches by
-// prefix, so USER_POSTS_QUERY_KEY_PREFIX alone hits every entry.
-// USER_POSTS_QUERY_KEY(username) is the full key useUserPosts queries
-// with client-side, and what a Server Component prefetches into —
-// kept here (not in hooks/useUserPosts.ts) so both sides, and
-// app/profile/page.tsx + app/u/[username]/page.tsx, construct the
-// exact same key from one definition.
-export const USER_POSTS_QUERY_KEY_PREFIX = ["userPosts"] as const;
-
-export function USER_POSTS_QUERY_KEY(username: string | undefined) {
-  return [...USER_POSTS_QUERY_KEY_PREFIX, username] as const;
-}
-</file>
-
 <file path="lib/saved.ts">
 import { prisma } from "./prisma";
 import { serializePost, postInclude } from "./posts";
@@ -7078,262 +6725,6 @@ import { headers } from "next/headers";
 // a new cookie during the request and this can't.
 export async function getServerUserId(): Promise<string | null> {
   return (await headers()).get("x-user-id");
-}
-</file>
-
-<file path="lib/users.ts">
-import { prisma } from "./prisma";
-
-export type FullCurrentUser = {
-  id: string;
-  username: string;
-  email: string;
-  avatarSrc: string;
-  bio: string;
-  toneTag: string;
-  pinnedRoutine: { id: string; label: string }[];
-  onboardingCompletedAt: string | null;
-  followerCount: number;
-  followingCount: number;
-  // Sourced from the same _count select as followerCount/followingCount
-  // below — a free aggregate on the one user row lookup, not derived
-  // from fetching the user's actual posts. Lets ProfileHeader show the
-  // real count immediately, without waiting on the separate (heavier,
-  // media-joined) posts query the grid itself runs.
-  postCount: number;
-};
-
-export async function getFullCurrentUser(
-  userId: string,
-): Promise<FullCurrentUser | null> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    include: {
-      routineItems: { orderBy: { order: "asc" } },
-      _count: { select: { followers: true, following: true, posts: true } },
-    },
-  });
-  if (!user) return null;
-
-  return {
-    id: user.id,
-    username: user.username,
-    email: user.email,
-    avatarSrc: user.avatarSrc,
-    bio: user.bio,
-    toneTag: user.toneTag,
-    pinnedRoutine: user.routineItems.map((item) => ({
-      id: item.id,
-      label: item.label,
-    })),
-    onboardingCompletedAt: user.onboardingCompletedAt
-      ? user.onboardingCompletedAt.toISOString()
-      : null,
-    followerCount: user._count.followers,
-    followingCount: user._count.following,
-    postCount: user._count.posts,
-  };
-}
-
-export type FollowingListUser = {
-  id: string;
-  username: string;
-  avatarSrc: string;
-  toneTag: string;
-};
-
-export async function getFollowingList(
-  username: string,
-  search?: string,
-): Promise<FollowingListUser[] | null> {
-  const target = await prisma.user.findUnique({
-    where: { username },
-    select: { id: true },
-  });
-  if (!target) return null;
-
-  const follows = await prisma.follow.findMany({
-    where: {
-      followerId: target.id,
-      ...(search
-        ? { following: { username: { contains: search, mode: "insensitive" } } }
-        : {}),
-    },
-    orderBy: { createdAt: "desc" },
-    select: {
-      following: {
-        select: { id: true, username: true, avatarSrc: true, toneTag: true },
-      },
-    },
-  });
-  return follows.map((f) => f.following);
-}
-
-// Mirrors getFollowingList exactly, just the reverse Follow direction
-// (followingId = target, not followerId) — same optional case-insensitive
-// ?search=, same null-on-missing-user contract. Backs both
-// GET /api/user/[username]/followers (see that route) and the SSR
-// prefetch for /profile/followers and /u/[username]/followers (see
-// lib/serverQueries.ts's fetchFollowersForSSR) — one query, not two
-// separate implementations of the same lookup.
-export async function getFollowersList(
-  username: string,
-  search?: string,
-): Promise<FollowingListUser[] | null> {
-  const target = await prisma.user.findUnique({
-    where: { username },
-    select: { id: true },
-  });
-  if (!target) return null;
-
-  const follows = await prisma.follow.findMany({
-    where: {
-      followingId: target.id,
-      ...(search
-        ? { follower: { username: { contains: search, mode: "insensitive" } } }
-        : {}),
-    },
-    orderBy: { createdAt: "desc" },
-    select: {
-      follower: {
-        select: { id: true, username: true, avatarSrc: true, toneTag: true },
-      },
-    },
-  });
-  return follows.map((f) => f.follower);
-}
-
-export type PublicUserProfile = {
-  id: string;
-  username: string;
-  avatarSrc: string;
-  bio: string;
-  toneTag: string;
-  pinnedRoutine: { id: string; label: string }[];
-  followerCount: number;
-  followingCount: number;
-  isFollowing: boolean;
-  followsMe: boolean;
-  // See the identical comment on FullCurrentUser.postCount above — same
-  // free _count aggregate, same reason: ProfileHeader shouldn't have to
-  // wait on the posts-with-media query just to show a number.
-  postCount: number;
-};
-
-export async function getPublicUserProfile(
-  username: string,
-  viewerId: string | null,
-): Promise<PublicUserProfile | null> {
-  const user = await prisma.user.findUnique({
-    where: { username },
-    include: {
-      routineItems: { orderBy: { order: "asc" } },
-      _count: { select: { followers: true, following: true, posts: true } },
-    },
-  });
-  if (!user) return null;
-
-  let isFollowing = false;
-  let followsMe = false;
-  if (viewerId && viewerId !== user.id) {
-    const [followingRow, followerRow] = await Promise.all([
-      prisma.follow.findUnique({
-        where: {
-          followerId_followingId: {
-            followerId: viewerId,
-            followingId: user.id,
-          },
-        },
-        select: { id: true },
-      }),
-      prisma.follow.findUnique({
-        where: {
-          followerId_followingId: {
-            followerId: user.id,
-            followingId: viewerId,
-          },
-        },
-        select: { id: true },
-      }),
-    ]);
-    isFollowing = Boolean(followingRow);
-    followsMe = Boolean(followerRow);
-  }
-
-  return {
-    id: user.id,
-    username: user.username,
-    avatarSrc: user.avatarSrc,
-    bio: user.bio,
-    toneTag: user.toneTag,
-    pinnedRoutine: user.routineItems.map((item) => ({
-      id: item.id,
-      label: item.label,
-    })),
-    followerCount: user._count.followers,
-    followingCount: user._count.following,
-    isFollowing,
-    followsMe,
-    postCount: user._count.posts,
-  };
-}
-
-export async function getPublicUserProfilesBatch(
-  usernames: string[],
-  viewerId: string | null,
-): Promise<Map<string, PublicUserProfile>> {
-  if (usernames.length === 0) return new Map();
-
-  const users = await prisma.user.findMany({
-    where: { username: { in: usernames } },
-    include: {
-      routineItems: { orderBy: { order: "asc" } },
-      _count: { select: { followers: true, following: true, posts: true } },
-    },
-  });
-
-  const otherUserIds = viewerId
-    ? users.filter((u) => u.id !== viewerId).map((u) => u.id)
-    : [];
-
-  const [followingRows, followerRows] =
-    viewerId && otherUserIds.length > 0
-      ? await Promise.all([
-          prisma.follow.findMany({
-            where: { followerId: viewerId, followingId: { in: otherUserIds } },
-            select: { followingId: true },
-          }),
-          prisma.follow.findMany({
-            where: { followerId: { in: otherUserIds }, followingId: viewerId },
-            select: { followerId: true },
-          }),
-        ])
-      : [[], []];
-
-  const followingSet = new Set(followingRows.map((r) => r.followingId));
-  const followerSet = new Set(followerRows.map((r) => r.followerId));
-
-  const profiles = new Map<string, PublicUserProfile>();
-  for (const user of users) {
-    const isSelf = viewerId === user.id;
-    profiles.set(user.username, {
-      id: user.id,
-      username: user.username,
-      avatarSrc: user.avatarSrc,
-      bio: user.bio,
-      toneTag: user.toneTag,
-      pinnedRoutine: user.routineItems.map((item) => ({
-        id: item.id,
-        label: item.label,
-      })),
-      followerCount: user._count.followers,
-      followingCount: user._count.following,
-      isFollowing: !isSelf && followingSet.has(user.id),
-      followsMe: !isSelf && followerSet.has(user.id),
-      postCount: user._count.posts,
-    });
-  }
-  return profiles;
 }
 </file>
 
@@ -8066,6 +7457,53 @@ export async function POST(req: NextRequest) {
 }
 </file>
 
+<file path="app/api/user/[username]/following/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { getFollowingList } from "@/lib/users";
+
+type Params = { params: Promise<{ username: string }> };
+
+// Requires authentication — unlike GET /api/user/[username] and its
+// /posts sibling, this route is deliberately NOT part of proxy.ts's
+// public-GET carve-out (see isPublicUserGet there), so an unauthenticated
+// request never even reaches this handler with a usable session. The
+// x-user-id check below is defense-in-depth, mirroring the same explicit
+// check in follow/route.ts, rather than the only thing standing between
+// this data and a logged-out caller.
+//
+// Returns the users the given username follows, most recent first. Only
+// the fields UserListRow actually renders are selected — id (React key /
+// self-follow check upstream), username, avatarSrc, toneTag — nothing
+// else off the target rows leaks through.
+//
+// Accepts an optional ?search= for a case-insensitive username filter —
+// used by both Following pages' server-side search (see
+// hooks/useFollowingList.ts), same as its followers/route.ts sibling.
+export async function GET(req: NextRequest, { params }: Params) {
+  const viewerId = req.headers.get("x-user-id");
+  if (!viewerId) {
+    return NextResponse.json(
+      { success: false, error: "Unauthorized" },
+      { status: 401 },
+    );
+  }
+
+  const { username } = await params;
+
+  const search = req.nextUrl.searchParams.get("search")?.trim();
+
+  const users = await getFollowingList(username, search);
+  if (users === null) {
+    return NextResponse.json(
+      { success: false, error: "User not found." },
+      { status: 404 },
+    );
+  }
+
+  return NextResponse.json({ success: true, users });
+}
+</file>
+
 <file path="app/create/page.tsx">
 import { CreatePostForm } from "@/components/create/CreatePostForm";
 import { RequireAuth } from "@/components/auth/RequireAuth";
@@ -8129,6 +7567,197 @@ export default function NotificationsPage() {
         )}
       </div>
     </RequireAuth>
+  );
+}
+</file>
+
+<file path="app/u/[username]/followers/page.tsx">
+import { notFound } from "next/navigation";
+import {
+  QueryClient,
+  dehydrate,
+  HydrationBoundary,
+} from "@tanstack/react-query";
+import { RequireAuth } from "@/components/auth/RequireAuth";
+import { FollowersListSection } from "@/components/profile/FollowersListSection";
+import { followersQueryKey, profileQueryKey } from "@/lib/queryKeys";
+import { getServerUserId } from "@/lib/session";
+import {
+  fetchUserProfileForSSR,
+  fetchFollowersForSSR,
+  fetchUserProfilesBatchForSSR,
+} from "@/lib/serverQueries";
+
+type Props = {
+  params: Promise<{ username: string }>;
+};
+
+// Same two-tier SSR posture as app/u/[username]/page.tsx: the profile
+// lookup (public, cheap — same lib/users.ts row GET /api/user/[username]
+// runs) is awaited here so a nonexistent username produces a real
+// server-side 404 regardless of the viewer's auth state. The followers
+// list itself stays gated behind RequireAuth — this route (and its API)
+// requires a session no matter whose followers are being viewed — so
+// it's only ever prefetched when there IS a viewer session; a logged-out
+// visitor still gets the correct 404 check but sees the sign-in gate in
+// place of a list, same as the client-side version did.
+//
+// Only the unsearched page (followersQueryKey(username, "")) is
+// prefetched — that's the one cache entry FollowersListSection's fresh
+// mount (search state starting at "") is guaranteed to agree with, so
+// the server-rendered list hydrates without an extra client fetch. Any
+// search the visitor types after that runs as its own client-side fetch
+// (see UserListWithSearch's server-search mode).
+export default async function UserFollowersPage({ params }: Props) {
+  const { username } = await params;
+  const viewerId = await getServerUserId();
+
+  const profile = await fetchUserProfileForSSR(username, viewerId);
+  if (!profile) {
+    notFound();
+  }
+
+  const queryClient = new QueryClient();
+  const prefetches: Promise<unknown>[] = [];
+
+  if (viewerId) {
+    const followers = await fetchFollowersForSSR(username);
+    prefetches.push(
+      queryClient.prefetchQuery({
+        queryKey: followersQueryKey(username, ""),
+        queryFn: async () => followers,
+      }),
+    );
+
+    // Same batch prefetch app/(home)/page.tsx does for post authors —
+    // without this, each row's own useUserProfile(username) call (see
+    // UserListRow) starts with nothing cached, so isFollowing/followsMe
+    // default to false for a beat before that row's own fetch resolves:
+    // a visible Follow-then-Following flash on every row that's
+    // actually already followed. Prefetching all of them here means the
+    // whole list — follow-button state included — is correct on the
+    // very first paint, not just the usernames/avatars.
+    const followerUsernames = [...new Set(followers.map((f) => f.username))];
+    if (followerUsernames.length > 0) {
+      prefetches.push(
+        fetchUserProfilesBatchForSSR(followerUsernames, viewerId).then(
+          (profiles) => {
+            for (const [rowUsername, rowProfile] of profiles) {
+              queryClient.setQueryData(
+                profileQueryKey(rowUsername),
+                rowProfile,
+              );
+            }
+          },
+        ),
+      );
+    }
+  }
+
+  await Promise.all(prefetches);
+
+  return (
+    <HydrationBoundary state={dehydrate(queryClient)}>
+      <RequireAuth>
+        <div className="flex flex-col">
+          <div className="border-b border-foreground/10 px-4 py-3">
+            <p className="text-sm font-medium">Followers</p>
+          </div>
+
+          <FollowersListSection username={username} />
+        </div>
+      </RequireAuth>
+    </HydrationBoundary>
+  );
+}
+</file>
+
+<file path="app/u/[username]/following/page.tsx">
+import { notFound } from "next/navigation";
+import {
+  QueryClient,
+  dehydrate,
+  HydrationBoundary,
+} from "@tanstack/react-query";
+import { RequireAuth } from "@/components/auth/RequireAuth";
+import { FollowingListSection } from "@/components/profile/FollowingListSection";
+import { followingQueryKey, profileQueryKey } from "@/lib/queryKeys";
+import { getServerUserId } from "@/lib/session";
+import {
+  fetchUserProfileForSSR,
+  fetchFollowingForSSR,
+  fetchUserProfilesBatchForSSR,
+} from "@/lib/serverQueries";
+
+type Props = {
+  params: Promise<{ username: string }>;
+};
+
+// Mirrors app/u/[username]/followers/page.tsx exactly, just the reverse
+// Follow direction — see that file's own comments for the full
+// reasoning behind each piece:
+//  - the profile lookup 404s server-side regardless of viewer auth,
+//  - the list itself only prefetches when there's a viewer session
+//    (RequireAuth is what actually gates it),
+//  - only the unsearched page (followingQueryKey(username, "")) is
+//    prefetched — the one cache entry FollowingListSection's fresh
+//    mount is guaranteed to agree with,
+//  - every visible row's own profile (isFollowing/followsMe — see
+//    UserListRow's useUserProfile call) is batch-prefetched too, so the
+//    follow buttons are correct on first paint instead of flashing
+//    Follow-then-Following.
+export default async function UserFollowingPage({ params }: Props) {
+  const { username } = await params;
+  const viewerId = await getServerUserId();
+
+  const profile = await fetchUserProfileForSSR(username, viewerId);
+  if (!profile) {
+    notFound();
+  }
+
+  const queryClient = new QueryClient();
+  const prefetches: Promise<unknown>[] = [];
+
+  if (viewerId) {
+    const following = await fetchFollowingForSSR(username);
+    prefetches.push(
+      queryClient.prefetchQuery({
+        queryKey: followingQueryKey(username, ""),
+        queryFn: async () => following,
+      }),
+    );
+
+    const followingUsernames = [...new Set(following.map((f) => f.username))];
+    if (followingUsernames.length > 0) {
+      prefetches.push(
+        fetchUserProfilesBatchForSSR(followingUsernames, viewerId).then(
+          (profiles) => {
+            for (const [rowUsername, rowProfile] of profiles) {
+              queryClient.setQueryData(
+                profileQueryKey(rowUsername),
+                rowProfile,
+              );
+            }
+          },
+        ),
+      );
+    }
+  }
+
+  await Promise.all(prefetches);
+
+  return (
+    <HydrationBoundary state={dehydrate(queryClient)}>
+      <RequireAuth>
+        <div className="flex flex-col">
+          <div className="border-b border-foreground/10 px-4 py-3">
+            <p className="text-sm font-medium">Following</p>
+          </div>
+
+          <FollowingListSection username={username} />
+        </div>
+      </RequireAuth>
+    </HydrationBoundary>
   );
 }
 </file>
@@ -8802,177 +8431,6 @@ export function PostGrid({
 }
 </file>
 
-<file path="components/profile/UserListWithSearch.tsx">
-"use client";
-
-import { useEffect, useRef, useState } from "react";
-import { MagnifyingGlassIcon } from "@phosphor-icons/react";
-import { UserListRow } from "./UserListRow";
-import { UserListSkeleton } from "./UserListSkeleton";
-import { useDebouncedValue } from "@/hooks/useDebouncedValue";
-import type { MockUser } from "@/data/mockUsers";
-
-type Props = {
-  users: MockUser[];
-  emptyLabel: string; // shown when the list itself has nobody in it at all
-  // Real backend loading state (from useFollowingList/useFollowersList) —
-  // when supplied, this replaces the simulated timer below entirely
-  // instead of racing it. Omitted (undefined) on any page that hasn't
-  // been wired up to a real backend yet.
-  isLoading?: boolean;
-  // When supplied, search moves server-side: `users` is assumed to
-  // already BE the server's result set for the current debounced query
-  // (see useFollowersList's `search` param / GET .../followers?search=),
-  // and this component no longer filters `users` itself — it just
-  // debounces keystrokes and hands the settled value to the caller.
-  // Omitted (undefined) keeps the original client-side-filter behavior
-  // below — no page currently uses that mode, but it's kept working in
-  // case a future list here doesn't have a server-side search endpoint.
-  onSearchChange?: (query: string) => void;
-};
-
-// Simulated so the skeleton is actually visible on any still-mock list.
-// Runs once per mount, which is fine here since these are separate pages
-// that fully unmount on navigation, unlike CommentSheet which stays
-// mounted.
-const SIMULATED_LOAD_MS = 700;
-
-// Client-filter mode's own simulated per-search delay — stands in for a
-// real search API round trip. Resets on every keystroke so rapid typing
-// just keeps the skeleton up until typing actually pauses, instead of
-// flashing per letter. Unused once onSearchChange is supplied — real
-// fetch latency (via isLoading) takes over instead.
-const SIMULATED_SEARCH_DELAY_MS = 500;
-
-// Server-search mode's real debounce — how long typing has to pause
-// before a new ?search= request actually fires.
-const SEARCH_DEBOUNCE_MS = 300;
-
-export function UserListWithSearch({
-  users,
-  emptyLabel,
-  isLoading,
-  onSearchChange,
-}: Props) {
-  const [query, setQuery] = useState("");
-  const serverSearch = Boolean(onSearchChange);
-
-  // isLoading === undefined means "no real loading state was supplied" —
-  // fall back to the original simulated timer in that case only.
-  const usesSimulatedLoad = isLoading === undefined;
-  const [simulatedLoading, setSimulatedLoading] = useState(usesSimulatedLoad);
-  useEffect(() => {
-    if (!usesSimulatedLoad) return;
-    const timer = window.setTimeout(
-      () => setSimulatedLoading(false),
-      SIMULATED_LOAD_MS,
-    );
-    return () => window.clearTimeout(timer);
-  }, [usesSimulatedLoad]);
-
-  const realLoading = usesSimulatedLoad ? simulatedLoading : Boolean(isLoading);
-
-  // Only the very FIRST fetch swaps out the whole component (including
-  // the search box itself) — tracked with state that, once flipped true,
-  // stays true, since in server-search mode `realLoading` goes true
-  // again on every later keystroke too (each distinct `search` string is
-  // its own query/queryKey — see useFollowersList). Later loads then
-  // only ever affect the "searching" skeleton below, not this one. Set
-  // during render (React's documented pattern for "adjust state when a
-  // value changes" — https://react.dev/learn/you-might-not-need-an-effect)
-  // rather than in an effect, so there's no extra render/commit cycle:
-  // initial value is derived straight from `realLoading` itself, so a
-  // hydrated SSR page (already not loading on first render) starts
-  // `true` and never shows this at all.
-  const [hasLoadedOnce, setHasLoadedOnce] = useState(!realLoading);
-  if (!realLoading && !hasLoadedOnce) {
-    setHasLoadedOnce(true);
-  }
-  const showInitialSkeleton = realLoading && !hasLoadedOnce;
-
-  // Server-search mode: debounce the raw input and hand the settled
-  // value to the parent, which feeds it into useFollowersList's `search`
-  // param — actual filtering happens in the DB query, not here.
-  const debouncedQuery = useDebouncedValue(query, SEARCH_DEBOUNCE_MS);
-  useEffect(() => {
-    if (serverSearch) {
-      onSearchChange?.(debouncedQuery.trim());
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedQuery, serverSearch]);
-
-  // Client-filter mode's own simulated per-keystroke delay — unchanged
-  // behavior for any page that doesn't pass onSearchChange yet.
-  const [simulatedSearching, setSimulatedSearching] = useState(false);
-  const isFirstRender = useRef(true);
-  useEffect(() => {
-    if (serverSearch) return;
-    if (isFirstRender.current) {
-      isFirstRender.current = false;
-      return;
-    }
-    setSimulatedSearching(true);
-    const timer = window.setTimeout(
-      () => setSimulatedSearching(false),
-      SIMULATED_SEARCH_DELAY_MS,
-    );
-    return () => window.clearTimeout(timer);
-  }, [query, serverSearch]);
-
-  if (showInitialSkeleton) {
-    return <UserListSkeleton />;
-  }
-
-  const trimmed = query.trim().toLowerCase();
-  // Server-search mode: `users` already IS the result set for `trimmed`
-  // — no re-filtering on top of what the server already searched.
-  const filtered = serverSearch
-    ? users
-    : trimmed
-      ? users.filter((u) => u.username.toLowerCase().includes(trimmed))
-      : users;
-
-  // Server-search mode: a real fetch is in flight for the CURRENT
-  // debounced query whenever realLoading is true post-initial-load,
-  // since each new `search` value starts pending until that specific
-  // search's results land.
-  const searching = serverSearch ? realLoading : simulatedSearching;
-  const hasQuery = trimmed.length > 0;
-
-  return (
-    <>
-      <div className="border-b border-foreground/10 px-4 py-2.5">
-        <div className="flex items-center gap-2 rounded-full bg-foreground/5 px-3 py-2">
-          <MagnifyingGlassIcon size={16} className="text-foreground/40" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search"
-            className="w-full bg-transparent text-sm outline-none placeholder:text-foreground/40"
-          />
-        </div>
-      </div>
-
-      {searching ? (
-        <UserListSkeleton />
-      ) : filtered.length === 0 ? (
-        hasQuery ? (
-          <p className="px-4 py-10 text-center text-sm text-foreground/50">
-            No results for &ldquo;{query}&rdquo;
-          </p>
-        ) : (
-          <p className="px-4 py-10 text-center text-sm text-foreground/50">
-            {emptyLabel}
-          </p>
-        )
-      ) : (
-        filtered.map((user) => <UserListRow key={user.username} user={user} />)
-      )}
-    </>
-  );
-}
-</file>
-
 <file path="constants/currentUser.ts">
 // Stable identity key for the logged-in user — never changes, even if
 // they edit their username later. Every "is this mine" check (isOwnPost,
@@ -9085,6 +8543,63 @@ export const mockFollowerUsernames = MOCK_USERS.map((u) => u.username).slice(
 // follow them yet, that's a follow-back, not a cold follow.
 export function isMockFollowerOfCurrentUser(username: string): boolean {
   return mockFollowerUsernames.includes(username);
+}
+</file>
+
+<file path="hooks/useFollowingList.ts">
+"use client";
+
+import { useQuery } from "@tanstack/react-query";
+import { getFollowing } from "@/services/userService";
+import type { MockUser } from "@/data/mockUsers";
+import { followingQueryKey } from "@/lib/queryKeys";
+
+// Same shape UserListWithSearch/UserListRow already render (MockUser),
+// plus the real id the backend returns — kept for parity with other
+// real-data hooks (useUserProfile's PublicUserProfile, useCurrentUser's
+// CurrentUser) even though the list UI itself doesn't use it yet.
+export type FollowingUser = MockUser & { id: string };
+
+// Backs both Following pages — /profile/following (own) and
+// /u/[username]/following (someone else's).
+//
+// Pass undefined to hold the query off entirely — used by
+// /u/[username]/following so the request isn't fired until the viewer's
+// auth state is actually known (the endpoint requires a session; there's
+// no reason to attempt it, and risk apiFetch's 401 handling kicking in,
+// for a visitor who isn't signed in at all).
+// Exported so useUserProfile can reach into this exact cache entry when
+// a follow/unfollow happens elsewhere (PostCard, ProfileHeader) — that's
+// what lets toggling follow from a post card optimistically update this
+// list without this hook needing to know anything about who's doing it.
+export { followingQueryKey };
+
+// Search round-trips to the server — GET .../following?search=... (see
+// lib/users.ts's getFollowingList) — instead of filtering an
+// already-fetched full list client-side. `search` is part of the query
+// key, so each distinct search string is its own cache entry;
+// UserListWithSearch's server-search mode debounces keystrokes before
+// this hook ever re-fires, and the "" entry (no search) is what the SSR
+// prefetch on both Following pages warms ahead of the first client
+// render.
+export function useFollowingList(
+  username: string | undefined,
+  search: string = "",
+) {
+  const query = useQuery({
+    queryKey: followingQueryKey(username, search),
+    queryFn: async () => {
+      const result = await getFollowing(username as string, search || undefined);
+      if (!result?.success) return [];
+      return result.users as FollowingUser[];
+    },
+    enabled: Boolean(username),
+  });
+
+  return {
+    users: query.data ?? [],
+    isLoading: query.isLoading,
+  };
 }
 </file>
 
@@ -9420,6 +8935,320 @@ export function useSavedPosts() {
 }
 </file>
 
+<file path="lib/queryKeys.ts">
+// Plain constants/functions only — deliberately NOT "use client", so
+// Server Components (app/page.tsx's SSR prefetch) can import the real
+// values instead of a client-reference stub. Client hooks import from
+// here too, so there's exactly one definition of each key.
+export const POSTS_QUERY_KEY = ["posts"] as const;
+export const LIKES_QUERY_KEY = ["likes"] as const;
+export const SAVED_QUERY_KEY = ["saved"] as const;
+
+// Following now round-trips search to the server too (see
+// fetchFollowingForSSR / useFollowingList), same as Followers below —
+// `search` is part of the key so each distinct search string is its own
+// cache entry. Defaults to "" (not omitted) so a Server Component's SSR
+// prefetch (app/u/[username]/following/page.tsx,
+// app/profile/following/page.tsx — always prefetching the unsearched
+// page) and a fresh client mount (whose search state also starts as "")
+// construct the exact same key and the server-rendered list hydrates
+// without an extra client fetch. useUserProfile's optimistic follow/
+// unfollow patches also call this with just a username, so they land on
+// that same "" entry — the one guaranteed to be mounted/visible.
+export function followingQueryKey(
+  username: string | undefined,
+  search: string = "",
+) {
+  return ["following", username, search] as const;
+}
+
+// Mirrors followingQueryKey above exactly, just the reverse Follow
+// direction.
+export function followersQueryKey(
+  username: string | undefined,
+  search: string = "",
+) {
+  return ["followers", username, search] as const;
+}
+
+export function profileQueryKey(username: string) {
+  return ["userProfile", username] as const;
+}
+
+export const CURRENT_USER_QUERY_KEY = ["currentUser"] as const;
+
+// Shared prefix so a post mutation elsewhere (create, delete, like,
+// comment) can invalidate every per-user posts query at once without
+// knowing which usernames are cached — invalidateQueries matches by
+// prefix, so USER_POSTS_QUERY_KEY_PREFIX alone hits every entry.
+// USER_POSTS_QUERY_KEY(username) is the full key useUserPosts queries
+// with client-side, and what a Server Component prefetches into —
+// kept here (not in hooks/useUserPosts.ts) so both sides, and
+// app/profile/page.tsx + app/u/[username]/page.tsx, construct the
+// exact same key from one definition.
+export const USER_POSTS_QUERY_KEY_PREFIX = ["userPosts"] as const;
+
+export function USER_POSTS_QUERY_KEY(username: string | undefined) {
+  return [...USER_POSTS_QUERY_KEY_PREFIX, username] as const;
+}
+</file>
+
+<file path="lib/users.ts">
+import { prisma } from "./prisma";
+
+export type FullCurrentUser = {
+  id: string;
+  username: string;
+  email: string;
+  avatarSrc: string;
+  bio: string;
+  toneTag: string;
+  pinnedRoutine: { id: string; label: string }[];
+  onboardingCompletedAt: string | null;
+  followerCount: number;
+  followingCount: number;
+  // Sourced from the same _count select as followerCount/followingCount
+  // below — a free aggregate on the one user row lookup, not derived
+  // from fetching the user's actual posts. Lets ProfileHeader show the
+  // real count immediately, without waiting on the separate (heavier,
+  // media-joined) posts query the grid itself runs.
+  postCount: number;
+};
+
+export async function getFullCurrentUser(
+  userId: string,
+): Promise<FullCurrentUser | null> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: {
+      routineItems: { orderBy: { order: "asc" } },
+      _count: { select: { followers: true, following: true, posts: true } },
+    },
+  });
+  if (!user) return null;
+
+  return {
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    avatarSrc: user.avatarSrc,
+    bio: user.bio,
+    toneTag: user.toneTag,
+    pinnedRoutine: user.routineItems.map((item) => ({
+      id: item.id,
+      label: item.label,
+    })),
+    onboardingCompletedAt: user.onboardingCompletedAt
+      ? user.onboardingCompletedAt.toISOString()
+      : null,
+    followerCount: user._count.followers,
+    followingCount: user._count.following,
+    postCount: user._count.posts,
+  };
+}
+
+export type FollowingListUser = {
+  id: string;
+  username: string;
+  avatarSrc: string;
+  toneTag: string;
+};
+
+export async function getFollowingList(
+  username: string,
+  search?: string,
+): Promise<FollowingListUser[] | null> {
+  const target = await prisma.user.findUnique({
+    where: { username },
+    select: { id: true },
+  });
+  if (!target) return null;
+
+  const follows = await prisma.follow.findMany({
+    where: {
+      followerId: target.id,
+      ...(search
+        ? { following: { username: { contains: search, mode: "insensitive" } } }
+        : {}),
+    },
+    orderBy: { createdAt: "desc" },
+    select: {
+      following: {
+        select: { id: true, username: true, avatarSrc: true, toneTag: true },
+      },
+    },
+  });
+  return follows.map((f) => f.following);
+}
+
+// Mirrors getFollowingList exactly, just the reverse Follow direction
+// (followingId = target, not followerId) — same optional case-insensitive
+// ?search=, same null-on-missing-user contract. Backs both
+// GET /api/user/[username]/followers (see that route) and the SSR
+// prefetch for /profile/followers and /u/[username]/followers (see
+// lib/serverQueries.ts's fetchFollowersForSSR) — one query, not two
+// separate implementations of the same lookup.
+export async function getFollowersList(
+  username: string,
+  search?: string,
+): Promise<FollowingListUser[] | null> {
+  const target = await prisma.user.findUnique({
+    where: { username },
+    select: { id: true },
+  });
+  if (!target) return null;
+
+  const follows = await prisma.follow.findMany({
+    where: {
+      followingId: target.id,
+      ...(search
+        ? { follower: { username: { contains: search, mode: "insensitive" } } }
+        : {}),
+    },
+    orderBy: { createdAt: "desc" },
+    select: {
+      follower: {
+        select: { id: true, username: true, avatarSrc: true, toneTag: true },
+      },
+    },
+  });
+  return follows.map((f) => f.follower);
+}
+
+export type PublicUserProfile = {
+  id: string;
+  username: string;
+  avatarSrc: string;
+  bio: string;
+  toneTag: string;
+  pinnedRoutine: { id: string; label: string }[];
+  followerCount: number;
+  followingCount: number;
+  isFollowing: boolean;
+  followsMe: boolean;
+  // See the identical comment on FullCurrentUser.postCount above — same
+  // free _count aggregate, same reason: ProfileHeader shouldn't have to
+  // wait on the posts-with-media query just to show a number.
+  postCount: number;
+};
+
+export async function getPublicUserProfile(
+  username: string,
+  viewerId: string | null,
+): Promise<PublicUserProfile | null> {
+  const user = await prisma.user.findUnique({
+    where: { username },
+    include: {
+      routineItems: { orderBy: { order: "asc" } },
+      _count: { select: { followers: true, following: true, posts: true } },
+    },
+  });
+  if (!user) return null;
+
+  let isFollowing = false;
+  let followsMe = false;
+  if (viewerId && viewerId !== user.id) {
+    const [followingRow, followerRow] = await Promise.all([
+      prisma.follow.findUnique({
+        where: {
+          followerId_followingId: {
+            followerId: viewerId,
+            followingId: user.id,
+          },
+        },
+        select: { id: true },
+      }),
+      prisma.follow.findUnique({
+        where: {
+          followerId_followingId: {
+            followerId: user.id,
+            followingId: viewerId,
+          },
+        },
+        select: { id: true },
+      }),
+    ]);
+    isFollowing = Boolean(followingRow);
+    followsMe = Boolean(followerRow);
+  }
+
+  return {
+    id: user.id,
+    username: user.username,
+    avatarSrc: user.avatarSrc,
+    bio: user.bio,
+    toneTag: user.toneTag,
+    pinnedRoutine: user.routineItems.map((item) => ({
+      id: item.id,
+      label: item.label,
+    })),
+    followerCount: user._count.followers,
+    followingCount: user._count.following,
+    isFollowing,
+    followsMe,
+    postCount: user._count.posts,
+  };
+}
+
+export async function getPublicUserProfilesBatch(
+  usernames: string[],
+  viewerId: string | null,
+): Promise<Map<string, PublicUserProfile>> {
+  if (usernames.length === 0) return new Map();
+
+  const users = await prisma.user.findMany({
+    where: { username: { in: usernames } },
+    include: {
+      routineItems: { orderBy: { order: "asc" } },
+      _count: { select: { followers: true, following: true, posts: true } },
+    },
+  });
+
+  const otherUserIds = viewerId
+    ? users.filter((u) => u.id !== viewerId).map((u) => u.id)
+    : [];
+
+  const [followingRows, followerRows] =
+    viewerId && otherUserIds.length > 0
+      ? await Promise.all([
+          prisma.follow.findMany({
+            where: { followerId: viewerId, followingId: { in: otherUserIds } },
+            select: { followingId: true },
+          }),
+          prisma.follow.findMany({
+            where: { followerId: { in: otherUserIds }, followingId: viewerId },
+            select: { followerId: true },
+          }),
+        ])
+      : [[], []];
+
+  const followingSet = new Set(followingRows.map((r) => r.followingId));
+  const followerSet = new Set(followerRows.map((r) => r.followerId));
+
+  const profiles = new Map<string, PublicUserProfile>();
+  for (const user of users) {
+    const isSelf = viewerId === user.id;
+    profiles.set(user.username, {
+      id: user.id,
+      username: user.username,
+      avatarSrc: user.avatarSrc,
+      bio: user.bio,
+      toneTag: user.toneTag,
+      pinnedRoutine: user.routineItems.map((item) => ({
+        id: item.id,
+        label: item.label,
+      })),
+      followerCount: user._count.followers,
+      followingCount: user._count.following,
+      isFollowing: !isSelf && followingSet.has(user.id),
+      followsMe: !isSelf && followerSet.has(user.id),
+      postCount: user._count.posts,
+    });
+  }
+  return profiles;
+}
+</file>
+
 <file path="services/savedService.ts">
 import { apiFetch } from "@/utils/apiClient";
 import { API_ROUTES } from "@/utils/apiRoutes";
@@ -9697,286 +9526,6 @@ async function timed<T>(label: string, fn: () => Promise<T>): Promise<T> {
 }
 </file>
 
-<file path="app/p/[postId]/page.tsx">
-import type { Metadata } from "next";
-import { notFound } from "next/navigation";
-import {
-  QueryClient,
-  dehydrate,
-  HydrationBoundary,
-} from "@tanstack/react-query";
-import { prisma } from "@/lib/prisma";
-import { serializePost, postInclude } from "@/lib/posts";
-import { PostCard } from "@/components/feed/PostCard";
-import { getPostThumbnail } from "@/utils/postThumbnail";
-import { getServerUserId } from "@/lib/session";
-import {
-  fetchLikedPostIdsForSSR,
-  fetchSavedBundleForSSR,
-  fetchUserProfileForSSR,
-} from "@/lib/serverQueries";
-import {
-  LIKES_QUERY_KEY,
-  SAVED_QUERY_KEY,
-  profileQueryKey,
-} from "@/lib/queryKeys";
-
-type Props = {
-  params: Promise<{ postId: string }>;
-};
-
-// Same query GET /api/posts/[postId] runs (same postInclude/serializePost
-// from lib/posts.ts), called directly here rather than as an HTTP
-// self-fetch — this is itself the server rendering the page, so there's
-// no separate server to round-trip to. Shared by generateMetadata and
-// the page body below so a not-found post behaves identically in both
-// (see the API route's own comment for why this is deliberately public:
-// unauthenticated visitors load this page directly).
-async function getPost(postId: string) {
-  const post = await prisma.post.findUnique({
-    where: { id: postId },
-    include: postInclude,
-  });
-  return post ? serializePost(post) : null;
-}
-
-export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const { postId } = await params;
-  const post = await getPost(postId);
-  if (!post) return {};
-
-  const title = `${post.author.username} on Vanity`;
-  const image = getPostThumbnail(post);
-
-  return {
-    title,
-    description: post.caption,
-    openGraph: {
-      title,
-      description: post.caption,
-      images: image ? [{ url: image }] : undefined,
-    },
-  };
-}
-
-// Same SSR-prefetch shape as app/(home)/page.tsx, app/u/[username]/page.tsx,
-// and app/saved/page.tsx: everything PostCard needs on first paint —
-// the post itself (already fetched above via getPost), whether the
-// viewer has liked/saved it, and the author's follow state — is
-// resolved server-side and dehydrated into the HydrationBoundary below,
-// instead of PostCard's hooks (useLikedPosts/useSavedPosts/
-// useUserProfile) each firing their own client-side fetch on mount.
-// LIKES_QUERY_KEY and SAVED_QUERY_KEY are the same app-wide keys the
-// home feed prefetches into — this just warms the same cache from a
-// different entry point, so navigating from here to /saved or /home
-// afterward doesn't re-fetch either. The author's profile is fetched
-// directly (fetchUserProfileForSSR) rather than via the home page's
-// batch helper, since there's only ever one author to look up here.
-export default async function SinglePostPage({ params }: Props) {
-  const { postId } = await params;
-
-  const [post, userId] = await Promise.all([
-    getPost(postId),
-    getServerUserId(),
-  ]);
-
-  if (!post) {
-    notFound();
-  }
-
-  const queryClient = new QueryClient();
-
-  const prefetches: Promise<unknown>[] = [
-    queryClient.prefetchQuery({
-      queryKey: profileQueryKey(post.author.username),
-      queryFn: () => fetchUserProfileForSSR(post.author.username, userId),
-    }),
-  ];
-
-  if (userId) {
-    prefetches.push(
-      queryClient.prefetchQuery({
-        queryKey: LIKES_QUERY_KEY,
-        queryFn: async () => ({
-          likedPostIds: await fetchLikedPostIdsForSSR(userId),
-        }),
-      }),
-      queryClient.prefetchQuery({
-        queryKey: SAVED_QUERY_KEY,
-        queryFn: () => fetchSavedBundleForSSR(userId),
-      }),
-    );
-  }
-
-  await Promise.all(prefetches);
-
-  return (
-    <HydrationBoundary state={dehydrate(queryClient)}>
-      <div className="min-h-dvh">
-        <PostCard post={post} />
-      </div>
-    </HydrationBoundary>
-  );
-}
-</file>
-
-<file path="app/profile/followers/page.tsx">
-import {
-  QueryClient,
-  dehydrate,
-  HydrationBoundary,
-} from "@tanstack/react-query";
-import { RequireAuth } from "@/components/auth/RequireAuth";
-import { FollowersListSection } from "@/components/profile/FollowersListSection";
-import { followersQueryKey, profileQueryKey } from "@/lib/queryKeys";
-import { getServerUserId } from "@/lib/session";
-import {
-  fetchCurrentUserForSSR,
-  fetchFollowersForSSR,
-  fetchUserProfilesBatchForSSR,
-} from "@/lib/serverQueries";
-
-// Same posture as app/saved/page.tsx for a logged-out visitor: RequireAuth
-// below is what actually gates this page, so a null userId just skips
-// the prefetch entirely — FollowersListSection is still rendered (with
-// username undefined, which keeps useFollowersList's query disabled),
-// but RequireAuth swaps it for the sign-in gate before it'd ever fetch
-// anything.
-//
-// Only the unsearched page (followersQueryKey(username, "")) is
-// prefetched — see the identical comment on
-// app/u/[username]/followers/page.tsx for why that's the one cache
-// entry a fresh client mount is guaranteed to agree with. Each row's
-// own profile (isFollowing/followsMe — see UserListRow's
-// useUserProfile call) is batch-prefetched too, same as that page, so
-// the follow buttons render correctly on first paint instead of
-// flashing "Follow" before settling on "Following".
-export default async function FollowersPage() {
-  const userId = await getServerUserId();
-  const currentUser = userId ? await fetchCurrentUserForSSR(userId) : null;
-  const username = currentUser?.username;
-
-  const queryClient = new QueryClient();
-  const prefetches: Promise<unknown>[] = [];
-
-  if (username && userId) {
-    const followers = await fetchFollowersForSSR(username);
-    prefetches.push(
-      queryClient.prefetchQuery({
-        queryKey: followersQueryKey(username, ""),
-        queryFn: async () => followers,
-      }),
-    );
-
-    const followerUsernames = [...new Set(followers.map((f) => f.username))];
-    if (followerUsernames.length > 0) {
-      prefetches.push(
-        fetchUserProfilesBatchForSSR(followerUsernames, userId).then(
-          (profiles) => {
-            for (const [rowUsername, rowProfile] of profiles) {
-              queryClient.setQueryData(
-                profileQueryKey(rowUsername),
-                rowProfile,
-              );
-            }
-          },
-        ),
-      );
-    }
-  }
-
-  await Promise.all(prefetches);
-
-  return (
-    <HydrationBoundary state={dehydrate(queryClient)}>
-      <RequireAuth>
-        <div className="flex flex-col">
-          <div className="border-b border-foreground/10 px-4 py-3">
-            <p className="text-sm font-medium">Followers</p>
-          </div>
-
-          <FollowersListSection username={username} />
-        </div>
-      </RequireAuth>
-    </HydrationBoundary>
-  );
-}
-</file>
-
-<file path="app/profile/following/page.tsx">
-import {
-  QueryClient,
-  dehydrate,
-  HydrationBoundary,
-} from "@tanstack/react-query";
-import { RequireAuth } from "@/components/auth/RequireAuth";
-import { FollowingListSection } from "@/components/profile/FollowingListSection";
-import { followingQueryKey, profileQueryKey } from "@/lib/queryKeys";
-import { getServerUserId } from "@/lib/session";
-import {
-  fetchCurrentUserForSSR,
-  fetchFollowingForSSR,
-  fetchUserProfilesBatchForSSR,
-} from "@/lib/serverQueries";
-
-// Mirrors app/profile/followers/page.tsx exactly, just the reverse
-// Follow direction — see that file's own comments for the full
-// reasoning: RequireAuth is what actually gates a logged-out visitor
-// (so a null userId just skips the prefetch), only the unsearched page
-// is prefetched, and every visible row's own profile is batch-prefetched
-// too so follow buttons don't flash Follow-then-Following.
-export default async function FollowingPage() {
-  const userId = await getServerUserId();
-  const currentUser = userId ? await fetchCurrentUserForSSR(userId) : null;
-  const username = currentUser?.username;
-
-  const queryClient = new QueryClient();
-  const prefetches: Promise<unknown>[] = [];
-
-  if (username && userId) {
-    const following = await fetchFollowingForSSR(username);
-    prefetches.push(
-      queryClient.prefetchQuery({
-        queryKey: followingQueryKey(username, ""),
-        queryFn: async () => following,
-      }),
-    );
-
-    const followingUsernames = [...new Set(following.map((f) => f.username))];
-    if (followingUsernames.length > 0) {
-      prefetches.push(
-        fetchUserProfilesBatchForSSR(followingUsernames, userId).then(
-          (profiles) => {
-            for (const [rowUsername, rowProfile] of profiles) {
-              queryClient.setQueryData(
-                profileQueryKey(rowUsername),
-                rowProfile,
-              );
-            }
-          },
-        ),
-      );
-    }
-  }
-
-  await Promise.all(prefetches);
-
-  return (
-    <HydrationBoundary state={dehydrate(queryClient)}>
-      <RequireAuth>
-        <div className="flex flex-col">
-          <div className="border-b border-foreground/10 px-4 py-3">
-            <p className="text-sm font-medium">Following</p>
-          </div>
-
-          <FollowingListSection username={username} />
-        </div>
-      </RequireAuth>
-    </HydrationBoundary>
-  );
-}
-</file>
-
 <file path="components/onboarding/OnboardingFlow.tsx">
 "use client";
 
@@ -10212,6 +9761,140 @@ export function OnboardingFlow() {
             : "Continue"}
       </button>
     </div>
+  );
+}
+</file>
+
+<file path="components/profile/UserListWithSearch.tsx">
+"use client";
+
+import { useEffect, useState } from "react";
+import { MagnifyingGlassIcon } from "@phosphor-icons/react";
+import { UserListRow } from "./UserListRow";
+import { UserListSkeleton } from "./UserListSkeleton";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import type { MockUser } from "@/data/mockUsers";
+
+type Props = {
+  users: MockUser[];
+  emptyLabel: string; // shown when the list itself has nobody in it at all
+  // Real backend loading state (from useFollowingList/useFollowersList) —
+  // when supplied, this replaces the simulated timer below entirely
+  // instead of racing it. Omitted (undefined) on any page that hasn't
+  // been wired up to a real backend yet.
+  isLoading?: boolean;
+  // Search is server-side: `users` is assumed to already BE the server's
+  // result set for the current debounced query (see useFollowersList's
+  // `search` param / GET .../followers?search=). This component doesn't
+  // filter `users` itself — it just debounces keystrokes and hands the
+  // settled value to the caller.
+  onSearchChange: (query: string) => void;
+};
+
+// Simulated so the skeleton is actually visible on any still-mock list.
+// Runs once per mount, which is fine here since these are separate pages
+// that fully unmount on navigation, unlike CommentSheet which stays
+// mounted.
+const SIMULATED_LOAD_MS = 700;
+
+// Real debounce — how long typing has to pause before a new ?search=
+// request actually fires.
+const SEARCH_DEBOUNCE_MS = 300;
+
+export function UserListWithSearch({
+  users,
+  emptyLabel,
+  isLoading,
+  onSearchChange,
+}: Props) {
+  const [query, setQuery] = useState("");
+
+  // isLoading === undefined means "no real loading state was supplied" —
+  // fall back to the original simulated timer in that case only.
+  const usesSimulatedLoad = isLoading === undefined;
+  const [simulatedLoading, setSimulatedLoading] = useState(usesSimulatedLoad);
+  useEffect(() => {
+    if (!usesSimulatedLoad) return;
+    const timer = window.setTimeout(
+      () => setSimulatedLoading(false),
+      SIMULATED_LOAD_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [usesSimulatedLoad]);
+
+  const realLoading = usesSimulatedLoad ? simulatedLoading : Boolean(isLoading);
+
+  // Only the very FIRST fetch swaps out the whole component (including
+  // the search box itself) — tracked with state that, once flipped true,
+  // stays true, since `realLoading` goes true again on every later
+  // keystroke too (each distinct `search` string is its own
+  // query/queryKey — see useFollowersList). Later loads then only ever
+  // affect the "searching" skeleton below, not this one. Set
+  // during render (React's documented pattern for "adjust state when a
+  // value changes" — https://react.dev/learn/you-might-not-need-an-effect)
+  // rather than in an effect, so there's no extra render/commit cycle:
+  // initial value is derived straight from `realLoading` itself, so a
+  // hydrated SSR page (already not loading on first render) starts
+  // `true` and never shows this at all.
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(!realLoading);
+  if (!realLoading && !hasLoadedOnce) {
+    setHasLoadedOnce(true);
+  }
+  const showInitialSkeleton = realLoading && !hasLoadedOnce;
+
+  // Debounce the raw input and hand the settled value to the parent,
+  // which feeds it into useFollowersList's `search` param — actual
+  // filtering happens in the DB query, not here.
+  const debouncedQuery = useDebouncedValue(query, SEARCH_DEBOUNCE_MS);
+  useEffect(() => {
+    onSearchChange(debouncedQuery.trim());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedQuery]);
+
+  if (showInitialSkeleton) {
+    return <UserListSkeleton />;
+  }
+
+  // `users` already IS the result set for the current debounced query —
+  // filtering happens server-side, not here.
+  const filtered = users;
+
+  // A real fetch is in flight for the CURRENT debounced query whenever
+  // realLoading is true post-initial-load, since each new `search` value
+  // starts pending until that specific search's results land.
+  const searching = realLoading;
+  const hasQuery = query.trim().length > 0;
+
+  return (
+    <>
+      <div className="border-b border-foreground/10 px-4 py-2.5">
+        <div className="flex items-center gap-2 rounded-full bg-foreground/5 px-3 py-2">
+          <MagnifyingGlassIcon size={16} className="text-foreground/40" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search"
+            className="w-full bg-transparent text-sm outline-none placeholder:text-foreground/40"
+          />
+        </div>
+      </div>
+
+      {searching ? (
+        <UserListSkeleton />
+      ) : filtered.length === 0 ? (
+        hasQuery ? (
+          <p className="px-4 py-10 text-center text-sm text-foreground/50">
+            No results for &ldquo;{query}&rdquo;
+          </p>
+        ) : (
+          <p className="px-4 py-10 text-center text-sm text-foreground/50">
+            {emptyLabel}
+          </p>
+        )
+      ) : (
+        filtered.map((user) => <UserListRow key={user.username} user={user} />)
+      )}
+    </>
   );
 }
 </file>
@@ -11194,6 +10877,286 @@ export default function ExplorePage() {
 }
 </file>
 
+<file path="app/p/[postId]/page.tsx">
+import type { Metadata } from "next";
+import { notFound } from "next/navigation";
+import {
+  QueryClient,
+  dehydrate,
+  HydrationBoundary,
+} from "@tanstack/react-query";
+import { prisma } from "@/lib/prisma";
+import { serializePost, postInclude } from "@/lib/posts";
+import { PostCard } from "@/components/feed/PostCard";
+import { getPostThumbnail } from "@/utils/postThumbnail";
+import { getServerUserId } from "@/lib/session";
+import {
+  fetchLikedPostIdsForSSR,
+  fetchSavedBundleForSSR,
+  fetchUserProfileForSSR,
+} from "@/lib/serverQueries";
+import {
+  LIKES_QUERY_KEY,
+  SAVED_QUERY_KEY,
+  profileQueryKey,
+} from "@/lib/queryKeys";
+
+type Props = {
+  params: Promise<{ postId: string }>;
+};
+
+// Same query GET /api/posts/[postId] runs (same postInclude/serializePost
+// from lib/posts.ts), called directly here rather than as an HTTP
+// self-fetch — this is itself the server rendering the page, so there's
+// no separate server to round-trip to. Shared by generateMetadata and
+// the page body below so a not-found post behaves identically in both
+// (see the API route's own comment for why this is deliberately public:
+// unauthenticated visitors load this page directly).
+async function getPost(postId: string) {
+  const post = await prisma.post.findUnique({
+    where: { id: postId },
+    include: postInclude,
+  });
+  return post ? serializePost(post) : null;
+}
+
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { postId } = await params;
+  const post = await getPost(postId);
+  if (!post) return {};
+
+  const title = `${post.author.username} on Vanity`;
+  const image = getPostThumbnail(post);
+
+  return {
+    title,
+    description: post.caption,
+    openGraph: {
+      title,
+      description: post.caption,
+      images: image ? [{ url: image }] : undefined,
+    },
+  };
+}
+
+// Same SSR-prefetch shape as app/(home)/page.tsx, app/u/[username]/page.tsx,
+// and app/saved/page.tsx: everything PostCard needs on first paint —
+// the post itself (already fetched above via getPost), whether the
+// viewer has liked/saved it, and the author's follow state — is
+// resolved server-side and dehydrated into the HydrationBoundary below,
+// instead of PostCard's hooks (useLikedPosts/useSavedPosts/
+// useUserProfile) each firing their own client-side fetch on mount.
+// LIKES_QUERY_KEY and SAVED_QUERY_KEY are the same app-wide keys the
+// home feed prefetches into — this just warms the same cache from a
+// different entry point, so navigating from here to /saved or /home
+// afterward doesn't re-fetch either. The author's profile is fetched
+// directly (fetchUserProfileForSSR) rather than via the home page's
+// batch helper, since there's only ever one author to look up here.
+export default async function SinglePostPage({ params }: Props) {
+  const { postId } = await params;
+
+  const [post, userId] = await Promise.all([
+    getPost(postId),
+    getServerUserId(),
+  ]);
+
+  if (!post) {
+    notFound();
+  }
+
+  const queryClient = new QueryClient();
+
+  const prefetches: Promise<unknown>[] = [
+    queryClient.prefetchQuery({
+      queryKey: profileQueryKey(post.author.username),
+      queryFn: () => fetchUserProfileForSSR(post.author.username, userId),
+    }),
+  ];
+
+  if (userId) {
+    prefetches.push(
+      queryClient.prefetchQuery({
+        queryKey: LIKES_QUERY_KEY,
+        queryFn: async () => ({
+          likedPostIds: await fetchLikedPostIdsForSSR(userId),
+        }),
+      }),
+      queryClient.prefetchQuery({
+        queryKey: SAVED_QUERY_KEY,
+        queryFn: () => fetchSavedBundleForSSR(userId),
+      }),
+    );
+  }
+
+  await Promise.all(prefetches);
+
+  return (
+    <HydrationBoundary state={dehydrate(queryClient)}>
+      <div className="min-h-dvh">
+        <PostCard post={post} />
+      </div>
+    </HydrationBoundary>
+  );
+}
+</file>
+
+<file path="app/profile/followers/page.tsx">
+import {
+  QueryClient,
+  dehydrate,
+  HydrationBoundary,
+} from "@tanstack/react-query";
+import { RequireAuth } from "@/components/auth/RequireAuth";
+import { FollowersListSection } from "@/components/profile/FollowersListSection";
+import { followersQueryKey, profileQueryKey } from "@/lib/queryKeys";
+import { getServerUserId } from "@/lib/session";
+import {
+  fetchCurrentUserForSSR,
+  fetchFollowersForSSR,
+  fetchUserProfilesBatchForSSR,
+} from "@/lib/serverQueries";
+
+// Same posture as app/saved/page.tsx for a logged-out visitor: RequireAuth
+// below is what actually gates this page, so a null userId just skips
+// the prefetch entirely — FollowersListSection is still rendered (with
+// username undefined, which keeps useFollowersList's query disabled),
+// but RequireAuth swaps it for the sign-in gate before it'd ever fetch
+// anything.
+//
+// Only the unsearched page (followersQueryKey(username, "")) is
+// prefetched — see the identical comment on
+// app/u/[username]/followers/page.tsx for why that's the one cache
+// entry a fresh client mount is guaranteed to agree with. Each row's
+// own profile (isFollowing/followsMe — see UserListRow's
+// useUserProfile call) is batch-prefetched too, same as that page, so
+// the follow buttons render correctly on first paint instead of
+// flashing "Follow" before settling on "Following".
+export default async function FollowersPage() {
+  const userId = await getServerUserId();
+  const currentUser = userId ? await fetchCurrentUserForSSR(userId) : null;
+  const username = currentUser?.username;
+
+  const queryClient = new QueryClient();
+  const prefetches: Promise<unknown>[] = [];
+
+  if (username && userId) {
+    const followers = await fetchFollowersForSSR(username);
+    prefetches.push(
+      queryClient.prefetchQuery({
+        queryKey: followersQueryKey(username, ""),
+        queryFn: async () => followers,
+      }),
+    );
+
+    const followerUsernames = [...new Set(followers.map((f) => f.username))];
+    if (followerUsernames.length > 0) {
+      prefetches.push(
+        fetchUserProfilesBatchForSSR(followerUsernames, userId).then(
+          (profiles) => {
+            for (const [rowUsername, rowProfile] of profiles) {
+              queryClient.setQueryData(
+                profileQueryKey(rowUsername),
+                rowProfile,
+              );
+            }
+          },
+        ),
+      );
+    }
+  }
+
+  await Promise.all(prefetches);
+
+  return (
+    <HydrationBoundary state={dehydrate(queryClient)}>
+      <RequireAuth>
+        <div className="flex flex-col">
+          <div className="border-b border-foreground/10 px-4 py-3">
+            <p className="text-sm font-medium">Followers</p>
+          </div>
+
+          <FollowersListSection username={username} />
+        </div>
+      </RequireAuth>
+    </HydrationBoundary>
+  );
+}
+</file>
+
+<file path="app/profile/following/page.tsx">
+import {
+  QueryClient,
+  dehydrate,
+  HydrationBoundary,
+} from "@tanstack/react-query";
+import { RequireAuth } from "@/components/auth/RequireAuth";
+import { FollowingListSection } from "@/components/profile/FollowingListSection";
+import { followingQueryKey, profileQueryKey } from "@/lib/queryKeys";
+import { getServerUserId } from "@/lib/session";
+import {
+  fetchCurrentUserForSSR,
+  fetchFollowingForSSR,
+  fetchUserProfilesBatchForSSR,
+} from "@/lib/serverQueries";
+
+// Mirrors app/profile/followers/page.tsx exactly, just the reverse
+// Follow direction — see that file's own comments for the full
+// reasoning: RequireAuth is what actually gates a logged-out visitor
+// (so a null userId just skips the prefetch), only the unsearched page
+// is prefetched, and every visible row's own profile is batch-prefetched
+// too so follow buttons don't flash Follow-then-Following.
+export default async function FollowingPage() {
+  const userId = await getServerUserId();
+  const currentUser = userId ? await fetchCurrentUserForSSR(userId) : null;
+  const username = currentUser?.username;
+
+  const queryClient = new QueryClient();
+  const prefetches: Promise<unknown>[] = [];
+
+  if (username && userId) {
+    const following = await fetchFollowingForSSR(username);
+    prefetches.push(
+      queryClient.prefetchQuery({
+        queryKey: followingQueryKey(username, ""),
+        queryFn: async () => following,
+      }),
+    );
+
+    const followingUsernames = [...new Set(following.map((f) => f.username))];
+    if (followingUsernames.length > 0) {
+      prefetches.push(
+        fetchUserProfilesBatchForSSR(followingUsernames, userId).then(
+          (profiles) => {
+            for (const [rowUsername, rowProfile] of profiles) {
+              queryClient.setQueryData(
+                profileQueryKey(rowUsername),
+                rowProfile,
+              );
+            }
+          },
+        ),
+      );
+    }
+  }
+
+  await Promise.all(prefetches);
+
+  return (
+    <HydrationBoundary state={dehydrate(queryClient)}>
+      <RequireAuth>
+        <div className="flex flex-col">
+          <div className="border-b border-foreground/10 px-4 py-3">
+            <p className="text-sm font-medium">Following</p>
+          </div>
+
+          <FollowingListSection username={username} />
+        </div>
+      </RequireAuth>
+    </HydrationBoundary>
+  );
+}
+</file>
+
 <file path="app/saved/[collectionId]/page.tsx">
 import { RequireAuth } from "@/components/auth/RequireAuth";
 import { SavedCollectionContent } from "@/components/saved/SavedCollectionContent";
@@ -11930,117 +11893,6 @@ export default async function SavedPage() {
     </HydrationBoundary>
   );
 }
-</file>
-
-<file path="lib/serverQueries.ts">
-import { cache } from "react";
-import { getPostsByUsername, getHomeFeedPosts } from "./posts";
-import { getSavedBundle } from "./saved";
-import {
-  getFullCurrentUser,
-  getFollowingList,
-  getFollowersList,
-  getPublicUserProfile,
-  getPublicUserProfilesBatch,
-} from "./users";
-import { getLikedPostIds } from "./likes";
-
-// Same query GET /api/posts runs (getHomeFeedPosts, in lib/posts.ts),
-// called directly instead of over HTTP — same pattern as
-// fetchUserPostsForSSR below. Home is always behind RequireAuth, but SSR
-// for that first (logged-out) paint still runs before the client-side
-// redirect fires, so a null userId — no session yet — just gets the
-// empty feed rather than every post in the app.
-export async function fetchPostsForSSR(userId: string | null) {
-  if (!userId) return [];
-  return getHomeFeedPosts(userId);
-}
-
-// Backs the post grid on both /profile and /u/[username] — same query
-// GET /api/user/[username]/posts runs (getPostsByUsername, in
-// lib/posts.ts), called directly instead of over HTTP. Called from
-// inside PostGridSection (components/profile/PostGridSection.tsx),
-// which both pages render behind a <Suspense> boundary — this is
-// deliberately the slow, heavier query (media, carousel items,
-// products, per-post like/comment counts), kept separate from the cheap
-// profile lookup above so the header can render and stream to the
-// client without waiting on this to resolve. Takes a username rather
-// than a userId: the caller (PostGridSection) doesn't necessarily have
-// a userId on hand without its own extra lookup, and getPostsByUsername
-// resolving one internally is cheap next to the query it's paired with
-// here anyway.
-export async function fetchUserPostsForSSR(username: string) {
-  return getPostsByUsername(username);
-}
-
-// Backs /u/[username]'s header — same lookup GET /api/user/[username]
-// runs (including the viewer-relative isFollowing/followsMe, and a real
-// postCount via _count — see lib/users.ts), called directly and awaited
-// before anything is flushed to the client, so the header renders with
-// real data (including the post count) on first paint, and a
-// nonexistent username 404s server-side instead of after mount.
-export async function fetchUserProfileForSSR(
-  username: string,
-  viewerId: string | null,
-) {
-  return getPublicUserProfile(username, viewerId);
-}
-
-export async function fetchLikedPostIdsForSSR(userId: string) {
-  return getLikedPostIds(userId);
-}
-
-// Backs /saved and /saved/[collectionId] — same query GET /api/saved
-// runs (getSavedBundle, in lib/saved.ts), called directly instead of
-// over HTTP, same convention as fetchUserPostsForSSR above. Returns the
-// actual saved Post[] (queried via the SavedPost join), not just ids to
-// cross-reference against some other already-fetched list — see
-// getSavedBundle's own comment for why that distinction matters.
-export async function fetchSavedBundleForSSR(userId: string) {
-  return getSavedBundle(userId);
-}
-
-// Backs /profile/following and /u/[username]/following — same query GET
-// /api/user/[username]/following runs (getFollowingList, in
-// lib/users.ts), called directly instead of over HTTP. Only ever called
-// with `search` omitted: that's the one cache entry
-// (followingQueryKey(username, "")) a fresh client mount always agrees
-// with, so the server-rendered list hydrates without an immediate
-// refetch — any later search the visitor types runs as its own
-// client-side fetch instead (see UserListWithSearch's server-search
-// mode).
-export async function fetchFollowingForSSR(username: string, search?: string) {
-  return (await getFollowingList(username, search)) ?? [];
-}
-
-// Backs /profile/followers and /u/[username]/followers — same query GET
-// /api/user/[username]/followers runs (getFollowersList, in
-// lib/users.ts), called directly instead of over HTTP, same convention
-// as fetchFollowingForSSR above. Only ever called with `search`
-// omitted: that's the one cache entry (followersQueryKey(username, ""))
-// a fresh client mount always agrees with, so the server-rendered list
-// hydrates without an immediate refetch — any later search the visitor
-// types runs as its own client-side fetch instead (see
-// UserListWithSearch's server-search mode).
-export async function fetchFollowersForSSR(username: string, search?: string) {
-  return (await getFollowersList(username, search)) ?? [];
-}
-
-export async function fetchUserProfilesBatchForSSR(
-  usernames: string[],
-  viewerId: string,
-) {
-  return getPublicUserProfilesBatch(usernames, viewerId);
-}
-
-// Wrapped in React's cache() so calling this from both the root layout
-// (for the global currentUser hydration BottomNav etc. need on every
-// route) and a page (for its own SSR prefetches) within the same
-// request only hits the DB once — React dedupes by arguments for the
-// lifetime of a single render pass.
-export const fetchCurrentUserForSSR = cache(async (userId: string) => {
-  return getFullCurrentUser(userId);
-});
 </file>
 
 <file path="components/create/CreatePostForm.tsx">
@@ -12919,6 +12771,117 @@ export function UserListRow({ user }: { user: MockUser }) {
     </div>
   );
 }
+</file>
+
+<file path="lib/serverQueries.ts">
+import { cache } from "react";
+import { getPostsByUsername, getHomeFeedPosts } from "./posts";
+import { getSavedBundle } from "./saved";
+import {
+  getFullCurrentUser,
+  getFollowingList,
+  getFollowersList,
+  getPublicUserProfile,
+  getPublicUserProfilesBatch,
+} from "./users";
+import { getLikedPostIds } from "./likes";
+
+// Same query GET /api/posts runs (getHomeFeedPosts, in lib/posts.ts),
+// called directly instead of over HTTP — same pattern as
+// fetchUserPostsForSSR below. Home is always behind RequireAuth, but SSR
+// for that first (logged-out) paint still runs before the client-side
+// redirect fires, so a null userId — no session yet — just gets the
+// empty feed rather than every post in the app.
+export async function fetchPostsForSSR(userId: string | null) {
+  if (!userId) return [];
+  return getHomeFeedPosts(userId);
+}
+
+// Backs the post grid on both /profile and /u/[username] — same query
+// GET /api/user/[username]/posts runs (getPostsByUsername, in
+// lib/posts.ts), called directly instead of over HTTP. Called from
+// inside PostGridSection (components/profile/PostGridSection.tsx),
+// which both pages render behind a <Suspense> boundary — this is
+// deliberately the slow, heavier query (media, carousel items,
+// products, per-post like/comment counts), kept separate from the cheap
+// profile lookup above so the header can render and stream to the
+// client without waiting on this to resolve. Takes a username rather
+// than a userId: the caller (PostGridSection) doesn't necessarily have
+// a userId on hand without its own extra lookup, and getPostsByUsername
+// resolving one internally is cheap next to the query it's paired with
+// here anyway.
+export async function fetchUserPostsForSSR(username: string) {
+  return getPostsByUsername(username);
+}
+
+// Backs /u/[username]'s header — same lookup GET /api/user/[username]
+// runs (including the viewer-relative isFollowing/followsMe, and a real
+// postCount via _count — see lib/users.ts), called directly and awaited
+// before anything is flushed to the client, so the header renders with
+// real data (including the post count) on first paint, and a
+// nonexistent username 404s server-side instead of after mount.
+export async function fetchUserProfileForSSR(
+  username: string,
+  viewerId: string | null,
+) {
+  return getPublicUserProfile(username, viewerId);
+}
+
+export async function fetchLikedPostIdsForSSR(userId: string) {
+  return getLikedPostIds(userId);
+}
+
+// Backs /saved and /saved/[collectionId] — same query GET /api/saved
+// runs (getSavedBundle, in lib/saved.ts), called directly instead of
+// over HTTP, same convention as fetchUserPostsForSSR above. Returns the
+// actual saved Post[] (queried via the SavedPost join), not just ids to
+// cross-reference against some other already-fetched list — see
+// getSavedBundle's own comment for why that distinction matters.
+export async function fetchSavedBundleForSSR(userId: string) {
+  return getSavedBundle(userId);
+}
+
+// Backs /profile/following and /u/[username]/following — same query GET
+// /api/user/[username]/following runs (getFollowingList, in
+// lib/users.ts), called directly instead of over HTTP. Only ever called
+// with `search` omitted: that's the one cache entry
+// (followingQueryKey(username, "")) a fresh client mount always agrees
+// with, so the server-rendered list hydrates without an immediate
+// refetch — any later search the visitor types runs as its own
+// client-side fetch instead (see UserListWithSearch's server-search
+// mode).
+export async function fetchFollowingForSSR(username: string, search?: string) {
+  return (await getFollowingList(username, search)) ?? [];
+}
+
+// Backs /profile/followers and /u/[username]/followers — same query GET
+// /api/user/[username]/followers runs (getFollowersList, in
+// lib/users.ts), called directly instead of over HTTP, same convention
+// as fetchFollowingForSSR above. Only ever called with `search`
+// omitted: that's the one cache entry (followersQueryKey(username, ""))
+// a fresh client mount always agrees with, so the server-rendered list
+// hydrates without an immediate refetch — any later search the visitor
+// types runs as its own client-side fetch instead (see
+// UserListWithSearch's server-search mode).
+export async function fetchFollowersForSSR(username: string, search?: string) {
+  return (await getFollowersList(username, search)) ?? [];
+}
+
+export async function fetchUserProfilesBatchForSSR(
+  usernames: string[],
+  viewerId: string,
+) {
+  return getPublicUserProfilesBatch(usernames, viewerId);
+}
+
+// Wrapped in React's cache() so calling this from both the root layout
+// (for the global currentUser hydration BottomNav etc. need on every
+// route) and a page (for its own SSR prefetches) within the same
+// request only hits the DB once — React dedupes by arguments for the
+// lifetime of a single render pass.
+export const fetchCurrentUserForSSR = cache(async (userId: string) => {
+  return getFullCurrentUser(userId);
+});
 </file>
 
 <file path="utils/paths.ts">

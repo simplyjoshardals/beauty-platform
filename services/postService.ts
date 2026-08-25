@@ -58,6 +58,17 @@ export async function getUserPosts(username: string): Promise<ListPostsResult> {
   });
 }
 
+// Backs useExplorePosts — GET /api/explore, a dedicated route running
+// its own hot-ranked query (getExploreFeedPosts) rather than filtering
+// the result of listPosts() above client-side. authRequired defaults to
+// true (unlike listPosts's override): Explore has no logged-out/public
+// permalink case to protect against the way /p/[postId] does for
+// listPosts, so a 401 here should behave like any other protected
+// fetch — attempt a refresh, then redirect to sign-in.
+export async function listExplorePosts(): Promise<ListPostsResult> {
+  return apiFetch(API_ROUTES.EXPLORE.LIST, { method: "GET" });
+}
+
 export type CreatePostResult =
   | { success: true; post: Post }
   | { success: false; error: string };

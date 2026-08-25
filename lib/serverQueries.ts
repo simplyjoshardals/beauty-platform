@@ -1,5 +1,9 @@
 import { cache } from "react";
-import { getPostsByUsername, getHomeFeedPosts } from "./posts";
+import {
+  getPostsByUsername,
+  getHomeFeedPosts,
+  getExploreFeedPosts,
+} from "./posts";
 import { getSavedBundle } from "./saved";
 import {
   getFullCurrentUser,
@@ -19,6 +23,17 @@ import { getLikedPostIds } from "./likes";
 export async function fetchPostsForSSR(userId: string | null) {
   if (!userId) return [];
   return getHomeFeedPosts(userId);
+}
+
+// Backs /explore — same query GET /api/explore runs (getExploreFeedPosts,
+// in lib/posts.ts), called directly instead of over HTTP, same
+// null-userId posture as fetchPostsForSSR above: Explore is always
+// behind RequireAuth, but SSR for that first (logged-out) paint still
+// runs before the client-side redirect fires, so a null userId just
+// gets the empty grid rather than an ownerless "everyone" ranking.
+export async function fetchExplorePostsForSSR(userId: string | null) {
+  if (!userId) return [];
+  return getExploreFeedPosts(userId);
 }
 
 // Backs the post grid on both /profile and /u/[username] — same query

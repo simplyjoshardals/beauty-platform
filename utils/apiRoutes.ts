@@ -64,6 +64,14 @@ export const API_ROUTES = {
     TOGGLE_LIKE: (postId: string) => `/api/posts/${postId}/like`,
   },
 
+  // Own dedicated endpoint, deliberately not a filtered call to
+  // POSTS.LIST — a different candidate set and ranking (see
+  // getExploreFeedPosts in lib/posts.ts), not just the home feed with a
+  // client-side filter.
+  EXPLORE: {
+    LIST: "/api/explore",
+  },
+
   COMMENTS: {
     LIST: (postId: string) => `/api/posts/${postId}/comments`,
     CREATE: (postId: string) => `/api/posts/${postId}/comments`,

@@ -6,6 +6,14 @@ export const POSTS_QUERY_KEY = ["posts"] as const;
 export const LIKES_QUERY_KEY = ["likes"] as const;
 export const SAVED_QUERY_KEY = ["saved"] as const;
 
+// Its own key, deliberately not sharing POSTS_QUERY_KEY — Explore is a
+// different query (getExploreFeedPosts, ranked, excludes self + who you
+// follow) with a different cache lifetime than Home's feed, even though
+// both ultimately return Post[]. Keeping them separate means a post
+// mutation that invalidates one doesn't force-refetch the other for no
+// reason.
+export const EXPLORE_QUERY_KEY = ["explore"] as const;
+
 // Following now round-trips search to the server too (see
 // fetchFollowingForSSR / useFollowingList), same as Followers below —
 // `search` is part of the key so each distinct search string is its own
