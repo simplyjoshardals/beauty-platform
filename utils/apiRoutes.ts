@@ -70,6 +70,11 @@ export const API_ROUTES = {
   // client-side filter.
   EXPLORE: {
     LIST: "/api/explore",
+    // Backs the "search people" box on /explore. Unlike
+    // USER.FOLLOWING/FOLLOWERS, search isn't optional here — the route
+    // returns no results without one (see the route handler).
+    SEARCH_USERS: (search: string) =>
+      `/api/explore/users?search=${encodeURIComponent(search)}`,
   },
 
   COMMENTS: {

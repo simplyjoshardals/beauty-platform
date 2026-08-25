@@ -119,6 +119,68 @@ export async function getFollowersList(
   return follows.map((f) => f.follower);
 }
 
+// Backs GET /api/explore/users — Explore's "search people" box.
+// Deliberately its own query rather than a slice of getFollowingList/
+// getFollowersList: this searches every user in the app, not one
+// person's follow edges. Case-insensitive `contains` on username, same
+// as the follow-list searches, and caps results since there's no follow
+// relationship here to naturally bound the set size.
+//
+// The viewer's own row is included on purpose — searching your own
+// username should surface your own profile, same as anyone else's.
+// UserListRow already hides the follow button for isSelf rows, so
+// there's nothing else to special-case here.
+const EXPLORE_USER_SEARCH_LIMIT = 20;
+
+export type ExploreSearchUser = FollowingListUser & {
+  isFollowing: boolean;
+  followsMe: boolean;
+  isSelf: boolean;
+};
+
+export async function searchUsers(
+  query: string,
+  viewerId: string,
+): Promise<ExploreSearchUser[]> {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+
+  const users = await prisma.user.findMany({
+    where: {
+      username: { contains: trimmed, mode: "insensitive" },
+    },
+    orderBy: { username: "asc" },
+    take: EXPLORE_USER_SEARCH_LIMIT,
+    select: { id: true, username: true, avatarSrc: true, toneTag: true },
+  });
+  if (users.length === 0) return [];
+
+  // One batched pair of queries for the whole result page rather than a
+  // per-row lookup — this is what lets the row render the right
+  // Follow/Following label on the very first paint instead of flashing
+  // "Follow" for a beat while a separate per-user fetch resolves.
+  const ids = users.map((u) => u.id);
+  const [followingRows, followerRows] = await Promise.all([
+    prisma.follow.findMany({
+      where: { followerId: viewerId, followingId: { in: ids } },
+      select: { followingId: true },
+    }),
+    prisma.follow.findMany({
+      where: { followingId: viewerId, followerId: { in: ids } },
+      select: { followerId: true },
+    }),
+  ]);
+  const followingSet = new Set(followingRows.map((f) => f.followingId));
+  const followerSet = new Set(followerRows.map((f) => f.followerId));
+
+  return users.map((u) => ({
+    ...u,
+    isFollowing: followingSet.has(u.id),
+    followsMe: followerSet.has(u.id),
+    isSelf: u.id === viewerId,
+  }));
+}
+
 export type PublicUserProfile = {
   id: string;
   username: string;

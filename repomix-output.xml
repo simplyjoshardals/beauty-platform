@@ -56,6 +56,8 @@ app/
         [token]/
           route.ts
     explore/
+      users/
+        route.ts
       route.ts
     posts/
       [postId]/
@@ -241,6 +243,7 @@ hooks/
   useCurrentUser.ts
   useDebouncedValue.ts
   useExplorePosts.ts
+  useExploreUserSearch.ts
   useFollowersList.ts
   useFollowingList.ts
   useLikedPosts.ts
@@ -339,44 +342,87 @@ tsconfig.json
 <files>
 This section contains the contents of the repository's files.
 
-<file path="app/p/[postId]/loading.tsx">
-import { PostCardSkeleton } from "@/components/feed/PostCardSkeleton";
+<file path="app/api/explore/users/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { searchUsers } from "@/lib/users";
 
-// SinglePostPage (./page.tsx) is an async server component — it awaits
-// getPost() plus the likes/saved/profile prefetches before it can render
-// anything. Next ties every route segment's page.tsx to a Suspense
-// boundary keyed off that segment's loading.tsx, so without this file
-// clicking into a post just sat on the previous screen until all of
-// that resolved. This claims the boundary so the skeleton shows
-// immediately on navigation instead. Mirrors page.tsx's own
-// `min-h-dvh` wrapper around PostCard so there's no layout shift once
-// the real post swaps in.
-export default function PostLoading() {
-  return (
-    <div className="min-h-dvh">
-      <PostCardSkeleton />
-    </div>
-  );
+// GET /api/explore/users?search=... — backs the "search people" box on
+// /explore (see components/explore/ExploreFeed.tsx). Falls under
+// /api/explore in proxy.ts's isProtectedRoute list, so this is already
+// gated to signed-in requests same as GET /api/explore itself; the
+// x-user-id check below is just defense-in-depth, same posture as the
+// followers/following routes.
+//
+// Unlike GET /api/user/[username]/following|followers, `search` isn't
+// optional here — an empty/missing query returns no results rather than
+// every user in the app, since there's no follow relationship to bound
+// the set. searchUsers itself also short-circuits on an empty query for
+// the same reason. The viewer's own account is included in results (see
+// searchUsers) so searching your own username surfaces your own profile
+// too, same as anyone else's.
+export async function GET(req: NextRequest) {
+  const userId = req.headers.get("x-user-id");
+  if (!userId) {
+    return NextResponse.json(
+      { success: false, error: "Unauthorized" },
+      { status: 401 },
+    );
+  }
+
+  const search = req.nextUrl.searchParams.get("search")?.trim() ?? "";
+  const users = search ? await searchUsers(search, userId) : [];
+
+  return NextResponse.json({ success: true, users });
 }
 </file>
 
-<file path="components/profile/SearchBarSkeleton.tsx">
-import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr";
+<file path="hooks/useExploreUserSearch.ts">
+"use client";
 
-// Matches the search bar markup shared by ExploreFeed and
-// UserListWithSearch (same border-b/px-4/py-2.5 wrapper, same
-// rounded-full pill, same icon) — only the input itself is swapped for
-// a pulsing placeholder bar, since these render server-side, before any
-// client search state exists.
-export function SearchBarSkeleton() {
-  return (
-    <div className="border-b border-foreground/10 px-4 py-2.5">
-      <div className="flex animate-pulse items-center gap-2 rounded-full bg-foreground/5 px-3 py-2">
-        <MagnifyingGlassIcon size={16} className="text-foreground/40" />
-        <div className="h-3.5 w-24 rounded bg-foreground/10" />
-      </div>
-    </div>
-  );
+import { useQuery } from "@tanstack/react-query";
+import { searchUsers } from "@/services/userService";
+import { exploreUserSearchQueryKey } from "@/lib/queryKeys";
+import type { FollowingUser } from "./useFollowingList";
+
+// Same shape as the follow-list rows, plus the follow-state fields the
+// search endpoint now computes server-side (see lib/users.ts's
+// searchUsers) — so UserListRow can render the right Follow/Following
+// label immediately instead of defaulting to "Follow" until a separate
+// per-row profile fetch resolves.
+export type ExploreSearchUser = FollowingUser & {
+  isFollowing: boolean;
+  followsMe: boolean;
+  isSelf: boolean;
+};
+
+// Backs Explore's "search people" box (components/explore/ExploreFeed.tsx).
+// Mirrors useFollowersList/useFollowingList's server-search shape: the
+// caller debounces keystrokes (see ExploreFeed, same pattern as
+// UserListWithSearch) and hands the settled query straight to this hook,
+// which round-trips it to GET /api/explore/users?search=... — no
+// client-side filtering of a pre-fetched list.
+//
+// Unlike Followers/Following, an empty query is never fetched (`enabled`
+// requires a non-blank search) — there's no "everyone" list to show by
+// default here, so the query simply doesn't run until the visitor has
+// typed something.
+export function useExploreUserSearch(search: string) {
+  const trimmed = search.trim();
+
+  const query = useQuery({
+    queryKey: exploreUserSearchQueryKey(trimmed),
+    queryFn: async () => {
+      const result = await searchUsers(trimmed);
+      if (!result?.success) return [];
+      return result.users as ExploreSearchUser[];
+    },
+    enabled: trimmed.length > 0,
+  });
+
+  return {
+    users: query.data ?? [],
+    isLoading: query.isLoading,
+  };
 }
 </file>
 
@@ -1342,64 +1388,22 @@ export async function GET(req: NextRequest) {
 }
 </file>
 
-<file path="app/explore/loading.tsx">
-import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
-import { SearchBarSkeleton } from "@/components/profile/SearchBarSkeleton";
+<file path="app/p/[postId]/loading.tsx">
+import { PostCardSkeleton } from "@/components/feed/PostCardSkeleton";
 
-// Mirrors ExploreFeed's own search bar markup (see SearchBarSkeleton)
-// so there's no layout shift when the real input mounts — this shell
-// renders before ExploreFeed's client-side state exists.
-export default function ExploreLoading() {
+// SinglePostPage (./page.tsx) is an async server component — it awaits
+// getPost() plus the likes/saved/profile prefetches before it can render
+// anything. Next ties every route segment's page.tsx to a Suspense
+// boundary keyed off that segment's loading.tsx, so without this file
+// clicking into a post just sat on the previous screen until all of
+// that resolved. This claims the boundary so the skeleton shows
+// immediately on navigation instead. Mirrors page.tsx's own
+// `min-h-dvh` wrapper around PostCard so there's no layout shift once
+// the real post swaps in.
+export default function PostLoading() {
   return (
     <div className="min-h-dvh">
-      <SearchBarSkeleton />
-      <PostGridSkeleton />
-    </div>
-  );
-}
-</file>
-
-<file path="app/profile/followers/loading.tsx">
-import { UserListSkeleton } from "@/components/profile/UserListSkeleton";
-import { SearchBarSkeleton } from "@/components/profile/SearchBarSkeleton";
-
-// Route-level fallback for /profile/followers — same role as
-// app/u/[username]/followers/loading.tsx (see its own comment), just
-// for the "own followers" page instead of someone else's. Includes the
-// search bar shell (see SearchBarSkeleton) since FollowersListSection
-// renders one via UserListWithSearch — without it here, that bar would
-// pop in only once the real content mounts.
-export default function FollowersLoading() {
-  return (
-    <div className="flex flex-col">
-      <div className="border-b border-foreground/10 px-4 py-3">
-        <p className="text-sm font-medium">Followers</p>
-      </div>
-      <SearchBarSkeleton />
-      <UserListSkeleton />
-    </div>
-  );
-}
-</file>
-
-<file path="app/profile/following/loading.tsx">
-import { UserListSkeleton } from "@/components/profile/UserListSkeleton";
-import { SearchBarSkeleton } from "@/components/profile/SearchBarSkeleton";
-
-// Route-level fallback for /profile/following — same role as
-// app/profile/followers/loading.tsx (see its own comment), just for the
-// "own following" page instead of someone else's. Includes the search
-// bar shell (see SearchBarSkeleton) since FollowingListSection renders
-// one via UserListWithSearch — without it here, that bar would pop in
-// only once the real content mounts.
-export default function FollowingLoading() {
-  return (
-    <div className="flex flex-col">
-      <div className="border-b border-foreground/10 px-4 py-3">
-        <p className="text-sm font-medium">Following</p>
-      </div>
-      <SearchBarSkeleton />
-      <UserListSkeleton />
+      <PostCardSkeleton />
     </div>
   );
 }
@@ -1458,56 +1462,6 @@ export default function SavedLoading() {
         <p className="text-sm font-medium">Saved</p>
       </div>
       <PostGridSkeleton />
-    </div>
-  );
-}
-</file>
-
-<file path="app/u/[username]/followers/loading.tsx">
-import { UserListSkeleton } from "@/components/profile/UserListSkeleton";
-import { SearchBarSkeleton } from "@/components/profile/SearchBarSkeleton";
-
-// Route-level fallback for /u/[username]/followers, same role
-// app/(home)/loading.tsx, app/u/[username]/loading.tsx, and
-// app/saved/loading.tsx play for their own routes — shown during the
-// initial navigation Suspense boundary, before the Server Component in
-// page.tsx has resolved (the profile lookup, and — for a logged-in
-// viewer — the followers list + row-profile prefetch). Mirrors that
-// page's own header markup, plus the search bar shell (see
-// SearchBarSkeleton) that FollowersListSection renders via
-// UserListWithSearch, so there's no layout shift when the real content
-// swaps in.
-export default function UserFollowersLoading() {
-  return (
-    <div className="flex flex-col">
-      <div className="border-b border-foreground/10 px-4 py-3">
-        <p className="text-sm font-medium">Followers</p>
-      </div>
-      <SearchBarSkeleton />
-      <UserListSkeleton />
-    </div>
-  );
-}
-</file>
-
-<file path="app/u/[username]/following/loading.tsx">
-import { UserListSkeleton } from "@/components/profile/UserListSkeleton";
-import { SearchBarSkeleton } from "@/components/profile/SearchBarSkeleton";
-
-// Route-level fallback for /u/[username]/following — same role as
-// app/u/[username]/followers/loading.tsx (see its own comment), just
-// for the reverse Follow direction. Includes the search bar shell (see
-// SearchBarSkeleton) since FollowingListSection renders one via
-// UserListWithSearch — without it here, that bar would pop in only
-// once the real content mounts.
-export default function UserFollowingLoading() {
-  return (
-    <div className="flex flex-col">
-      <div className="border-b border-foreground/10 px-4 py-3">
-        <p className="text-sm font-medium">Following</p>
-      </div>
-      <SearchBarSkeleton />
-      <UserListSkeleton />
     </div>
   );
 }
@@ -1597,49 +1551,45 @@ export function Providers({ children }: { children: React.ReactNode }) {
 <file path="components/explore/ExploreFeed.tsx">
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { MagnifyingGlassIcon } from "@phosphor-icons/react";
 import { useExplorePosts } from "@/hooks/useExplorePosts";
-import { MOCK_USERS } from "@/data/mockUsers";
+import { useExploreUserSearch } from "@/hooks/useExploreUserSearch";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { PostGrid } from "@/components/profile/PostGrid";
 import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
 import { UserListSkeleton } from "@/components/profile/UserListSkeleton";
 import { UserListRow } from "@/components/profile/UserListRow";
 
-// Same debounced-search pattern as UserListWithSearch, kept consistent
-// rather than having search feel instant here and delayed everywhere else.
-// Search-by-people is still mock-backed for now (MOCK_USERS) — a real
-// dedicated search endpoint is a later pass, not part of this one.
-const SEARCH_DELAY_MS = 500;
+// Same debounce window UserListWithSearch uses for Followers/Following —
+// kept consistent so search doesn't feel instant here and delayed
+// everywhere else.
+const SEARCH_DEBOUNCE_MS = 300;
 
 // Rendered inside a HydrationBoundary by app/explore/page.tsx, which has
 // already prefetched EXPLORE_QUERY_KEY server-side — on a fresh load
 // useExplorePosts's isLoading is false immediately, so the grid skeleton
 // below is a real fallback for later client-side refetches, not the
 // first paint.
+//
+// Search-by-people now round-trips to GET /api/explore/users (see
+// useExploreUserSearch) instead of filtering MOCK_USERS client-side —
+// same server-search shape as UserListWithSearch: this component just
+// debounces keystrokes and hands the settled query to the hook, which
+// owns the actual query/loading state.
 export function ExploreFeed() {
   const { posts, isLoading } = useExplorePosts();
   const [query, setQuery] = useState("");
-  const [searching, setSearching] = useState(false);
-  const isFirstRender = useRef(true);
 
-  // Skipped on mount — only real query changes (typing, clearing) should
-  // trigger the search skeleton, not the initial empty query.
-  useEffect(() => {
-    if (isFirstRender.current) {
-      isFirstRender.current = false;
-      return;
-    }
-    setSearching(true);
-    const timer = window.setTimeout(() => setSearching(false), SEARCH_DELAY_MS);
-    return () => window.clearTimeout(timer);
-  }, [query]);
+  const debouncedQuery = useDebouncedValue(query, SEARCH_DEBOUNCE_MS);
+  const { users: matchedUsers, isLoading: searching } =
+    useExploreUserSearch(debouncedQuery);
 
-  const trimmed = query.trim().toLowerCase();
-  const isSearching = trimmed.length > 0;
-  const matchedUsers = isSearching
-    ? MOCK_USERS.filter((u) => u.username.toLowerCase().includes(trimmed))
-    : [];
+  const isSearching = query.trim().length > 0;
+  // Once the visitor has typed something, gate on the debounced query
+  // (not the raw one) too, so there's no flash of "no results" in the
+  // gap between a keystroke and the debounce actually settling.
+  const hasDebouncedQuery = debouncedQuery.trim().length > 0;
 
   return (
     <div className="flex flex-col">
@@ -1656,7 +1606,7 @@ export function ExploreFeed() {
       </div>
 
       {isSearching ? (
-        searching ? (
+        !hasDebouncedQuery || searching ? (
           <UserListSkeleton />
         ) : matchedUsers.length === 0 ? (
           <p className="px-4 py-10 text-center text-sm text-foreground/50">
@@ -1664,7 +1614,12 @@ export function ExploreFeed() {
           </p>
         ) : (
           matchedUsers.map((user) => (
-            <UserListRow key={user.username} user={user} />
+            <UserListRow
+              key={user.username}
+              user={user}
+              initialFollowing={user.isFollowing}
+              initialFollowsMe={user.followsMe}
+            />
           ))
         )
       ) : isLoading ? (
@@ -2615,6 +2570,26 @@ export function ProfileHeaderSkeleton() {
       </div>
 
       <div className="h-9 w-full rounded-lg bg-foreground/10" />
+    </div>
+  );
+}
+</file>
+
+<file path="components/profile/SearchBarSkeleton.tsx">
+import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr";
+
+// Matches the search bar markup shared by ExploreFeed and
+// UserListWithSearch (same border-b/px-4/py-2.5 wrapper, same
+// rounded-full pill, same icon) — only the input itself is swapped for
+// a pulsing placeholder bar, since these render server-side, before any
+// client search state exists.
+export function SearchBarSkeleton() {
+  return (
+    <div className="border-b border-foreground/10 px-4 py-2.5">
+      <div className="flex animate-pulse items-center gap-2 rounded-full bg-foreground/5 px-3 py-2">
+        <MagnifyingGlassIcon size={16} className="text-foreground/40" />
+        <div className="h-3.5 w-24 rounded bg-foreground/10" />
+      </div>
     </div>
   );
 }
@@ -5346,6 +5321,23 @@ export default async function AuthPage({ searchParams }: Props) {
 }
 </file>
 
+<file path="app/explore/loading.tsx">
+import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
+import { SearchBarSkeleton } from "@/components/profile/SearchBarSkeleton";
+
+// Mirrors ExploreFeed's own search bar markup (see SearchBarSkeleton)
+// so there's no layout shift when the real input mounts — this shell
+// renders before ExploreFeed's client-side state exists.
+export default function ExploreLoading() {
+  return (
+    <div className="min-h-dvh">
+      <SearchBarSkeleton />
+      <PostGridSkeleton />
+    </div>
+  );
+}
+</file>
+
 <file path="app/onboarding/page.tsx">
 import { OnboardingFlow } from "@/components/onboarding/OnboardingFlow";
 import { RequireAuth } from "@/components/auth/RequireAuth";
@@ -5368,6 +5360,102 @@ export default function EditProfilePage() {
     <RequireAuth>
       <EditProfileForm />
     </RequireAuth>
+  );
+}
+</file>
+
+<file path="app/profile/followers/loading.tsx">
+import { UserListSkeleton } from "@/components/profile/UserListSkeleton";
+import { SearchBarSkeleton } from "@/components/profile/SearchBarSkeleton";
+
+// Route-level fallback for /profile/followers — same role as
+// app/u/[username]/followers/loading.tsx (see its own comment), just
+// for the "own followers" page instead of someone else's. Includes the
+// search bar shell (see SearchBarSkeleton) since FollowersListSection
+// renders one via UserListWithSearch — without it here, that bar would
+// pop in only once the real content mounts.
+export default function FollowersLoading() {
+  return (
+    <div className="flex flex-col">
+      <div className="border-b border-foreground/10 px-4 py-3">
+        <p className="text-sm font-medium">Followers</p>
+      </div>
+      <SearchBarSkeleton />
+      <UserListSkeleton />
+    </div>
+  );
+}
+</file>
+
+<file path="app/profile/following/loading.tsx">
+import { UserListSkeleton } from "@/components/profile/UserListSkeleton";
+import { SearchBarSkeleton } from "@/components/profile/SearchBarSkeleton";
+
+// Route-level fallback for /profile/following — same role as
+// app/profile/followers/loading.tsx (see its own comment), just for the
+// "own following" page instead of someone else's. Includes the search
+// bar shell (see SearchBarSkeleton) since FollowingListSection renders
+// one via UserListWithSearch — without it here, that bar would pop in
+// only once the real content mounts.
+export default function FollowingLoading() {
+  return (
+    <div className="flex flex-col">
+      <div className="border-b border-foreground/10 px-4 py-3">
+        <p className="text-sm font-medium">Following</p>
+      </div>
+      <SearchBarSkeleton />
+      <UserListSkeleton />
+    </div>
+  );
+}
+</file>
+
+<file path="app/u/[username]/followers/loading.tsx">
+import { UserListSkeleton } from "@/components/profile/UserListSkeleton";
+import { SearchBarSkeleton } from "@/components/profile/SearchBarSkeleton";
+
+// Route-level fallback for /u/[username]/followers, same role
+// app/(home)/loading.tsx, app/u/[username]/loading.tsx, and
+// app/saved/loading.tsx play for their own routes — shown during the
+// initial navigation Suspense boundary, before the Server Component in
+// page.tsx has resolved (the profile lookup, and — for a logged-in
+// viewer — the followers list + row-profile prefetch). Mirrors that
+// page's own header markup, plus the search bar shell (see
+// SearchBarSkeleton) that FollowersListSection renders via
+// UserListWithSearch, so there's no layout shift when the real content
+// swaps in.
+export default function UserFollowersLoading() {
+  return (
+    <div className="flex flex-col">
+      <div className="border-b border-foreground/10 px-4 py-3">
+        <p className="text-sm font-medium">Followers</p>
+      </div>
+      <SearchBarSkeleton />
+      <UserListSkeleton />
+    </div>
+  );
+}
+</file>
+
+<file path="app/u/[username]/following/loading.tsx">
+import { UserListSkeleton } from "@/components/profile/UserListSkeleton";
+import { SearchBarSkeleton } from "@/components/profile/SearchBarSkeleton";
+
+// Route-level fallback for /u/[username]/following — same role as
+// app/u/[username]/followers/loading.tsx (see its own comment), just
+// for the reverse Follow direction. Includes the search bar shell (see
+// SearchBarSkeleton) since FollowingListSection renders one via
+// UserListWithSearch — without it here, that bar would pop in only
+// once the real content mounts.
+export default function UserFollowingLoading() {
+  return (
+    <div className="flex flex-col">
+      <div className="border-b border-foreground/10 px-4 py-3">
+        <p className="text-sm font-medium">Following</p>
+      </div>
+      <SearchBarSkeleton />
+      <UserListSkeleton />
+    </div>
   );
 }
 </file>
@@ -9291,6 +9379,68 @@ export async function getFollowersList(
   return follows.map((f) => f.follower);
 }
 
+// Backs GET /api/explore/users — Explore's "search people" box.
+// Deliberately its own query rather than a slice of getFollowingList/
+// getFollowersList: this searches every user in the app, not one
+// person's follow edges. Case-insensitive `contains` on username, same
+// as the follow-list searches, and caps results since there's no follow
+// relationship here to naturally bound the set size.
+//
+// The viewer's own row is included on purpose — searching your own
+// username should surface your own profile, same as anyone else's.
+// UserListRow already hides the follow button for isSelf rows, so
+// there's nothing else to special-case here.
+const EXPLORE_USER_SEARCH_LIMIT = 20;
+
+export type ExploreSearchUser = FollowingListUser & {
+  isFollowing: boolean;
+  followsMe: boolean;
+  isSelf: boolean;
+};
+
+export async function searchUsers(
+  query: string,
+  viewerId: string,
+): Promise<ExploreSearchUser[]> {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+
+  const users = await prisma.user.findMany({
+    where: {
+      username: { contains: trimmed, mode: "insensitive" },
+    },
+    orderBy: { username: "asc" },
+    take: EXPLORE_USER_SEARCH_LIMIT,
+    select: { id: true, username: true, avatarSrc: true, toneTag: true },
+  });
+  if (users.length === 0) return [];
+
+  // One batched pair of queries for the whole result page rather than a
+  // per-row lookup — this is what lets the row render the right
+  // Follow/Following label on the very first paint instead of flashing
+  // "Follow" for a beat while a separate per-user fetch resolves.
+  const ids = users.map((u) => u.id);
+  const [followingRows, followerRows] = await Promise.all([
+    prisma.follow.findMany({
+      where: { followerId: viewerId, followingId: { in: ids } },
+      select: { followingId: true },
+    }),
+    prisma.follow.findMany({
+      where: { followingId: viewerId, followerId: { in: ids } },
+      select: { followerId: true },
+    }),
+  ]);
+  const followingSet = new Set(followingRows.map((f) => f.followingId));
+  const followerSet = new Set(followerRows.map((f) => f.followerId));
+
+  return users.map((u) => ({
+    ...u,
+    isFollowing: followingSet.has(u.id),
+    followsMe: followerSet.has(u.id),
+    isSelf: u.id === viewerId,
+  }));
+}
+
 export type PublicUserProfile = {
   id: string;
   username: string;
@@ -10398,6 +10548,17 @@ export function followersQueryKey(
   return ["followers", username, search] as const;
 }
 
+// Backs GET /api/explore/users — Explore's "search people" box (see
+// useExploreUserSearch / ExploreFeed). Same "search is part of the key"
+// convention as followingQueryKey/followersQueryKey above, so each
+// distinct debounced query string is its own cache entry — but there's
+// no per-user SSR prefetch to line up with here (unlike Following/
+// Followers, this isn't scoped to any one profile), so it's just
+// ["exploreUserSearch", search] rather than taking a username too.
+export function exploreUserSearchQueryKey(search: string) {
+  return ["exploreUserSearch", search] as const;
+}
+
 export function profileQueryKey(username: string) {
   return ["userProfile", username] as const;
 }
@@ -10502,6 +10663,15 @@ export async function getFollowing(username: string, search?: string) {
 // Backs /profile/followers. Same contract as getFollowing above.
 export async function getFollowers(username: string, search?: string) {
   return apiFetch(API_ROUTES.USER.FOLLOWERS(username, search), {
+    method: "GET",
+  });
+}
+
+// Backs /explore's "search people" box. Same authRequired default (true)
+// as getFollowing/getFollowers above — GET /api/explore/users requires a
+// session same as the rest of /api/explore.
+export async function searchUsers(search: string) {
+  return apiFetch(API_ROUTES.EXPLORE.SEARCH_USERS(search), {
     method: "GET",
   });
 }
@@ -12091,9 +12261,9 @@ import { fetchExplorePostsForSSR } from "@/lib/serverQueries";
 // fetchExplorePostsForSSR — a dedicated hot-ranked query, not a filtered
 // slice of Home's feed), and hydrate the client straight into real data
 // instead of the old client-only page's fake loading timer over mock
-// posts. Search-by-people (still mock-backed) is untouched here — that's
-// ExploreFeed's own concern, and a later pass gets it a real endpoint
-// too.
+// posts. Search-by-people is ExploreFeed's own concern — it now hits a
+// real GET /api/explore/users endpoint (see useExploreUserSearch), not
+// SSR-prefetched here since it's empty until the visitor types.
 export default async function ExplorePage() {
   const userId = await getServerUserId();
   const posts = await fetchExplorePostsForSSR(userId);
@@ -12981,20 +13151,42 @@ import type { MockUser } from "@/data/mockUsers";
 // One useUserProfile call per row means one request per row (React
 // Query dedupes repeats of the same username, but a Followers/Following
 // list is, by construction, all distinct usernames) — fine for the list
-// sizes this app deals with, worth revisiting with a batched
-// "isFollowing" field on the list endpoints themselves if that ever
-// stops being true.
-export function UserListRow({ user }: { user: MockUser }) {
+// sizes this app deals with. Explore's search now sidesteps the
+// resulting flash-of-"Follow" by passing initialFollowing/initialFollowsMe
+// (computed batched, server-side — see lib/users.ts's searchUsers)
+// straight through; Followers/Following don't have that batched field
+// yet, so their rows still show the brief default until their own
+// useUserProfile call resolves.
+type Props = {
+  user: MockUser;
+  // Known up front from whatever list produced this row (e.g. Explore's
+  // search, which now computes isFollowing/followsMe server-side — see
+  // lib/users.ts's searchUsers) so the row can render the correct label
+  // on first paint instead of defaulting to "Follow" for a beat while
+  // this row's own useUserProfile fetch resolves. Once that fetch
+  // resolves it takes over as the source of truth either way.
+  initialFollowing?: boolean;
+  initialFollowsMe?: boolean;
+};
+
+export function UserListRow({
+  user,
+  initialFollowing,
+  initialFollowsMe,
+}: Props) {
   const { user: currentUser } = useCurrentUser();
   const { user: profile, toggleFollow } = useUserProfile(user.username);
   const { gateOpen, gateMessage, closeGate, guard } = useAuthGatedAction();
-  const following = profile?.isFollowing ?? false;
-  // Falls back to the mock pool only until this row's real profile
-  // fetch resolves — profile.followsMe (once loaded) is the real Follow-
-  // table fact; isMockFollowerOfCurrentUser was the only signal
-  // available before this migration and stays as a placeholder default.
+  const following = profile?.isFollowing ?? initialFollowing ?? false;
+  // Falls back to initialFollowsMe (when the caller has it) and then the
+  // mock pool, only until this row's real profile fetch resolves —
+  // profile.followsMe (once loaded) is the real Follow-table fact;
+  // isMockFollowerOfCurrentUser was the only signal available before
+  // this migration and stays as a last-resort placeholder default.
   const followsMe =
-    profile?.followsMe ?? isMockFollowerOfCurrentUser(user.username);
+    profile?.followsMe ??
+    initialFollowsMe ??
+    isMockFollowerOfCurrentUser(user.username);
   const isSelf = user.username === currentUser?.username;
 
   const label = following ? "Following" : followsMe ? "Follow back" : "Follow";
@@ -13810,6 +14002,11 @@ export const API_ROUTES = {
   // client-side filter.
   EXPLORE: {
     LIST: "/api/explore",
+    // Backs the "search people" box on /explore. Unlike
+    // USER.FOLLOWING/FOLLOWERS, search isn't optional here — the route
+    // returns no results without one (see the route handler).
+    SEARCH_USERS: (search: string) =>
+      `/api/explore/users?search=${encodeURIComponent(search)}`,
   },
 
   COMMENTS: {

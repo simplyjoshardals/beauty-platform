@@ -14,9 +14,9 @@ import { fetchExplorePostsForSSR } from "@/lib/serverQueries";
 // fetchExplorePostsForSSR — a dedicated hot-ranked query, not a filtered
 // slice of Home's feed), and hydrate the client straight into real data
 // instead of the old client-only page's fake loading timer over mock
-// posts. Search-by-people (still mock-backed) is untouched here — that's
-// ExploreFeed's own concern, and a later pass gets it a real endpoint
-// too.
+// posts. Search-by-people is ExploreFeed's own concern — it now hits a
+// real GET /api/explore/users endpoint (see useExploreUserSearch), not
+// SSR-prefetched here since it's empty until the visitor types.
 export default async function ExplorePage() {
   const userId = await getServerUserId();
   const posts = await fetchExplorePostsForSSR(userId);

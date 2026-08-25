@@ -82,3 +82,12 @@ export async function getFollowers(username: string, search?: string) {
     method: "GET",
   });
 }
+
+// Backs /explore's "search people" box. Same authRequired default (true)
+// as getFollowing/getFollowers above — GET /api/explore/users requires a
+// session same as the rest of /api/explore.
+export async function searchUsers(search: string) {
+  return apiFetch(API_ROUTES.EXPLORE.SEARCH_USERS(search), {
+    method: "GET",
+  });
+}

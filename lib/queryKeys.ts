@@ -41,6 +41,17 @@ export function followersQueryKey(
   return ["followers", username, search] as const;
 }
 
+// Backs GET /api/explore/users — Explore's "search people" box (see
+// useExploreUserSearch / ExploreFeed). Same "search is part of the key"
+// convention as followingQueryKey/followersQueryKey above, so each
+// distinct debounced query string is its own cache entry — but there's
+// no per-user SSR prefetch to line up with here (unlike Following/
+// Followers, this isn't scoped to any one profile), so it's just
+// ["exploreUserSearch", search] rather than taking a username too.
+export function exploreUserSearchQueryKey(search: string) {
+  return ["exploreUserSearch", search] as const;
+}
+
 export function profileQueryKey(username: string) {
   return ["userProfile", username] as const;
 }

@@ -1,48 +1,44 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { MagnifyingGlassIcon } from "@phosphor-icons/react";
 import { useExplorePosts } from "@/hooks/useExplorePosts";
-import { MOCK_USERS } from "@/data/mockUsers";
+import { useExploreUserSearch } from "@/hooks/useExploreUserSearch";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { PostGrid } from "@/components/profile/PostGrid";
 import { PostGridSkeleton } from "@/components/profile/PostGridSkeleton";
 import { UserListSkeleton } from "@/components/profile/UserListSkeleton";
 import { UserListRow } from "@/components/profile/UserListRow";
 
-// Same debounced-search pattern as UserListWithSearch, kept consistent
-// rather than having search feel instant here and delayed everywhere else.
-// Search-by-people is still mock-backed for now (MOCK_USERS) — a real
-// dedicated search endpoint is a later pass, not part of this one.
-const SEARCH_DELAY_MS = 500;
+// Same debounce window UserListWithSearch uses for Followers/Following —
+// kept consistent so search doesn't feel instant here and delayed
+// everywhere else.
+const SEARCH_DEBOUNCE_MS = 300;
 
 // Rendered inside a HydrationBoundary by app/explore/page.tsx, which has
 // already prefetched EXPLORE_QUERY_KEY server-side — on a fresh load
 // useExplorePosts's isLoading is false immediately, so the grid skeleton
 // below is a real fallback for later client-side refetches, not the
 // first paint.
+//
+// Search-by-people now round-trips to GET /api/explore/users (see
+// useExploreUserSearch) instead of filtering MOCK_USERS client-side —
+// same server-search shape as UserListWithSearch: this component just
+// debounces keystrokes and hands the settled query to the hook, which
+// owns the actual query/loading state.
 export function ExploreFeed() {
   const { posts, isLoading } = useExplorePosts();
   const [query, setQuery] = useState("");
-  const [searching, setSearching] = useState(false);
-  const isFirstRender = useRef(true);
 
-  // Skipped on mount — only real query changes (typing, clearing) should
-  // trigger the search skeleton, not the initial empty query.
-  useEffect(() => {
-    if (isFirstRender.current) {
-      isFirstRender.current = false;
-      return;
-    }
-    setSearching(true);
-    const timer = window.setTimeout(() => setSearching(false), SEARCH_DELAY_MS);
-    return () => window.clearTimeout(timer);
-  }, [query]);
+  const debouncedQuery = useDebouncedValue(query, SEARCH_DEBOUNCE_MS);
+  const { users: matchedUsers, isLoading: searching } =
+    useExploreUserSearch(debouncedQuery);
 
-  const trimmed = query.trim().toLowerCase();
-  const isSearching = trimmed.length > 0;
-  const matchedUsers = isSearching
-    ? MOCK_USERS.filter((u) => u.username.toLowerCase().includes(trimmed))
-    : [];
+  const isSearching = query.trim().length > 0;
+  // Once the visitor has typed something, gate on the debounced query
+  // (not the raw one) too, so there's no flash of "no results" in the
+  // gap between a keystroke and the debounce actually settling.
+  const hasDebouncedQuery = debouncedQuery.trim().length > 0;
 
   return (
     <div className="flex flex-col">
@@ -59,7 +55,7 @@ export function ExploreFeed() {
       </div>
 
       {isSearching ? (
-        searching ? (
+        !hasDebouncedQuery || searching ? (
           <UserListSkeleton />
         ) : matchedUsers.length === 0 ? (
           <p className="px-4 py-10 text-center text-sm text-foreground/50">
@@ -67,7 +63,12 @@ export function ExploreFeed() {
           </p>
         ) : (
           matchedUsers.map((user) => (
-            <UserListRow key={user.username} user={user} />
+            <UserListRow
+              key={user.username}
+              user={user}
+              initialFollowing={user.isFollowing}
+              initialFollowsMe={user.followsMe}
+            />
           ))
         )
       ) : isLoading ? (
