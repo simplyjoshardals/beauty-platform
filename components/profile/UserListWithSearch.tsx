@@ -1,41 +1,50 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { MagnifyingGlassIcon } from "@phosphor-icons/react";
 import { UserListRow } from "./UserListRow";
 import { UserListSkeleton } from "./UserListSkeleton";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import type { MockUser } from "@/data/mockUsers";
 
 type Props = {
   users: MockUser[];
   emptyLabel: string; // shown when the list itself has nobody in it at all
-  // Real backend loading state (from useFollowingList) — when supplied,
-  // this replaces the simulated timer below entirely instead of racing
-  // it. Omitted (undefined) on the still-mock Followers pages, which
-  // keep the original simulated behavior unchanged.
+  // Real backend loading state (from useFollowingList/useFollowersList) —
+  // when supplied, this replaces the simulated timer below entirely
+  // instead of racing it. Omitted (undefined) on any page that hasn't
+  // been wired up to a real backend yet.
   isLoading?: boolean;
+  // Search is server-side: `users` is assumed to already BE the server's
+  // result set for the current debounced query (see useFollowersList's
+  // `search` param / GET .../followers?search=). This component doesn't
+  // filter `users` itself — it just debounces keystrokes and hands the
+  // settled value to the caller.
+  onSearchChange: (query: string) => void;
 };
 
-// Simulated so the skeleton is actually visible on the still-mock
-// Followers pages, which don't pass isLoading. Runs once per mount,
-// which is fine here since Followers/Following are separate pages that
-// fully unmount on navigation, unlike CommentSheet which stays mounted.
+// Simulated so the skeleton is actually visible on any still-mock list.
+// Runs once per mount, which is fine here since these are separate pages
+// that fully unmount on navigation, unlike CommentSheet which stays
+// mounted.
 const SIMULATED_LOAD_MS = 700;
 
-// Debounce + simulated per-search delay — stands in for a real search API
-// round trip. Resets on every keystroke so rapid typing just keeps the
-// skeleton up until typing actually pauses, instead of flashing per letter.
-const SEARCH_DELAY_MS = 500;
+// Real debounce — how long typing has to pause before a new ?search=
+// request actually fires.
+const SEARCH_DEBOUNCE_MS = 300;
 
-export function UserListWithSearch({ users, emptyLabel, isLoading }: Props) {
+export function UserListWithSearch({
+  users,
+  emptyLabel,
+  isLoading,
+  onSearchChange,
+}: Props) {
   const [query, setQuery] = useState("");
+
   // isLoading === undefined means "no real loading state was supplied" —
   // fall back to the original simulated timer in that case only.
   const usesSimulatedLoad = isLoading === undefined;
   const [simulatedLoading, setSimulatedLoading] = useState(usesSimulatedLoad);
-  const [searching, setSearching] = useState(false);
-  const isFirstRender = useRef(true);
-
   useEffect(() => {
     if (!usesSimulatedLoad) return;
     const timer = window.setTimeout(
@@ -45,28 +54,48 @@ export function UserListWithSearch({ users, emptyLabel, isLoading }: Props) {
     return () => window.clearTimeout(timer);
   }, [usesSimulatedLoad]);
 
-  const loading = usesSimulatedLoad ? simulatedLoading : isLoading;
+  const realLoading = usesSimulatedLoad ? simulatedLoading : Boolean(isLoading);
 
-  // Skipped on mount — only real query changes (typing, clearing) should
-  // trigger the search skeleton, not the initial empty query.
+  // Only the very FIRST fetch swaps out the whole component (including
+  // the search box itself) — tracked with state that, once flipped true,
+  // stays true, since `realLoading` goes true again on every later
+  // keystroke too (each distinct `search` string is its own
+  // query/queryKey — see useFollowersList). Later loads then only ever
+  // affect the "searching" skeleton below, not this one. Set
+  // during render (React's documented pattern for "adjust state when a
+  // value changes" — https://react.dev/learn/you-might-not-need-an-effect)
+  // rather than in an effect, so there's no extra render/commit cycle:
+  // initial value is derived straight from `realLoading` itself, so a
+  // hydrated SSR page (already not loading on first render) starts
+  // `true` and never shows this at all.
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(!realLoading);
+  if (!realLoading && !hasLoadedOnce) {
+    setHasLoadedOnce(true);
+  }
+  const showInitialSkeleton = realLoading && !hasLoadedOnce;
+
+  // Debounce the raw input and hand the settled value to the parent,
+  // which feeds it into useFollowersList's `search` param — actual
+  // filtering happens in the DB query, not here.
+  const debouncedQuery = useDebouncedValue(query, SEARCH_DEBOUNCE_MS);
   useEffect(() => {
-    if (isFirstRender.current) {
-      isFirstRender.current = false;
-      return;
-    }
-    setSearching(true);
-    const timer = window.setTimeout(() => setSearching(false), SEARCH_DELAY_MS);
-    return () => window.clearTimeout(timer);
-  }, [query]);
+    onSearchChange(debouncedQuery.trim());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedQuery]);
 
-  if (loading) {
+  if (showInitialSkeleton) {
     return <UserListSkeleton />;
   }
 
-  const trimmed = query.trim().toLowerCase();
-  const filtered = trimmed
-    ? users.filter((u) => u.username.toLowerCase().includes(trimmed))
-    : users;
+  // `users` already IS the result set for the current debounced query —
+  // filtering happens server-side, not here.
+  const filtered = users;
+
+  // A real fetch is in flight for the CURRENT debounced query whenever
+  // realLoading is true post-initial-load, since each new `search` value
+  // starts pending until that specific search's results land.
+  const searching = realLoading;
+  const hasQuery = query.trim().length > 0;
 
   return (
     <>
@@ -84,14 +113,16 @@ export function UserListWithSearch({ users, emptyLabel, isLoading }: Props) {
 
       {searching ? (
         <UserListSkeleton />
-      ) : users.length === 0 ? (
-        <p className="px-4 py-10 text-center text-sm text-foreground/50">
-          {emptyLabel}
-        </p>
       ) : filtered.length === 0 ? (
-        <p className="px-4 py-10 text-center text-sm text-foreground/50">
-          No results for &ldquo;{query}&rdquo;
-        </p>
+        hasQuery ? (
+          <p className="px-4 py-10 text-center text-sm text-foreground/50">
+            No results for &ldquo;{query}&rdquo;
+          </p>
+        ) : (
+          <p className="px-4 py-10 text-center text-sm text-foreground/50">
+            {emptyLabel}
+          </p>
+        )
       ) : (
         filtered.map((user) => <UserListRow key={user.username} user={user} />)
       )}

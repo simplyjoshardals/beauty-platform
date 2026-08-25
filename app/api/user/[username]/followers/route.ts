@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { getFollowersList } from "@/lib/users";
 
 type Params = { params: Promise<{ username: string }> };
 
 // Mirrors app/api/user/[username]/following/route.ts exactly, just the
-// reverse Follow direction (followingId = target, not followerId) — same
-// auth posture (not part of proxy.ts's public-GET carve-out, plus the
-// explicit x-user-id check below as defense-in-depth), same trimmed
-// field selection, same optional ?search=.
+// reverse Follow direction — same auth posture (not part of proxy.ts's
+// public-GET carve-out, plus the explicit x-user-id check below as
+// defense-in-depth), same optional ?search=, and now the same
+// lib/users.ts-backed query (getFollowersList) instead of an inline
+// prisma call duplicating it. That single implementation is what the
+// SSR prefetch for /profile/followers and /u/[username]/followers calls
+// directly too (see lib/serverQueries.ts's fetchFollowersForSSR).
 export async function GET(req: NextRequest, { params }: Params) {
   const viewerId = req.headers.get("x-user-id");
   if (!viewerId) {
@@ -18,47 +21,15 @@ export async function GET(req: NextRequest, { params }: Params) {
   }
 
   const { username } = await params;
+  const search = req.nextUrl.searchParams.get("search")?.trim();
 
-  const target = await prisma.user.findUnique({
-    where: { username },
-    select: { id: true },
-  });
-
-  if (!target) {
+  const users = await getFollowersList(username, search);
+  if (users === null) {
     return NextResponse.json(
       { success: false, error: "User not found." },
       { status: 404 },
     );
   }
 
-  const search = req.nextUrl.searchParams.get("search")?.trim();
-
-  const follows = await prisma.follow.findMany({
-    where: {
-      followingId: target.id,
-      ...(search
-        ? {
-            follower: {
-              username: { contains: search, mode: "insensitive" },
-            },
-          }
-        : {}),
-    },
-    orderBy: { createdAt: "desc" },
-    select: {
-      follower: {
-        select: {
-          id: true,
-          username: true,
-          avatarSrc: true,
-          toneTag: true,
-        },
-      },
-    },
-  });
-
-  return NextResponse.json({
-    success: true,
-    users: follows.map((f) => f.follower),
-  });
+  return NextResponse.json({ success: true, users });
 }

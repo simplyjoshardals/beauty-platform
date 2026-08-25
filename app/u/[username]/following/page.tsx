@@ -1,56 +1,87 @@
-"use client";
-
-import { use } from "react";
 import { notFound } from "next/navigation";
-import { useUserProfile } from "@/hooks/useUserProfile";
-import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { useFollowingList } from "@/hooks/useFollowingList";
-import { UserListWithSearch } from "@/components/profile/UserListWithSearch";
+import {
+  QueryClient,
+  dehydrate,
+  HydrationBoundary,
+} from "@tanstack/react-query";
 import { RequireAuth } from "@/components/auth/RequireAuth";
+import { FollowingListSection } from "@/components/profile/FollowingListSection";
+import { followingQueryKey, profileQueryKey } from "@/lib/queryKeys";
+import { getServerUserId } from "@/lib/session";
+import {
+  fetchUserProfileForSSR,
+  fetchFollowingForSSR,
+  fetchUserProfilesBatchForSSR,
+} from "@/lib/serverQueries";
 
 type Props = {
   params: Promise<{ username: string }>;
 };
 
-export default function UserFollowingPage({ params }: Props) {
-  const { username } = use(params);
-  const { isAuthenticated } = useCurrentUser();
+// Mirrors app/u/[username]/followers/page.tsx exactly, just the reverse
+// Follow direction — see that file's own comments for the full
+// reasoning behind each piece:
+//  - the profile lookup 404s server-side regardless of viewer auth,
+//  - the list itself only prefetches when there's a viewer session
+//    (RequireAuth is what actually gates it),
+//  - only the unsearched page (followingQueryKey(username, "")) is
+//    prefetched — the one cache entry FollowingListSection's fresh
+//    mount is guaranteed to agree with,
+//  - every visible row's own profile (isFollowing/followsMe — see
+//    UserListRow's useUserProfile call) is batch-prefetched too, so the
+//    follow buttons are correct on first paint instead of flashing
+//    Follow-then-Following.
+export default async function UserFollowingPage({ params }: Props) {
+  const { username } = await params;
+  const viewerId = await getServerUserId();
 
-  // GET /api/user/[username] is public (same as the /u/[username]
-  // profile page itself) — used here only to 404 on a nonexistent
-  // username, same check the mock version had.
-  const { user, isLoading: profileLoading } = useUserProfile(username);
-
-  // Held off until the viewer is confirmed authenticated — the backend
-  // requires a session regardless (see the route handler), but there's
-  // no reason to fire the request, and risk apiFetch's 401 → hard
-  // redirect, for a visitor who isn't signed in.
-  const { users: following, isLoading: followingLoading } = useFollowingList(
-    isAuthenticated ? username : undefined,
-  );
-
-  if (!profileLoading && !user) {
+  const profile = await fetchUserProfileForSSR(username, viewerId);
+  if (!profile) {
     notFound();
   }
 
-  // RequireAuth gates the Following list itself, not the profile it
-  // belongs to — the actual /u/[username] profile stays public; only
-  // this page (and its API route) require a session. Non-dismissible,
-  // same as every other RequireAuth usage: there's nothing to browse
-  // read-only behind it here, since this page is only the list.
-  return (
-    <RequireAuth>
-      <div className="flex flex-col">
-        <div className="border-b border-foreground/10 px-4 py-3">
-          <p className="text-sm font-medium">Following</p>
-        </div>
+  const queryClient = new QueryClient();
+  const prefetches: Promise<unknown>[] = [];
 
-        <UserListWithSearch
-          users={following}
-          emptyLabel="Not following anyone yet."
-          isLoading={followingLoading}
-        />
-      </div>
-    </RequireAuth>
+  if (viewerId) {
+    const following = await fetchFollowingForSSR(username);
+    prefetches.push(
+      queryClient.prefetchQuery({
+        queryKey: followingQueryKey(username, ""),
+        queryFn: async () => following,
+      }),
+    );
+
+    const followingUsernames = [...new Set(following.map((f) => f.username))];
+    if (followingUsernames.length > 0) {
+      prefetches.push(
+        fetchUserProfilesBatchForSSR(followingUsernames, viewerId).then(
+          (profiles) => {
+            for (const [rowUsername, rowProfile] of profiles) {
+              queryClient.setQueryData(
+                profileQueryKey(rowUsername),
+                rowProfile,
+              );
+            }
+          },
+        ),
+      );
+    }
+  }
+
+  await Promise.all(prefetches);
+
+  return (
+    <HydrationBoundary state={dehydrate(queryClient)}>
+      <RequireAuth>
+        <div className="flex flex-col">
+          <div className="border-b border-foreground/10 px-4 py-3">
+            <p className="text-sm font-medium">Following</p>
+          </div>
+
+          <FollowingListSection username={username} />
+        </div>
+      </RequireAuth>
+    </HydrationBoundary>
   );
 }

@@ -16,12 +16,9 @@ type Params = { params: Promise<{ username: string }> };
 // self-follow check upstream), username, avatarSrc, toneTag — nothing
 // else off the target rows leaks through.
 //
-// Accepts an optional ?search= for a case-insensitive username filter.
-// Both Following pages currently filter client-side against the full
-// list (see UserListWithSearch), so nothing calls this with a search
-// param yet — it's wired up now so switching either page to server-side
-// search later is a query-param change in useFollowingList, not a new
-// endpoint.
+// Accepts an optional ?search= for a case-insensitive username filter —
+// used by both Following pages' server-side search (see
+// hooks/useFollowingList.ts), same as its followers/route.ts sibling.
 export async function GET(req: NextRequest, { params }: Params) {
   const viewerId = req.headers.get("x-user-id");
   if (!viewerId) {

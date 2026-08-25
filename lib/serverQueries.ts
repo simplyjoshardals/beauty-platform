@@ -4,6 +4,7 @@ import { getSavedBundle } from "./saved";
 import {
   getFullCurrentUser,
   getFollowingList,
+  getFollowersList,
   getPublicUserProfile,
   getPublicUserProfilesBatch,
 } from "./users";
@@ -64,8 +65,30 @@ export async function fetchSavedBundleForSSR(userId: string) {
   return getSavedBundle(userId);
 }
 
-export async function fetchFollowingForSSR(username: string) {
-  return (await getFollowingList(username)) ?? [];
+// Backs /profile/following and /u/[username]/following — same query GET
+// /api/user/[username]/following runs (getFollowingList, in
+// lib/users.ts), called directly instead of over HTTP. Only ever called
+// with `search` omitted: that's the one cache entry
+// (followingQueryKey(username, "")) a fresh client mount always agrees
+// with, so the server-rendered list hydrates without an immediate
+// refetch — any later search the visitor types runs as its own
+// client-side fetch instead (see UserListWithSearch's server-search
+// mode).
+export async function fetchFollowingForSSR(username: string, search?: string) {
+  return (await getFollowingList(username, search)) ?? [];
+}
+
+// Backs /profile/followers and /u/[username]/followers — same query GET
+// /api/user/[username]/followers runs (getFollowersList, in
+// lib/users.ts), called directly instead of over HTTP, same convention
+// as fetchFollowingForSSR above. Only ever called with `search`
+// omitted: that's the one cache entry (followersQueryKey(username, ""))
+// a fresh client mount always agrees with, so the server-rendered list
+// hydrates without an immediate refetch — any later search the visitor
+// types runs as its own client-side fetch instead (see
+// UserListWithSearch's server-search mode).
+export async function fetchFollowersForSSR(username: string, search?: string) {
+  return (await getFollowersList(username, search)) ?? [];
 }
 
 export async function fetchUserProfilesBatchForSSR(

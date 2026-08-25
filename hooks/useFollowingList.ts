@@ -12,10 +12,7 @@ import { followingQueryKey } from "@/lib/queryKeys";
 export type FollowingUser = MockUser & { id: string };
 
 // Backs both Following pages — /profile/following (own) and
-// /u/[username]/following (someone else's). A single fetch of the full
-// list; search stays client-side in UserListWithSearch for now (see its
-// own comment), even though the underlying API already accepts
-// ?search= for when that needs to move server-side.
+// /u/[username]/following (someone else's).
 //
 // Pass undefined to hold the query off entirely — used by
 // /u/[username]/following so the request isn't fired until the viewer's
@@ -28,11 +25,22 @@ export type FollowingUser = MockUser & { id: string };
 // list without this hook needing to know anything about who's doing it.
 export { followingQueryKey };
 
-export function useFollowingList(username: string | undefined) {
+// Search round-trips to the server — GET .../following?search=... (see
+// lib/users.ts's getFollowingList) — instead of filtering an
+// already-fetched full list client-side. `search` is part of the query
+// key, so each distinct search string is its own cache entry;
+// UserListWithSearch's server-search mode debounces keystrokes before
+// this hook ever re-fires, and the "" entry (no search) is what the SSR
+// prefetch on both Following pages warms ahead of the first client
+// render.
+export function useFollowingList(
+  username: string | undefined,
+  search: string = "",
+) {
   const query = useQuery({
-    queryKey: followingQueryKey(username),
+    queryKey: followingQueryKey(username, search),
     queryFn: async () => {
-      const result = await getFollowing(username as string);
+      const result = await getFollowing(username as string, search || undefined);
       if (!result?.success) return [];
       return result.users as FollowingUser[];
     },

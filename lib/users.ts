@@ -85,6 +85,40 @@ export async function getFollowingList(
   return follows.map((f) => f.following);
 }
 
+// Mirrors getFollowingList exactly, just the reverse Follow direction
+// (followingId = target, not followerId) — same optional case-insensitive
+// ?search=, same null-on-missing-user contract. Backs both
+// GET /api/user/[username]/followers (see that route) and the SSR
+// prefetch for /profile/followers and /u/[username]/followers (see
+// lib/serverQueries.ts's fetchFollowersForSSR) — one query, not two
+// separate implementations of the same lookup.
+export async function getFollowersList(
+  username: string,
+  search?: string,
+): Promise<FollowingListUser[] | null> {
+  const target = await prisma.user.findUnique({
+    where: { username },
+    select: { id: true },
+  });
+  if (!target) return null;
+
+  const follows = await prisma.follow.findMany({
+    where: {
+      followingId: target.id,
+      ...(search
+        ? { follower: { username: { contains: search, mode: "insensitive" } } }
+        : {}),
+    },
+    orderBy: { createdAt: "desc" },
+    select: {
+      follower: {
+        select: { id: true, username: true, avatarSrc: true, toneTag: true },
+      },
+    },
+  });
+  return follows.map((f) => f.follower);
+}
+
 export type PublicUserProfile = {
   id: string;
   username: string;
