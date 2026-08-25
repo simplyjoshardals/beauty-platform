@@ -27,14 +27,22 @@ const MAX_CAROUSEL_IMAGES = 10;
 export function CreatePostForm() {
   const router = useRouter();
   const { user } = useCurrentUser();
-  const { mutateAsync: uploadMedia, isPending: isUploading } = useUploadMedia();
-  const { mutateAsync: createPost, isPending: isSubmitting } = useCreatePost();
+  const { mutateAsync: uploadMedia } = useUploadMedia();
+  const { mutateAsync: createPost } = useCreatePost();
 
-  // Single source of truth for "is anything in flight right now" — every
-  // interactive control in the form reads this, not isSubmitting or
-  // isUploading individually, so nothing can slip through and get
-  // tampered with mid-upload or mid-create.
-  const isBusy = isSubmitting || isUploading;
+  // Single source of truth for "is anything in flight right now", owned
+  // directly instead of derived from the upload/create mutations'
+  // isPending flags. Those two flags belong to separate hooks, so there
+  // was a real gap between the upload phase finishing and the create
+  // phase starting (both false for a beat) — and another gap after
+  // createPost resolves but before router.push's navigation actually
+  // lands — where the form would flash back to fully interactive
+  // mid-submit. isPosting is set true once, at the top of handleSubmit,
+  // and only ever reset to false in the catch branch: on success it
+  // deliberately stays true all the way through the redirect, since
+  // there's nothing to reset it FOR — the component is about to unmount.
+  const [isPosting, setIsPosting] = useState(false);
+  const isBusy = isPosting;
 
   const [postType, setPostType] = useState<PostType>("photo");
   const [images, setImages] = useState<string[]>([]);
@@ -165,6 +173,7 @@ export function CreatePostForm() {
   async function handleSubmit() {
     if (!media || !user || isBusy) return;
     setSubmitError(null);
+    setIsPosting(true);
 
     try {
       const productInputs = products.map((p) => ({ label: p.label }));
@@ -204,7 +213,7 @@ export function CreatePostForm() {
           })),
         };
       } else if (postType === "video") {
-        if (!videoFile) return;
+        if (!videoFile) throw new Error("Add a video first.");
         const result = await uploadMedia({
           file: videoFile,
           context: "post-video",
@@ -217,7 +226,9 @@ export function CreatePostForm() {
           videoSrc: result.url,
         };
       } else {
-        if (!beforeFile || !afterFile) return;
+        if (!beforeFile || !afterFile) {
+          throw new Error("Add both a before and after photo.");
+        }
         const [beforeResult, afterResult] = await Promise.all([
           uploadMedia({ file: beforeFile, context: "post-image" }),
           uploadMedia({ file: afterFile, context: "post-image" }),
@@ -243,10 +254,14 @@ export function CreatePostForm() {
       }
 
       router.push(PATHS.HOME);
+      // No setIsPosting(false) here on purpose — see the comment on
+      // isPosting above. Resetting it here is exactly what let the form
+      // flash back to interactive before the redirect actually landed.
     } catch (err) {
       setSubmitError(
         err instanceof Error ? err.message : "Couldn't share your post.",
       );
+      setIsPosting(false);
     }
   }
 

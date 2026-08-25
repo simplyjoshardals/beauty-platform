@@ -18,16 +18,25 @@ import type { ProductTag } from "@/types/post";
 export function EditProfileForm() {
   const router = useRouter();
   const { user } = useCurrentUser();
-  const { mutateAsync: saveProfile, isPending: saving } = useUpdateProfile();
-  const { mutateAsync: uploadAvatar, isPending: avatarUploading } =
-    useUploadMedia();
-  const { mutateAsync: logOut, isPending: loggingOut } = useLogout();
+  const { mutateAsync: saveProfile } = useUpdateProfile();
+  const { mutateAsync: uploadAvatar } = useUploadMedia();
+  const { mutateAsync: logOut } = useLogout();
 
-  // Single source of truth every field reads, same convention as
-  // CreatePostForm — nothing should be tamperable while a save is in
-  // flight, whether that's the avatar upload leg, the profile PATCH, or
-  // now logging out.
-  const isBusy = saving || avatarUploading || loggingOut;
+  // Own flags instead of deriving isBusy from the mutations' isPending —
+  // same convention as CreatePostForm's isPosting, and for the same
+  // reason. saving/avatarUploading/loggingOut go false the instant their
+  // mutateAsync settles, but a save here is really two legs back to back
+  // (upload, then the profile PATCH) plus a router.back()/refresh() or a
+  // window.location redirect after that — every one of those handoffs is
+  // a beat where isPending would already read false and the form would
+  // flash back to interactive mid-flow. isSaving and isLoggingOut are
+  // each set true once, at the top of their handler, and only ever reset
+  // to false in the failure branch: on success they deliberately stay
+  // true through the navigation, since there's nothing to reset them FOR
+  // — the component is about to unmount or the page is about to redirect.
+  const [isSaving, setIsSaving] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const isBusy = isSaving || isLoggingOut;
 
   const [username, setUsername] = useState(user?.username ?? "");
   const [usernameError, setUsernameError] = useState<string | null>(null);
@@ -84,7 +93,7 @@ export function EditProfileForm() {
   }
 
   async function handleSave() {
-    if (!user) return;
+    if (!user || isBusy) return;
 
     const error = validateUsername(username);
     if (error) {
@@ -100,6 +109,7 @@ export function EditProfileForm() {
     }
 
     setSubmitError(null);
+    setIsSaving(true);
 
     // Only the LAST photo picked ever actually gets uploaded, and only
     // once, right here. An avatar left untouched (still the real,
@@ -116,6 +126,7 @@ export function EditProfileForm() {
         realAvatarSrc = result.url;
       } else {
         setAvatarError(result.error);
+        setIsSaving(false);
         return;
       }
     }
@@ -136,6 +147,7 @@ export function EditProfileForm() {
           result?.error || "Something went wrong. Please try again.",
         );
       }
+      setIsSaving(false);
       return;
     }
 
@@ -154,6 +166,9 @@ export function EditProfileForm() {
       router.refresh();
     }
     router.back();
+    // No setIsSaving(false) here on purpose — see the comment on isSaving
+    // above. Resetting it here is exactly what would let the form flash
+    // back to interactive before router.back() actually lands.
   }
 
   // Only warn if something actually changed from what's already saved —
@@ -179,16 +194,23 @@ export function EditProfileForm() {
   }
 
   async function handleLogoutConfirm() {
+    if (isBusy) return;
     setLogoutError(null);
+    setIsLoggingOut(true);
     const result = await logOut();
     if (!result?.success) {
       setLogoutError(
         result?.error || "Something went wrong. Please try again.",
       );
       setConfirmingLogout(false);
+      setIsLoggingOut(false);
       return;
     }
     window.location.href = PATHS.AUTH;
+    // No setIsLoggingOut(false) here on purpose — same reasoning as
+    // isSaving above. This is a full-page redirect, but the component can
+    // still be mounted for a beat before it lands, and there's nothing to
+    // reset the flag FOR once we're on our way out.
   }
 
   const saveDisabled =
@@ -316,7 +338,7 @@ export function EditProfileForm() {
             disabled={isBusy}
             className="w-full text-center text-sm font-medium text-red-500 disabled:opacity-50"
           >
-            {loggingOut ? "Logging out…" : "Log out"}
+            {isLoggingOut ? "Logging out…" : "Log out"}
           </button>
           {logoutError && (
             <p className="mt-2 text-center text-xs text-red-500">
@@ -344,7 +366,7 @@ export function EditProfileForm() {
         open={confirmingLogout}
         title="Log out?"
         description="You'll need to sign in again to continue."
-        confirmLabel={loggingOut ? "Logging out…" : "Log out"}
+        confirmLabel={isLoggingOut ? "Logging out…" : "Log out"}
         destructive
         onConfirm={handleLogoutConfirm}
         onCancel={() => setConfirmingLogout(false)}
