@@ -126,6 +126,14 @@ export function useUserProfile(username: string) {
                 username: previousProfile.username,
                 avatarSrc: previousProfile.avatarSrc,
                 toneTag: previousProfile.toneTag,
+                // Row is the target, from the viewer's own following
+                // list — the viewer now follows them (that's this
+                // action), and whether the target follows back is
+                // unchanged by it, so carry that over from the profile
+                // snapshot rather than guessing.
+                isFollowing: true,
+                followsMe: previousProfile.followsMe,
+                isSelf: false,
               }),
           );
 
@@ -137,6 +145,15 @@ export function useUserProfile(username: string) {
                 username: viewer.username,
                 avatarSrc: viewer.avatarSrc,
                 toneTag: viewer.toneTag,
+                // Row is the viewer's own entry in this list — this
+                // cache entry is only ever populated while the current
+                // viewer is the one looking at this followers page, so
+                // it's a self-row. Same convention lib/users.ts's
+                // attachViewerRelationship uses: isFollowing/followsMe
+                // forced false, isSelf true.
+                isFollowing: false,
+                followsMe: false,
+                isSelf: true,
               }),
           );
         }

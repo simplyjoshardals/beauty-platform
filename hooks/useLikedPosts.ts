@@ -4,7 +4,11 @@ import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getLikedPostIds, togglePostLike } from "@/services/likeService";
 import { POSTS_QUERY_KEY } from "@/hooks/usePosts";
-import { LIKES_QUERY_KEY } from "@/lib/queryKeys";
+import {
+  LIKES_QUERY_KEY,
+  EXPLORE_QUERY_KEY,
+  USER_POSTS_QUERY_KEY_PREFIX,
+} from "@/lib/queryKeys";
 
 export { LIKES_QUERY_KEY };
 
@@ -65,9 +69,16 @@ export function useLikedPosts() {
       } else {
         queryClient.invalidateQueries({ queryKey: LIKES_QUERY_KEY });
         // A like flips Post.likeCount too (derived via _count) — refetch
-        // the feed so that number catches up with what just happened
-        // here, same as how a comment add/delete needs to below.
+        // every cache that carries that same Post object, not just
+        // Home's feed: Explore's ranked feed and the post author's own
+        // profile grid (by prefix — this hook doesn't know whose post
+        // it is without its own lookup) can both be showing the same
+        // post with the old count otherwise.
         queryClient.invalidateQueries({ queryKey: POSTS_QUERY_KEY });
+        queryClient.invalidateQueries({ queryKey: EXPLORE_QUERY_KEY });
+        queryClient.invalidateQueries({
+          queryKey: USER_POSTS_QUERY_KEY_PREFIX,
+        });
       }
     },
   });

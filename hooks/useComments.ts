@@ -9,6 +9,22 @@ import {
   toggleCommentLike as toggleCommentLikeRequest,
 } from "@/services/commentService";
 import { POSTS_QUERY_KEY } from "@/hooks/usePosts";
+import {
+  EXPLORE_QUERY_KEY,
+  USER_POSTS_QUERY_KEY_PREFIX,
+} from "@/lib/queryKeys";
+
+// Same three-cache fan-out useLikedPosts' toggleLike does for
+// Post.likeCount — Post.commentCount is derived via _count too (see
+// prisma/schema.prisma), so an add/delete here needs to invalidate the
+// same siblings: Home's feed, Explore's ranked feed, and the post
+// author's own profile grid (by prefix — this hook only has a postId,
+// not the author's username).
+function invalidatePostCaches(queryClient: ReturnType<typeof useQueryClient>) {
+  queryClient.invalidateQueries({ queryKey: POSTS_QUERY_KEY });
+  queryClient.invalidateQueries({ queryKey: EXPLORE_QUERY_KEY });
+  queryClient.invalidateQueries({ queryKey: USER_POSTS_QUERY_KEY_PREFIX });
+}
 
 // apiFetch never throws on a failed request (see utils/apiClient.ts) —
 // same reasoning as useSavedPosts.ts's mutationFailed.
@@ -112,7 +128,7 @@ export function useComments(
         // Swaps the temp-id placeholder for the real comment, and picks
         // up Post.commentCount (derived via _count) catching up too.
         queryClient.invalidateQueries({ queryKey });
-        queryClient.invalidateQueries({ queryKey: POSTS_QUERY_KEY });
+        invalidatePostCaches(queryClient);
       }
     },
   });
@@ -155,7 +171,7 @@ export function useComments(
         rollback(context?.previous);
       } else {
         queryClient.invalidateQueries({ queryKey });
-        queryClient.invalidateQueries({ queryKey: POSTS_QUERY_KEY });
+        invalidatePostCaches(queryClient);
       }
     },
   });

@@ -6,7 +6,12 @@ import {
   listPosts,
   deletePost as deletePostRequest,
 } from "@/services/postService";
-import { POSTS_QUERY_KEY } from "@/lib/queryKeys";
+import {
+  POSTS_QUERY_KEY,
+  EXPLORE_QUERY_KEY,
+  USER_POSTS_QUERY_KEY_PREFIX,
+  CURRENT_USER_QUERY_KEY,
+} from "@/lib/queryKeys";
 
 // Exported so hooks that mutate a post's derived counts from elsewhere
 // (useLikedPosts' toggleLike, useComments' add/delete) can invalidate
@@ -69,7 +74,17 @@ export function usePosts() {
         // Succeeded — the optimistic removal already matches server
         // state, but refetch anyway so the list is fully in sync (e.g.
         // with another post that became visible now this one's gone).
+        // Same three sibling caches useCreatePost invalidates on the
+        // way in also need to catch up on the way out — Explore's
+        // ranked feed, the author's profile grid (by prefix — this hook
+        // doesn't know the author's username without its own lookup),
+        // and currentUser's postCount.
         queryClient.invalidateQueries({ queryKey: POSTS_QUERY_KEY });
+        queryClient.invalidateQueries({ queryKey: EXPLORE_QUERY_KEY });
+        queryClient.invalidateQueries({
+          queryKey: USER_POSTS_QUERY_KEY_PREFIX,
+        });
+        queryClient.invalidateQueries({ queryKey: CURRENT_USER_QUERY_KEY });
       }
     },
   });
