@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { XIcon } from "@phosphor-icons/react";
 import { PATHS } from "@/utils/paths";
+import { followLabel } from "@/utils/followLabel";
 
 type BaseProps = {
   username: string;
@@ -133,11 +134,7 @@ export function ProfileHeader(props: Props) {
               : "bg-foreground text-background"
           }`}
         >
-          {props.isFollowing
-            ? "Following"
-            : props.followsMe
-              ? "Follow back"
-              : "Follow"}
+          {followLabel(props.isFollowing, props.followsMe)}
         </button>
       )}
 

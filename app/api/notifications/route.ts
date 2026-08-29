@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { MAX_NOTIFICATIONS, serializeNotifications } from "@/lib/notifications";
+import { getNotificationsForUser } from "@/lib/notifications";
 
 // x-user-id is set by proxy.ts, which already validated the session
 // before this route runs — see the isProtectedRoute list there, which
@@ -16,17 +15,8 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const notifications = await prisma.notification.findMany({
-    where: { recipientId: userId },
-    orderBy: { createdAt: "desc" },
-    take: MAX_NOTIFICATIONS,
-    include: {
-      actor: { select: { username: true, avatarSrc: true } },
-    },
-  });
-
   return NextResponse.json({
     success: true,
-    notifications: serializeNotifications(notifications),
+    notifications: await getNotificationsForUser(userId),
   });
 }

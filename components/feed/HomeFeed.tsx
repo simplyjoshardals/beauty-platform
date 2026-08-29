@@ -7,9 +7,8 @@ import { PostCard } from "./PostCard";
 import { HomeFeedSkeleton } from "./HomeFeedSkeleton";
 import { EmptyHomeFeed } from "./EmptyHomeFeed";
 
-// Real following list now (see hooks/useFollowingList.ts), not
-// context/FollowProvider's mock Set — this is the query key
-// useUserProfile's toggleFollow already optimistically patches when
+// Real following list (see hooks/useFollowingList.ts) — this is the
+// query key useUserProfile's toggleFollow already optimistically patches when
 // following someone from a post card, so a fresh follow from inside the
 // feed itself shows up here without a manual refetch.
 export function HomeFeed() {

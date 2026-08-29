@@ -17,11 +17,9 @@ type Params = { params: Promise<{ username: string }> };
 // (unlike CURRENT_USER_PROFILE.followerCount in data/currentUserProfile.ts,
 // which is still a hardcoded placeholder — there's just no consumer of
 // "who follows me" for your OWN profile yet). isFollowing/followsMe are
-// real too. The one thing still owed to a real backend here is the
-// follow *action* everywhere else in the app (PostCard, NotificationRow,
-// UserListRow all still read/write context/FollowProvider's local
-// Set) — this route and its sibling follow/route.ts are the first real
-// piece of that; wiring the rest through is a separate pass.
+// real too, and every follow *action* in the app (PostCard,
+// NotificationRow, UserListRow) reads/writes this same Follow table via
+// this route and its sibling follow/route.ts.
 export async function GET(req: NextRequest, { params }: Params) {
   const { username } = await params;
 

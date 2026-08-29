@@ -49,12 +49,14 @@ function addOrRemoveRow(
   return list.filter((u) => u.username !== row.username);
 }
 
-// Backs /u/[username]'s ProfileHeader AND PostCard's follow button — the
-// two places that now read/write the real Follow table (see
-// app/api/user/[username]/route.ts and its sibling follow/route.ts).
-// context/FollowProvider's local Set is still what NotificationRow and
-// UserListRow read/write; migrating those is a separate pass.
-export function useUserProfile(username: string) {
+// Backs /u/[username]'s ProfileHeader, PostCard's follow button,
+// UserListRow, and NotificationRow — every place in the app that reads
+// or writes the real Follow table (see app/api/user/[username]/route.ts
+// and its sibling follow/route.ts).
+export function useUserProfile(
+  username: string,
+  options?: { enabled?: boolean },
+) {
   const queryClient = useQueryClient();
   const queryKey = profileQueryKey(username);
   // The logged-in viewer, not the profile being looked at — needed so a
@@ -63,6 +65,7 @@ export function useUserProfile(username: string) {
   // (adding/removing the viewer), the two list caches this toggle
   // actually affects.
   const { user: viewer } = useCurrentUser();
+  const enabled = (options?.enabled ?? true) && Boolean(username);
 
   const query = useQuery({
     queryKey,
@@ -71,7 +74,7 @@ export function useUserProfile(username: string) {
       if (!result?.success) return null;
       return result.user as PublicUserProfile;
     },
-    enabled: Boolean(username),
+    enabled,
   });
 
   // apiFetch never throws on a failed request (see utils/apiClient.ts) —

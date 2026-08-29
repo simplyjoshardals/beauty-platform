@@ -13,6 +13,7 @@ import {
   getPublicUserProfilesBatch,
 } from "./users";
 import { getLikedPostIds } from "./likes";
+import { getNotificationsForUser } from "./notifications";
 
 // Same query GET /api/posts runs (getHomeFeedPosts, in lib/posts.ts),
 // called directly instead of over HTTP — same pattern as
@@ -80,6 +81,13 @@ export async function fetchSavedBundleForSSR(userId: string) {
   return getSavedBundle(userId);
 }
 
+// Backs /notifications — same query GET /api/notifications runs
+// (getNotificationsForUser, in lib/notifications.ts), called directly
+// instead of over HTTP, same convention as fetchSavedBundleForSSR
+// above.
+export async function fetchNotificationsForSSR(userId: string) {
+  return getNotificationsForUser(userId);
+}
 // Backs /profile/following and /u/[username]/following — same query GET
 // /api/user/[username]/following runs (getFollowingList, in
 // lib/users.ts), called directly instead of over HTTP. Only ever called

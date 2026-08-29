@@ -27,19 +27,19 @@ import { useComments } from "@/hooks/useComments";
 import { PATHS } from "@/utils/paths";
 import { useAuthGatedAction } from "@/hooks/useAuthGatedAction";
 import { AuthGateModal } from "@/components/auth/AuthGateModal";
+import { followLabel } from "@/utils/followLabel";
 
 export function PostCard({ post }: { post: Post }) {
-  // Same real backend the profile header now uses (see
-  // hooks/useUserProfile.ts and app/u/[username]/page.tsx) — isFollowing
-  // and followsMe come off the Follow table, and toggleFollow does the
-  // same optimistic update/rollback via React Query. Multiple PostCards
-  // for the same author share one cached query (React Query dedupes by
-  // queryKey), so a repeat author in the feed doesn't mean a repeat
-  // request. This is still the FIRST of PostCard/NotificationRow/
-  // UserListRow to move off context/FollowProvider's local Set — the
-  // other two are a separate pass, so following someone from a post
-  // card here won't yet be reflected on their row in, say, the
-  // Following list until that migration happens too.
+  // Same real backend the profile header, UserListRow, and
+  // NotificationRow all use (see hooks/useUserProfile.ts and
+  // app/u/[username]/page.tsx) — isFollowing and followsMe come off the
+  // Follow table, and toggleFollow does the same optimistic
+  // update/rollback via React Query. Multiple PostCards for the same
+  // author share one cached query (React Query dedupes by queryKey), so
+  // a repeat author in the feed doesn't mean a repeat request. Because
+  // every one of these follow buttons now reads/writes the same cache
+  // entries, following someone from a post card here is immediately
+  // reflected on their row in, say, the Following list too.
   const { user: authorProfile, toggleFollow } = useUserProfile(
     post.author.username,
   );
@@ -253,11 +253,10 @@ export function PostCard({ post }: { post: Post }) {
                 : "bg-foreground text-background"
             }`}
           >
-            {authorProfile?.isFollowing
-              ? "Following"
-              : authorProfile?.followsMe
-                ? "Follow back"
-                : "Follow"}
+            {followLabel(
+              Boolean(authorProfile?.isFollowing),
+              Boolean(authorProfile?.followsMe),
+            )}
           </button>
         )}
 

@@ -4,8 +4,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { useUserProfile } from "@/hooks/useUserProfile";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { isMockFollowerOfCurrentUser } from "@/data/mockFollowers";
 import { PATHS } from "@/utils/paths";
+import { followLabel } from "@/utils/followLabel";
 import { useAuthGatedAction } from "@/hooks/useAuthGatedAction";
 import { AuthGateModal } from "@/components/auth/AuthGateModal";
 import type { MockUser } from "@/data/mockUsers";
@@ -13,8 +13,7 @@ import type { MockUser } from "@/data/mockUsers";
 // Same real backend PostCard's follow button now uses (see
 // hooks/useUserProfile.ts) — isFollowing/followsMe come off the Follow
 // table, and toggleFollow optimistically patches this profile plus the
-// two following/followers list caches it affects. NotificationRow is
-// the one remaining consumer of context/FollowProvider's mock Set.
+// two following/followers list caches it affects.
 //
 // One useUserProfile call per row means one request per row (React
 // Query dedupes repeats of the same username, but a Followers/Following
@@ -23,7 +22,7 @@ import type { MockUser } from "@/data/mockUsers";
 // resulting flash-of-"Follow" by passing initialFollowing/initialFollowsMe
 // (computed batched, server-side — see lib/users.ts's searchUsers)
 // straight through; Followers/Following don't have that batched field
-// yet, so their rows still show the brief default until their own
+// yet, so their rows briefly default to "Follow"/false until their own
 // useUserProfile call resolves.
 type Props = {
   user: MockUser;
@@ -46,18 +45,15 @@ export function UserListRow({
   const { user: profile, toggleFollow } = useUserProfile(user.username);
   const { gateOpen, gateMessage, closeGate, guard } = useAuthGatedAction();
   const following = profile?.isFollowing ?? initialFollowing ?? false;
-  // Falls back to initialFollowsMe (when the caller has it) and then the
-  // mock pool, only until this row's real profile fetch resolves —
-  // profile.followsMe (once loaded) is the real Follow-table fact;
-  // isMockFollowerOfCurrentUser was the only signal available before
-  // this migration and stays as a last-resort placeholder default.
-  const followsMe =
-    profile?.followsMe ??
-    initialFollowsMe ??
-    isMockFollowerOfCurrentUser(user.username);
+  // Falls back to initialFollowsMe (when the caller has it), otherwise
+  // false, only until this row's real profile fetch resolves —
+  // profile.followsMe (once loaded) is the real Follow-table fact, and
+  // this is a genuine "don't know yet" default rather than a guess, now
+  // that the mock followers pool is gone.
+  const followsMe = profile?.followsMe ?? initialFollowsMe ?? false;
   const isSelf = user.username === currentUser?.username;
 
-  const label = following ? "Following" : followsMe ? "Follow back" : "Follow";
+  const label = followLabel(following, followsMe);
 
   return (
     <div className="flex items-center gap-3 px-4 py-2.5">

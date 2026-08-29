@@ -13,9 +13,14 @@ export { NOTIFICATIONS_QUERY_KEY };
 
 // Independent of the app's global 1-minute staleTime (see
 // app/providers.tsx) — the BottomNav badge needs to notice a new
-// notification within a beat of it arriving, which is tighter than
-// feeds/profiles need to be. 25s splits the "roughly 20–30s" target.
-const NOTIFICATIONS_REFETCH_INTERVAL_MS = 25 * 1000;
+// notification much sooner than feeds/profiles need to refresh.
+// refetchOnWindowFocus/refetchOnReconnect (also global defaults) already
+// catch the "came back to the tab" case instantly; this interval is
+// just for "left the tab open and idle." 8s keeps a genuinely idle tab
+// feeling near-live without the request volume 1s polling would mean
+// (that's 10x fewer requests per idle hour than a 1s interval, for a
+// worst-case wait that's still under 10 seconds).
+const NOTIFICATIONS_REFETCH_INTERVAL_MS = 8 * 1000;
 
 // apiFetch never throws on a failed request (see utils/apiClient.ts) —
 // same reasoning as useSavedPosts.ts's mutationFailed.

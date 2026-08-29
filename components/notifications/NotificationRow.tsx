@@ -2,7 +2,10 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useFollow } from "@/context/FollowProvider";
+import { useUserProfile } from "@/hooks/useUserProfile";
+import { useAuthGatedAction } from "@/hooks/useAuthGatedAction";
+import { AuthGateModal } from "@/components/auth/AuthGateModal";
+import { followLabel } from "@/utils/followLabel";
 import { getRelativeTime } from "@/utils/time";
 import { PATHS } from "@/utils/paths";
 import type { Notification } from "@/types/notification";
@@ -48,11 +51,18 @@ export function NotificationRow({
   // they're still looking at the list.
   unread: boolean;
 }) {
-  const { isFollowing, toggleFollow } = useFollow();
-  const following =
-    notification.type === "follow"
-      ? isFollowing(notification.actor.username)
-      : false;
+  // Same real Follow-table backend PostCard/ProfileHeader/UserListRow
+  // use. Only "follow" notifications need a follow button at all, so
+  // the fetch is disabled for every other notification type — no point
+  // asking for the actor's profile just to render a like/comment row.
+  const { user: actorProfile, toggleFollow } = useUserProfile(
+    notification.actor.username,
+    { enabled: notification.type === "follow" },
+  );
+  const { gateOpen, gateMessage, closeGate, guard } = useAuthGatedAction();
+  const isFollowing = actorProfile?.isFollowing ?? false;
+  const followsMe = actorProfile?.followsMe ?? true; // this notification IS them following us
+  const label = followLabel(isFollowing, followsMe);
 
   return (
     <div
@@ -90,19 +100,22 @@ export function NotificationRow({
       {notification.type === "follow" && (
         <button
           type="button"
-          onClick={() => toggleFollow(notification.actor.username)}
+          onClick={guard(toggleFollow)}
           className={`shrink-0 rounded-lg px-4 py-1.5 text-sm font-medium transition-colors ${
-            following
+            isFollowing
               ? "border border-foreground/15 text-foreground"
               : "bg-foreground text-background"
           }`}
         >
-          {/* This IS a "so-and-so followed you" notification, so if you
-              haven't followed back yet, it's always a follow-back —
-              no need to cross-check the mock followers list here. */}
-          {following ? "Following" : "Follow back"}
+          {label}
         </button>
       )}
+
+      <AuthGateModal
+        open={gateOpen}
+        onClose={closeGate}
+        message={gateMessage}
+      />
     </div>
   );
 }

@@ -107,3 +107,22 @@ export function serializeNotifications(
 ): Notification[] {
   return rows.map(serializeOne);
 }
+
+// Shared by GET /api/notifications and the SSR prefetch
+// (lib/serverQueries.ts's fetchNotificationsForSSR) — one definition of
+// "a user's notification list" so the two can never drift (e.g. one
+// forgetting the `take` cap or the actor `select`).
+export async function getNotificationsForUser(
+  userId: string,
+): Promise<Notification[]> {
+  const rows = await prisma.notification.findMany({
+    where: { recipientId: userId },
+    orderBy: { createdAt: "desc" },
+    take: MAX_NOTIFICATIONS,
+    include: {
+      actor: { select: { username: true, avatarSrc: true } },
+    },
+  });
+
+  return serializeNotifications(rows);
+}
