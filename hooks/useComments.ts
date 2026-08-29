@@ -92,8 +92,15 @@ export function useComments(
   // Same optimistic-update / snapshot / rollback-or-refetch pattern as
   // useSavedPosts.ts and useLikedPosts.ts throughout.
   const addCommentMutation = useMutation({
-    mutationFn: ({ text, parentId }: { text: string; parentId?: string }) =>
-      addCommentRequest(postId, text, parentId),
+    mutationFn: ({
+      text,
+      parentId,
+      replyToUserId,
+    }: {
+      text: string;
+      parentId?: string;
+      replyToUserId?: string;
+    }) => addCommentRequest(postId, text, parentId, replyToUserId),
     onMutate: async ({ text, parentId }) => {
       const previous = await snapshotAndCancel();
       if (currentUser) {
@@ -195,8 +202,8 @@ export function useComments(
     },
   });
 
-  function addComment(text: string, parentId?: string) {
-    addCommentMutation.mutate({ text, parentId });
+  function addComment(text: string, parentId?: string, replyToUserId?: string) {
+    addCommentMutation.mutate({ text, parentId, replyToUserId });
   }
 
   function deleteComment(commentId: string, topLevelId?: string) {

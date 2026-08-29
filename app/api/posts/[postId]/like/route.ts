@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { createNotification } from "@/lib/notifications";
 
 type Params = { params: Promise<{ postId: string }> };
 
@@ -23,7 +24,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
     const post = await prisma.post.findUnique({
       where: { id: postId },
-      select: { id: true },
+      select: { id: true, authorId: true },
     });
     if (!post) {
       return NextResponse.json(
@@ -38,11 +39,19 @@ export async function POST(req: NextRequest, { params }: Params) {
     });
 
     if (existing) {
+      // Unliking never retracts a notification that was already sent
+      // for the original like — nothing to do here besides the delete.
       await prisma.like.delete({ where: { id: existing.id } });
       return NextResponse.json({ success: true, liked: false });
     }
 
     await prisma.like.create({ data: { postId, userId } });
+    await createNotification({
+      recipientId: post.authorId,
+      actorId: userId,
+      type: "LIKE",
+      postId,
+    });
     return NextResponse.json({ success: true, liked: true });
   } catch (err) {
     console.error("toggle post like error", err);

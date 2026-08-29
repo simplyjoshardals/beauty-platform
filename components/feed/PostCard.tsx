@@ -170,9 +170,13 @@ export function PostCard({ post }: { post: Post }) {
   // the hook itself. commentCount is bumped/dropped here to match, and
   // resyncs to the real Post.commentCount once that mutation settles
   // (see the useEffect above).
-  function handleAddComment(text: string, parentId?: string) {
+  function handleAddComment(
+    text: string,
+    parentId?: string,
+    replyToUserId?: string,
+  ) {
     if (!user) return;
-    addComment(text, parentId);
+    addComment(text, parentId, replyToUserId);
     setCommentCount((c) => c + 1);
   }
 

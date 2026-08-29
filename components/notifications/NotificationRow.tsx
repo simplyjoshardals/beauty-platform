@@ -17,6 +17,8 @@ function getMessage(notification: Notification): string {
       return "started following you";
     case "reply":
       return `replied to your comment: "${notification.commentText}"`;
+    case "comment_like":
+      return "liked your comment";
   }
 }
 
@@ -27,14 +29,24 @@ function getHref(notification: Notification): string {
     case "like":
     case "comment":
     case "reply":
+    case "comment_like":
       return PATHS.POST(notification.postId);
   }
 }
 
 export function NotificationRow({
   notification,
+  unread,
 }: {
   notification: Notification;
+  // Whether this row should render as unread — driven by the
+  // notifications page's frozen unreadIdsAtOpen snapshot, NOT
+  // notification.read directly. That field gets optimistically flipped
+  // to true the instant the page mounts (see
+  // app/notifications/page.tsx), so reading it here would make the
+  // unread dot/highlight disappear out from under the person while
+  // they're still looking at the list.
+  unread: boolean;
 }) {
   const { isFollowing, toggleFollow } = useFollow();
   const following =
@@ -45,10 +57,10 @@ export function NotificationRow({
   return (
     <div
       className={`flex items-center gap-3 px-4 py-3 ${
-        notification.read ? "" : "bg-foreground/3"
+        unread ? "bg-foreground/3" : ""
       }`}
     >
-      {!notification.read && (
+      {unread && (
         <span
           className="size-2 shrink-0 rounded-full bg-blue-500"
           aria-hidden

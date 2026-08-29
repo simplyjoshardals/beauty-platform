@@ -5,6 +5,7 @@ import {
   serializeComment,
   MAX_COMMENT_LENGTH,
 } from "@/lib/comments";
+import { createNotification } from "@/lib/notifications";
 
 type Params = { params: Promise<{ postId: string }> };
 
@@ -65,7 +66,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
     const post = await prisma.post.findUnique({
       where: { id: postId },
-      select: { id: true },
+      select: { id: true, authorId: true },
     });
     if (!post) {
       return NextResponse.json(
@@ -75,7 +76,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     }
 
     const body = await req.json();
-    const { text, parentId } = body;
+    const { text, parentId, replyToUserId } = body;
 
     if (typeof text !== "string" || !text.trim()) {
       return NextResponse.json(
@@ -91,6 +92,11 @@ export async function POST(req: NextRequest, { params }: Params) {
       );
     }
 
+    // Only set when this is a reply — used below to pick who gets the
+    // REPLY notification (parent.authorId, fetched alongside the
+    // existing postId/parentId validation).
+    let parentAuthorId: string | null = null;
+
     if (parentId !== undefined) {
       if (typeof parentId !== "string" || !parentId) {
         return NextResponse.json(
@@ -103,13 +109,32 @@ export async function POST(req: NextRequest, { params }: Params) {
       // assume; a reply-to-a-reply would have nowhere to render.
       const parent = await prisma.comment.findUnique({
         where: { id: parentId },
-        select: { postId: true, parentId: true },
+        select: { postId: true, parentId: true, authorId: true },
       });
       if (!parent || parent.postId !== postId || parent.parentId !== null) {
         return NextResponse.json(
           { success: false, error: "Invalid reply target." },
           { status: 400 },
         );
+      }
+      parentAuthorId = parent.authorId;
+    }
+
+    // replyToUserId is only ever notification metadata (who the person
+    // hit "reply" on, per replyingTo.authorId in CommentSheet — not
+    // necessarily the top-level comment's author, since parentId stays
+    // flattened to the top-level comment while a reply can be aimed at
+    // someone else in the thread). A bad/stale id here should never fail
+    // the comment itself — just fall back to notifying the top-level
+    // comment's author instead, same as if replyToUserId was omitted.
+    let validReplyToUserId: string | null = null;
+    if (typeof replyToUserId === "string" && replyToUserId) {
+      const replyTarget = await prisma.user.findUnique({
+        where: { id: replyToUserId },
+        select: { id: true },
+      });
+      if (replyTarget) {
+        validReplyToUserId = replyTarget.id;
       }
     }
 
@@ -122,6 +147,29 @@ export async function POST(req: NextRequest, { params }: Params) {
       },
       include: commentInclude(userId),
     });
+
+    if (parentId) {
+      const recipientId = validReplyToUserId ?? parentAuthorId;
+      if (recipientId) {
+        await createNotification({
+          recipientId,
+          actorId: userId,
+          type: "REPLY",
+          postId,
+          commentId: comment.id,
+          commentText: trimmed,
+        });
+      }
+    } else {
+      await createNotification({
+        recipientId: post.authorId,
+        actorId: userId,
+        type: "COMMENT",
+        postId,
+        commentId: comment.id,
+        commentText: trimmed,
+      });
+    }
 
     return NextResponse.json({
       success: true,

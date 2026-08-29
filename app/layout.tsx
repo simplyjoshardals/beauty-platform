@@ -9,7 +9,6 @@ import "./globals.css";
 import { BottomNav } from "@/components/shared/BottomNav";
 import { TopNav } from "@/components/shared/TopNav";
 import { FollowProvider } from "@/context/FollowProvider";
-import { NotificationsProvider } from "@/context/NotificationsProvider";
 import { Providers } from "./providers";
 import { getServerUserId } from "@/lib/session";
 import { fetchCurrentUserForSSR } from "@/lib/serverQueries";
@@ -87,13 +86,11 @@ export default async function RootLayout({
         <Providers>
           <HydrationBoundary state={dehydrate(queryClient)}>
             <FollowProvider>
-              <NotificationsProvider>
-                <TopNav />
-                <main className="mx-auto w-full max-w-lg flex-1 pt-[calc(3.5rem+env(safe-area-inset-top))] pb-[calc(3.5rem+env(safe-area-inset-bottom))]">
-                  {children}
-                </main>
-                <BottomNav initialUser={navUser} />
-              </NotificationsProvider>
+              <TopNav />
+              <main className="mx-auto w-full max-w-lg flex-1 pt-[calc(3.5rem+env(safe-area-inset-top))] pb-[calc(3.5rem+env(safe-area-inset-bottom))]">
+                {children}
+              </main>
+              <BottomNav initialUser={navUser} />
             </FollowProvider>
           </HydrationBoundary>
         </Providers>

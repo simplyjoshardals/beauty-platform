@@ -6,7 +6,9 @@ type BaseNotification = {
 };
 
 // Discriminated on `type` — follow has no post to link to; like/comment/
-// reply all do, and comment/reply also carry a text snippet to preview.
+// reply/comment_like all do, and comment/reply also carry a text
+// snippet to preview (comment_like doesn't preview the liked comment's
+// text, same as like doesn't preview the post).
 export type Notification =
   | (BaseNotification & { type: "like"; postId: string })
   | (BaseNotification & {
@@ -15,4 +17,5 @@ export type Notification =
       commentText: string;
     })
   | (BaseNotification & { type: "follow" })
-  | (BaseNotification & { type: "reply"; postId: string; commentText: string });
+  | (BaseNotification & { type: "reply"; postId: string; commentText: string })
+  | (BaseNotification & { type: "comment_like"; postId: string });

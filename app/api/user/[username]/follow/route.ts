@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { createNotification } from "@/lib/notifications";
 
 type Params = { params: Promise<{ username: string }> };
 
@@ -48,12 +49,19 @@ export async function POST(req: NextRequest, { params }: Params) {
     });
 
     if (existing) {
+      // Unfollowing never retracts a notification, same as the like
+      // routes.
       await prisma.follow.delete({ where: { id: existing.id } });
       return NextResponse.json({ success: true, following: false });
     }
 
     await prisma.follow.create({
       data: { followerId: userId, followingId: target.id },
+    });
+    await createNotification({
+      recipientId: target.id,
+      actorId: userId,
+      type: "FOLLOW",
     });
     return NextResponse.json({ success: true, following: true });
   } catch (err) {

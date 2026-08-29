@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { createNotification } from "@/lib/notifications";
 
 type Params = { params: Promise<{ postId: string; commentId: string }> };
 
@@ -20,7 +21,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
     const comment = await prisma.comment.findUnique({
       where: { id: commentId },
-      select: { postId: true, deleted: true },
+      select: { postId: true, deleted: true, authorId: true },
     });
     if (!comment || comment.postId !== postId || comment.deleted) {
       return NextResponse.json(
@@ -35,11 +36,20 @@ export async function POST(req: NextRequest, { params }: Params) {
     });
 
     if (existing) {
+      // Unliking never retracts a notification, same as the post-level
+      // like route.
       await prisma.commentLike.delete({ where: { id: existing.id } });
       return NextResponse.json({ success: true, liked: false });
     }
 
     await prisma.commentLike.create({ data: { commentId, userId } });
+    await createNotification({
+      recipientId: comment.authorId,
+      actorId: userId,
+      type: "COMMENT_LIKE",
+      postId,
+      commentId,
+    });
     return NextResponse.json({ success: true, liked: true });
   } catch (err) {
     console.error("toggle comment like error", err);

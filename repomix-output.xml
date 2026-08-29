@@ -59,6 +59,10 @@ app/
       users/
         route.ts
       route.ts
+    notifications/
+      read-all/
+        route.ts
+      route.ts
     posts/
       [postId]/
         comments/
@@ -228,11 +232,9 @@ constants/
   username.ts
 context/
   FollowProvider.tsx
-  NotificationsProvider.tsx
 data/
   currentUserProfile.ts
   mockFollowers.ts
-  mockNotifications.ts
   mockPosts.ts
   mockUsers.ts
 hooks/
@@ -248,6 +250,7 @@ hooks/
   useFollowingList.ts
   useLikedPosts.ts
   useLogout.ts
+  useNotifications.ts
   usePosts.ts
   useSavedPosts.ts
   useUpdateProfile.ts
@@ -262,6 +265,7 @@ lib/
   comments.ts
   likes.ts
   mailer.ts
+  notifications.ts
   posts.ts
   prisma.ts
   queryKeys.ts
@@ -274,6 +278,8 @@ prisma/
     20260727202204_init/
       migration.sql
     20260728182816_init/
+      migration.sql
+    20260828234000_add_comment_like_notification/
       migration.sql
     migration_lock.toml
   schema.prisma
@@ -305,6 +311,7 @@ services/
   authService.ts
   commentService.ts
   likeService.ts
+  notificationService.ts
   postService.ts
   savedService.ts
   uploadService.ts
@@ -341,6 +348,305 @@ tsconfig.json
 
 <files>
 This section contains the contents of the repository's files.
+
+<file path="app/api/notifications/read-all/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+
+// Intentionally no per-notification read endpoint — Option B (see
+// hooks/useNotifications.ts + app/notifications/page.tsx) always marks
+// every unread notification as read the moment the page is opened, so
+// there's never a case where the frontend needs to mark just one.
+export async function PATCH(req: NextRequest) {
+  const userId = req.headers.get("x-user-id");
+  if (!userId) {
+    return NextResponse.json(
+      { success: false, error: "Unauthorized" },
+      { status: 401 },
+    );
+  }
+
+  await prisma.notification.updateMany({
+    where: { recipientId: userId, read: false },
+    data: { read: true },
+  });
+
+  return NextResponse.json({ success: true });
+}
+</file>
+
+<file path="app/api/notifications/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { MAX_NOTIFICATIONS, serializeNotifications } from "@/lib/notifications";
+
+// x-user-id is set by proxy.ts, which already validated the session
+// before this route runs — see the isProtectedRoute list there, which
+// includes /api/notifications. There's no public GET carve-out here
+// (unlike GET /api/posts/[postId]/comments): a person's notifications
+// are never visible to anyone but themselves.
+export async function GET(req: NextRequest) {
+  const userId = req.headers.get("x-user-id");
+  if (!userId) {
+    return NextResponse.json(
+      { success: false, error: "Unauthorized" },
+      { status: 401 },
+    );
+  }
+
+  const notifications = await prisma.notification.findMany({
+    where: { recipientId: userId },
+    orderBy: { createdAt: "desc" },
+    take: MAX_NOTIFICATIONS,
+    include: {
+      actor: { select: { username: true, avatarSrc: true } },
+    },
+  });
+
+  return NextResponse.json({
+    success: true,
+    notifications: serializeNotifications(notifications),
+  });
+}
+</file>
+
+<file path="hooks/useNotifications.ts">
+"use client";
+
+import { useMemo } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { Notification } from "@/types/notification";
+import {
+  getNotifications,
+  markAllNotificationsRead,
+} from "@/services/notificationService";
+import { NOTIFICATIONS_QUERY_KEY } from "@/lib/queryKeys";
+
+export { NOTIFICATIONS_QUERY_KEY };
+
+// Independent of the app's global 1-minute staleTime (see
+// app/providers.tsx) — the BottomNav badge needs to notice a new
+// notification within a beat of it arriving, which is tighter than
+// feeds/profiles need to be. 25s splits the "roughly 20–30s" target.
+const NOTIFICATIONS_REFETCH_INTERVAL_MS = 25 * 1000;
+
+// apiFetch never throws on a failed request (see utils/apiClient.ts) —
+// same reasoning as useSavedPosts.ts's mutationFailed.
+function mutationFailed(result: { success: boolean } | undefined) {
+  return result === undefined || !result.success;
+}
+
+// Replaces context/NotificationsProvider.tsx's mock-data context. Same
+// public shape (notifications, unreadCount, markAllAsRead) so BottomNav
+// and the notifications page both keep working with just an import-path
+// change — and because both call this same hook, they read off the
+// exact same React Query cache entry (NOTIFICATIONS_QUERY_KEY) and can
+// never show conflicting read state. No provider wrapping needed, same
+// as useSavedPosts/useLikedPosts: react-query already dedupes/shares
+// this cache across every component that calls the hook.
+export function useNotifications() {
+  const queryClient = useQueryClient();
+
+  const query = useQuery({
+    queryKey: NOTIFICATIONS_QUERY_KEY,
+    queryFn: async (): Promise<Notification[]> => {
+      const result = await getNotifications();
+      if (!result?.success) return [];
+      return result.notifications;
+    },
+    refetchInterval: NOTIFICATIONS_REFETCH_INTERVAL_MS,
+  });
+
+  const notifications = useMemo(() => query.data ?? [], [query.data]);
+  const unreadCount = useMemo(
+    () => notifications.filter((n) => !n.read).length,
+    [notifications],
+  );
+
+  // Same optimistic-update / snapshot / rollback-or-refetch pattern as
+  // useSavedPosts.ts and useLikedPosts.ts throughout. There's no
+  // per-notification variant of this mutation — see
+  // app/api/notifications/read-all/route.ts.
+  const markAllAsReadMutation = useMutation({
+    mutationFn: () => markAllNotificationsRead(),
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: NOTIFICATIONS_QUERY_KEY });
+      const previous = queryClient.getQueryData<Notification[]>(
+        NOTIFICATIONS_QUERY_KEY,
+      );
+      queryClient.setQueryData<Notification[]>(NOTIFICATIONS_QUERY_KEY, (old) =>
+        (old ?? []).map((n) => (n.read ? n : { ...n, read: true })),
+      );
+      return { previous };
+    },
+    onSettled: (result, _error, _vars, context) => {
+      if (mutationFailed(result)) {
+        if (context?.previous) {
+          queryClient.setQueryData(NOTIFICATIONS_QUERY_KEY, context.previous);
+        }
+      } else {
+        queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_QUERY_KEY });
+      }
+    },
+  });
+
+  function markAllAsRead() {
+    markAllAsReadMutation.mutate();
+  }
+
+  return {
+    notifications,
+    unreadCount,
+    markAllAsRead,
+    isLoading: query.isLoading,
+  };
+}
+</file>
+
+<file path="lib/notifications.ts">
+import { prisma } from "./prisma";
+import { NotificationType as PrismaNotificationType } from "./generated/prisma/client";
+import type { Notification } from "@/types/notification";
+
+export const MAX_NOTIFICATIONS = 50;
+
+// Every trigger (post like, comment, reply, comment like, follow) calls
+// this one helper rather than creating a Notification row itself — the
+// self-notification guard and the shape of what gets written both live
+// here exactly once, so no individual route can forget either.
+type CreateNotificationArgs = {
+  recipientId: string;
+  actorId: string;
+  type: PrismaNotificationType;
+  postId?: string;
+  commentId?: string;
+  commentText?: string;
+};
+
+export async function createNotification({
+  recipientId,
+  actorId,
+  type,
+  postId,
+  commentId,
+  commentText,
+}: CreateNotificationArgs): Promise<void> {
+  // Liking/commenting/following your own stuff never produces a
+  // notification. Unliking/unfollowing afterwards doesn't retract one
+  // either — that's just a matter of the routes above only ever calling
+  // this from their "create" branch, never their "delete" branch.
+  if (recipientId === actorId) return;
+
+  await prisma.notification.create({
+    data: {
+      recipientId,
+      actorId,
+      type,
+      postId: postId ?? null,
+      commentId: commentId ?? null,
+      commentText: commentText ?? null,
+    },
+  });
+}
+
+// Shape this file needs from a Prisma Notification row — hand-rolled,
+// same convention as lib/comments.ts's CommentRecord and lib/posts.ts's
+// PostRecord, so this has no compile-time dependency on the generated
+// client beyond the enum import above.
+export type NotificationRecord = {
+  id: string;
+  type: PrismaNotificationType;
+  postId: string | null;
+  commentText: string | null;
+  read: boolean;
+  createdAt: Date;
+  actor: { username: string; avatarSrc: string };
+};
+
+// Maps the Prisma enum + nullable columns onto the frontend's
+// discriminated union (types/notification.ts). Each Prisma NotificationType
+// always carries the fields its corresponding case needs — enforced by
+// createNotification's callers below, not by anything in the schema —
+// so a malformed row (e.g. a LIKE with no postId) is a bug elsewhere,
+// not something this needs to defend against by returning null.
+function serializeOne(row: NotificationRecord): Notification {
+  const base = {
+    id: row.id,
+    actor: row.actor,
+    createdAt: row.createdAt.toISOString(),
+    read: row.read,
+  };
+
+  switch (row.type) {
+    case PrismaNotificationType.LIKE:
+      return { ...base, type: "like", postId: row.postId! };
+    case PrismaNotificationType.COMMENT:
+      return {
+        ...base,
+        type: "comment",
+        postId: row.postId!,
+        commentText: row.commentText ?? "",
+      };
+    case PrismaNotificationType.FOLLOW:
+      return { ...base, type: "follow" };
+    case PrismaNotificationType.REPLY:
+      return {
+        ...base,
+        type: "reply",
+        postId: row.postId!,
+        commentText: row.commentText ?? "",
+      };
+    case PrismaNotificationType.COMMENT_LIKE:
+      return { ...base, type: "comment_like", postId: row.postId! };
+    default: {
+      // Exhaustiveness guard — every PrismaNotificationType member is
+      // handled above; this only fires if a new one is ever added to
+      // the schema without a matching case here.
+      const _exhaustive: never = row.type;
+      throw new Error(`Unhandled notification type: ${_exhaustive}`);
+    }
+  }
+}
+
+export function serializeNotifications(
+  rows: NotificationRecord[],
+): Notification[] {
+  return rows.map(serializeOne);
+}
+</file>
+
+<file path="prisma/migrations/20260828234000_add_comment_like_notification/migration.sql">
+-- AlterEnum
+ALTER TYPE "NotificationType" ADD VALUE 'COMMENT_LIKE';
+
+-- AlterTable
+ALTER TABLE "Notification" ADD COLUMN     "commentId" TEXT;
+
+-- AddForeignKey
+ALTER TABLE "Notification" ADD CONSTRAINT "Notification_commentId_fkey" FOREIGN KEY ("commentId") REFERENCES "Comment"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+</file>
+
+<file path="services/notificationService.ts">
+import { apiFetch } from "@/utils/apiClient";
+import { API_ROUTES } from "@/utils/apiRoutes";
+import type { Notification } from "@/types/notification";
+
+export type NotificationsBundleResult =
+  | { success: true; notifications: Notification[] }
+  | { success: false; error: string };
+
+export async function getNotifications(): Promise<NotificationsBundleResult> {
+  return apiFetch(API_ROUTES.NOTIFICATIONS.LIST, { method: "GET" });
+}
+
+export type MarkAllNotificationsReadResult =
+  | { success: true }
+  | { success: false; error: string };
+
+export async function markAllNotificationsRead(): Promise<MarkAllNotificationsReadResult> {
+  return apiFetch(API_ROUTES.NOTIFICATIONS.READ_ALL, { method: "PATCH" });
+}
+</file>
 
 <file path="app/(home)/loading.tsx">
 import { HomeFeedSkeleton } from "@/components/feed/HomeFeedSkeleton";
@@ -628,6 +934,7 @@ export async function GET(req: NextRequest) {
 <file path="app/api/posts/[postId]/comments/[commentId]/like/route.ts">
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { createNotification } from "@/lib/notifications";
 
 type Params = { params: Promise<{ postId: string; commentId: string }> };
 
@@ -648,7 +955,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
     const comment = await prisma.comment.findUnique({
       where: { id: commentId },
-      select: { postId: true, deleted: true },
+      select: { postId: true, deleted: true, authorId: true },
     });
     if (!comment || comment.postId !== postId || comment.deleted) {
       return NextResponse.json(
@@ -663,11 +970,20 @@ export async function POST(req: NextRequest, { params }: Params) {
     });
 
     if (existing) {
+      // Unliking never retracts a notification, same as the post-level
+      // like route.
       await prisma.commentLike.delete({ where: { id: existing.id } });
       return NextResponse.json({ success: true, liked: false });
     }
 
     await prisma.commentLike.create({ data: { commentId, userId } });
+    await createNotification({
+      recipientId: comment.authorId,
+      actorId: userId,
+      type: "COMMENT_LIKE",
+      postId,
+      commentId,
+    });
     return NextResponse.json({ success: true, liked: true });
   } catch (err) {
     console.error("toggle comment like error", err);
@@ -763,6 +1079,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
 <file path="app/api/posts/[postId]/like/route.ts">
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { createNotification } from "@/lib/notifications";
 
 type Params = { params: Promise<{ postId: string }> };
 
@@ -786,7 +1103,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
     const post = await prisma.post.findUnique({
       where: { id: postId },
-      select: { id: true },
+      select: { id: true, authorId: true },
     });
     if (!post) {
       return NextResponse.json(
@@ -801,11 +1118,19 @@ export async function POST(req: NextRequest, { params }: Params) {
     });
 
     if (existing) {
+      // Unliking never retracts a notification that was already sent
+      // for the original like — nothing to do here besides the delete.
       await prisma.like.delete({ where: { id: existing.id } });
       return NextResponse.json({ success: true, liked: false });
     }
 
     await prisma.like.create({ data: { postId, userId } });
+    await createNotification({
+      recipientId: post.authorId,
+      actorId: userId,
+      type: "LIKE",
+      postId,
+    });
     return NextResponse.json({ success: true, liked: true });
   } catch (err) {
     console.error("toggle post like error", err);
@@ -1141,6 +1466,7 @@ export async function POST(req: NextRequest) {
 <file path="app/api/user/[username]/follow/route.ts">
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { createNotification } from "@/lib/notifications";
 
 type Params = { params: Promise<{ username: string }> };
 
@@ -1189,12 +1515,19 @@ export async function POST(req: NextRequest, { params }: Params) {
     });
 
     if (existing) {
+      // Unfollowing never retracts a notification, same as the like
+      // routes.
       await prisma.follow.delete({ where: { id: existing.id } });
       return NextResponse.json({ success: true, following: false });
     }
 
     await prisma.follow.create({
       data: { followerId: userId, followingId: target.id },
+    });
+    await createNotification({
+      recipientId: target.id,
+      actorId: userId,
+      type: "FOLLOW",
     });
     return NextResponse.json({ success: true, following: true });
   } catch (err) {
@@ -1985,6 +2318,8 @@ function getMessage(notification: Notification): string {
       return "started following you";
     case "reply":
       return `replied to your comment: "${notification.commentText}"`;
+    case "comment_like":
+      return "liked your comment";
   }
 }
 
@@ -1995,14 +2330,24 @@ function getHref(notification: Notification): string {
     case "like":
     case "comment":
     case "reply":
+    case "comment_like":
       return PATHS.POST(notification.postId);
   }
 }
 
 export function NotificationRow({
   notification,
+  unread,
 }: {
   notification: Notification;
+  // Whether this row should render as unread — driven by the
+  // notifications page's frozen unreadIdsAtOpen snapshot, NOT
+  // notification.read directly. That field gets optimistically flipped
+  // to true the instant the page mounts (see
+  // app/notifications/page.tsx), so reading it here would make the
+  // unread dot/highlight disappear out from under the person while
+  // they're still looking at the list.
+  unread: boolean;
 }) {
   const { isFollowing, toggleFollow } = useFollow();
   const following =
@@ -2013,10 +2358,10 @@ export function NotificationRow({
   return (
     <div
       className={`flex items-center gap-3 px-4 py-3 ${
-        notification.read ? "" : "bg-foreground/3"
+        unread ? "bg-foreground/3" : ""
       }`}
     >
-      {!notification.read && (
+      {unread && (
         <span
           className="size-2 shrink-0 rounded-full bg-blue-500"
           aria-hidden
@@ -2884,137 +3229,6 @@ export const USERNAME_FORMAT_ERROR =
   "3–20 characters: lowercase letters, numbers, underscores, or periods.";
 </file>
 
-<file path="context/NotificationsProvider.tsx">
-"use client";
-
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
-import type { Notification } from "@/types/notification";
-import { mockNotifications } from "@/data/mockNotifications";
-
-type NotificationsContextValue = {
-  notifications: Notification[];
-  unreadCount: number;
-  markAllAsRead: () => void;
-};
-
-const NotificationsContext = createContext<NotificationsContextValue | null>(
-  null,
-);
-
-export function NotificationsProvider({ children }: { children: ReactNode }) {
-  const [notifications, setNotifications] =
-    useState<Notification[]>(mockNotifications);
-
-  const markAllAsRead = useCallback(() => {
-    setNotifications((prev) => {
-      // Bail out to the exact same reference if nothing changed — makes
-      // this safe to call repeatedly (e.g. from an effect) without
-      // triggering needless re-renders in every consumer of this context.
-      if (prev.every((n) => n.read)) return prev;
-      return prev.map((n) => ({ ...n, read: true }));
-    });
-  }, []);
-
-  const unreadCount = useMemo(
-    () => notifications.filter((n) => !n.read).length,
-    [notifications],
-  );
-
-  const value = useMemo(
-    () => ({ notifications, unreadCount, markAllAsRead }),
-    [notifications, unreadCount, markAllAsRead],
-  );
-
-  return (
-    <NotificationsContext.Provider value={value}>
-      {children}
-    </NotificationsContext.Provider>
-  );
-}
-
-export function useNotifications() {
-  const ctx = useContext(NotificationsContext);
-  if (!ctx) {
-    throw new Error(
-      "useNotifications must be used within a NotificationsProvider",
-    );
-  }
-  return ctx;
-}
-</file>
-
-<file path="data/mockNotifications.ts">
-import type { Notification } from "@/types/notification";
-
-// Mock data, built from usernames/posts that already exist elsewhere in
-// the app (MOCK_USERS, mockPosts) so links actually resolve to something.
-export const mockNotifications: Notification[] = [
-  {
-    id: "n1",
-    type: "like",
-    actor: { username: "skinbytemi", avatarSrc: "/mock/avatar-2.webp" },
-    postId: "1",
-    createdAt: "2026-07-19T09:10:00Z",
-    read: false,
-  },
-  {
-    id: "n2",
-    type: "comment",
-    actor: { username: "tobiwears", avatarSrc: "/mock/avatar-5.webp" },
-    postId: "1",
-    commentText: "the blend on your cheek is unreal, what brush?",
-    createdAt: "2026-07-19T08:45:00Z",
-    read: false,
-  },
-  {
-    id: "n3",
-    type: "follow",
-    actor: { username: "beautywithzee", avatarSrc: "/mock/avatar-6.webp" },
-    createdAt: "2026-07-18T21:30:00Z",
-    read: false,
-  },
-  {
-    id: "n4",
-    type: "reply",
-    actor: { username: "glowbyash", avatarSrc: "/mock/avatar-1.webp" },
-    postId: "1",
-    commentText: "a cheap synthetic one honestly, technique matters more",
-    createdAt: "2026-07-18T20:52:00Z",
-    read: true,
-  },
-  {
-    id: "n5",
-    type: "like",
-    actor: { username: "northofnorml", avatarSrc: "/mock/avatar-3.webp" },
-    postId: "2",
-    createdAt: "2026-07-17T15:00:00Z",
-    read: true,
-  },
-  {
-    id: "n6",
-    type: "follow",
-    actor: { username: "kemi.contours", avatarSrc: "/mock/avatar-8.webp" },
-    createdAt: "2026-07-16T12:00:00Z",
-    read: true,
-  },
-  {
-    id: "n7",
-    type: "like",
-    actor: { username: "lashlounge_ng", avatarSrc: "/mock/avatar-7.webp" },
-    postId: "1",
-    createdAt: "2026-07-15T22:15:00Z",
-    read: true,
-  },
-];
-</file>
-
 <file path="hooks/useCompleteOnboarding.ts">
 "use client";
 
@@ -3763,10 +3977,17 @@ export async function addComment(
   postId: string,
   text: string,
   parentId?: string,
+  // Who was actually being replied to (replyingTo.authorId in
+  // CommentSheet) — distinct from parentId, which stays flattened to
+  // the top-level comment for threading. Purely notification metadata:
+  // the API route validates it and silently falls back to the
+  // top-level comment's author if it's missing or invalid, rather than
+  // rejecting the comment over it.
+  replyToUserId?: string,
 ): Promise<AddCommentResult> {
   return apiFetch(API_ROUTES.COMMENTS.CREATE(postId), {
     method: "POST",
-    body: JSON.stringify({ text, parentId }),
+    body: JSON.stringify({ text, parentId, replyToUserId }),
   });
 }
 
@@ -3885,7 +4106,9 @@ type BaseNotification = {
 };
 
 // Discriminated on `type` — follow has no post to link to; like/comment/
-// reply all do, and comment/reply also carry a text snippet to preview.
+// reply/comment_like all do, and comment/reply also carry a text
+// snippet to preview (comment_like doesn't preview the liked comment's
+// text, same as like doesn't preview the post).
 export type Notification =
   | (BaseNotification & { type: "like"; postId: string })
   | (BaseNotification & {
@@ -3894,7 +4117,8 @@ export type Notification =
       commentText: string;
     })
   | (BaseNotification & { type: "follow" })
-  | (BaseNotification & { type: "reply"; postId: string; commentText: string });
+  | (BaseNotification & { type: "reply"; postId: string; commentText: string })
+  | (BaseNotification & { type: "comment_like"; postId: string });
 </file>
 
 <file path="utils/apiClient.ts">
@@ -4549,6 +4773,7 @@ import {
   serializeComment,
   MAX_COMMENT_LENGTH,
 } from "@/lib/comments";
+import { createNotification } from "@/lib/notifications";
 
 type Params = { params: Promise<{ postId: string }> };
 
@@ -4609,7 +4834,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
     const post = await prisma.post.findUnique({
       where: { id: postId },
-      select: { id: true },
+      select: { id: true, authorId: true },
     });
     if (!post) {
       return NextResponse.json(
@@ -4619,7 +4844,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     }
 
     const body = await req.json();
-    const { text, parentId } = body;
+    const { text, parentId, replyToUserId } = body;
 
     if (typeof text !== "string" || !text.trim()) {
       return NextResponse.json(
@@ -4635,6 +4860,11 @@ export async function POST(req: NextRequest, { params }: Params) {
       );
     }
 
+    // Only set when this is a reply — used below to pick who gets the
+    // REPLY notification (parent.authorId, fetched alongside the
+    // existing postId/parentId validation).
+    let parentAuthorId: string | null = null;
+
     if (parentId !== undefined) {
       if (typeof parentId !== "string" || !parentId) {
         return NextResponse.json(
@@ -4647,13 +4877,32 @@ export async function POST(req: NextRequest, { params }: Params) {
       // assume; a reply-to-a-reply would have nowhere to render.
       const parent = await prisma.comment.findUnique({
         where: { id: parentId },
-        select: { postId: true, parentId: true },
+        select: { postId: true, parentId: true, authorId: true },
       });
       if (!parent || parent.postId !== postId || parent.parentId !== null) {
         return NextResponse.json(
           { success: false, error: "Invalid reply target." },
           { status: 400 },
         );
+      }
+      parentAuthorId = parent.authorId;
+    }
+
+    // replyToUserId is only ever notification metadata (who the person
+    // hit "reply" on, per replyingTo.authorId in CommentSheet — not
+    // necessarily the top-level comment's author, since parentId stays
+    // flattened to the top-level comment while a reply can be aimed at
+    // someone else in the thread). A bad/stale id here should never fail
+    // the comment itself — just fall back to notifying the top-level
+    // comment's author instead, same as if replyToUserId was omitted.
+    let validReplyToUserId: string | null = null;
+    if (typeof replyToUserId === "string" && replyToUserId) {
+      const replyTarget = await prisma.user.findUnique({
+        where: { id: replyToUserId },
+        select: { id: true },
+      });
+      if (replyTarget) {
+        validReplyToUserId = replyTarget.id;
       }
     }
 
@@ -4666,6 +4915,29 @@ export async function POST(req: NextRequest, { params }: Params) {
       },
       include: commentInclude(userId),
     });
+
+    if (parentId) {
+      const recipientId = validReplyToUserId ?? parentAuthorId;
+      if (recipientId) {
+        await createNotification({
+          recipientId,
+          actorId: userId,
+          type: "REPLY",
+          postId,
+          commentId: comment.id,
+          commentText: trimmed,
+        });
+      }
+    } else {
+      await createNotification({
+        recipientId: post.authorId,
+        actorId: userId,
+        type: "COMMENT",
+        postId,
+        commentId: comment.id,
+        commentText: trimmed,
+      });
+    }
 
     return NextResponse.json({
       success: true,
@@ -6316,8 +6588,15 @@ export function useComments(
   // Same optimistic-update / snapshot / rollback-or-refetch pattern as
   // useSavedPosts.ts and useLikedPosts.ts throughout.
   const addCommentMutation = useMutation({
-    mutationFn: ({ text, parentId }: { text: string; parentId?: string }) =>
-      addCommentRequest(postId, text, parentId),
+    mutationFn: ({
+      text,
+      parentId,
+      replyToUserId,
+    }: {
+      text: string;
+      parentId?: string;
+      replyToUserId?: string;
+    }) => addCommentRequest(postId, text, parentId, replyToUserId),
     onMutate: async ({ text, parentId }) => {
       const previous = await snapshotAndCancel();
       if (currentUser) {
@@ -6419,8 +6698,8 @@ export function useComments(
     },
   });
 
-  function addComment(text: string, parentId?: string) {
-    addCommentMutation.mutate({ text, parentId });
+  function addComment(text: string, parentId?: string, replyToUserId?: string) {
+    addCommentMutation.mutate({ text, parentId, replyToUserId });
   }
 
   function deleteComment(commentId: string, topLevelId?: string) {
@@ -7143,6 +7422,10 @@ model Comment {
   replies  Comment[] @relation("CommentReplies")
 
   likes CommentLike[]
+  // "so-and-so replied to your comment" / "so-and-so liked your comment"
+  // notifications that point at this specific comment — see
+  // Notification.commentId in the NOTIFICATIONS section below.
+  notifications Notification[]
 
   createdAt DateTime @default(now())
 
@@ -7218,6 +7501,7 @@ enum NotificationType {
   COMMENT
   FOLLOW
   REPLY
+  COMMENT_LIKE
 }
 
 model Notification {
@@ -7230,6 +7514,16 @@ model Notification {
 
   postId String?
   post   Post?   @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  // Used by both COMMENT_LIKE and REPLY — points at the specific
+  // comment/reply the notification is about, not just the post it lives
+  // on. Nullable since LIKE/FOLLOW (and top-level COMMENT, which already
+  // has its own commentText snapshot below) have no single comment to
+  // point at. Cascades with the comment itself, same reasoning as
+  // postId above: if the underlying comment is hard-deleted, there's
+  // nothing left for the notification to link to.
+  commentId String?
+  comment   Comment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
 
   commentText String? @db.Text
 
@@ -7737,48 +8031,64 @@ export default function CreatePostPage() {
 "use client";
 
 import { useEffect, useState } from "react";
-import { useNotifications } from "@/context/NotificationsProvider";
+import { useNotifications } from "@/hooks/useNotifications";
 import { NotificationRow } from "@/components/notifications/NotificationRow";
 import { NotificationsListSkeleton } from "@/components/notifications/NotificationsListSkeleton";
 import { EmptyNotifications } from "@/components/notifications/EmptyNotifications";
 import { RequireAuth } from "@/components/auth/RequireAuth";
 
-// Simulated so the skeleton is actually visible — swap for a real pending
-// flag once notifications come from a real fetch.
-const SIMULATED_LOAD_MS = 800;
-
 export default function NotificationsPage() {
-  const { notifications, unreadCount, markAllAsRead } = useNotifications();
-  const [loading, setLoading] = useState(true);
+  const { notifications, markAllAsRead, isLoading } = useNotifications();
+
+  // Option B, deliberately: the moment the real list first finishes
+  // loading, freeze which ids were unread right then into
+  // unreadIdsAtOpen, then optimistically mark everything read.
+  // useNotifications' cache (and so the BottomNav badge) flips to
+  // read/zero immediately — but this list keeps rendering its unread
+  // dot/highlight off THIS frozen snapshot for the rest of the visit,
+  // not off notification.read, so a notification that was unread when
+  // you opened the page still looks unread while you're looking at it.
+  // It's just plain component state, so it's naturally discarded when
+  // this page unmounts — coming back later starts a fresh snapshot off
+  // whatever's unread at that point.
+  const [unreadIdsAtOpen, setUnreadIdsAtOpen] = useState<Set<string> | null>(
+    null,
+  );
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setLoading(false), SIMULATED_LOAD_MS);
-    return () => window.clearTimeout(timer);
-  }, []);
+    if (isLoading || unreadIdsAtOpen !== null) return;
+    const unreadIds = notifications.filter((n) => !n.read).map((n) => n.id);
+    setUnreadIdsAtOpen(new Set(unreadIds));
+    if (unreadIds.length > 0) {
+      markAllAsRead();
+    }
+    // Deliberately only keyed on isLoading: this should capture exactly
+    // once, the moment the real data first arrives, and never again for
+    // the rest of this mount — a later background refetch/poll updating
+    // `notifications` shouldn't reset the snapshot (the unreadIdsAtOpen
+    // !== null guard above is what actually prevents that; isLoading is
+    // just what triggers the first check).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading]);
 
   return (
     <RequireAuth>
       <div className="flex flex-col">
         <div className="flex items-center justify-between border-b border-foreground/10 px-4 py-3">
           <p className="text-sm font-medium">Notifications</p>
-          {unreadCount > 0 && (
-            <button
-              type="button"
-              onClick={markAllAsRead}
-              className="text-xs font-medium text-foreground/60"
-            >
-              Mark all read
-            </button>
-          )}
         </div>
 
-        {loading ? (
+        {isLoading ? (
           <NotificationsListSkeleton />
         ) : notifications.length === 0 ? (
           <EmptyNotifications />
         ) : (
           notifications.map((n) => (
-            <NotificationRow key={n.id} notification={n} />
+            <NotificationRow
+              key={n.id}
+              notification={n}
+              unread={unreadIdsAtOpen?.has(n.id) ?? false}
+            />
           ))
         )}
       </div>
@@ -11483,6 +11793,11 @@ export const POSTS_QUERY_KEY = ["posts"] as const;
 export const LIKES_QUERY_KEY = ["likes"] as const;
 export const SAVED_QUERY_KEY = ["saved"] as const;
 
+// Shared by the notification page and BottomNav's badge (see
+// hooks/useNotifications.ts) — same cache, so they can't ever disagree
+// about read state.
+export const NOTIFICATIONS_QUERY_KEY = ["notifications"] as const;
+
 // Its own key, deliberately not sharing POSTS_QUERY_KEY — Explore is a
 // different query (getExploreFeedPosts, ranked, excludes self + who you
 // follow) with a different cache lifetime than Home's feed, even though
@@ -12429,6 +12744,283 @@ export default async function ExplorePage() {
 }
 </file>
 
+<file path="components/feed/CommentSheet.tsx">
+"use client";
+
+import { useMemo, useRef, useState } from "react";
+import { XIcon, PaperPlaneRightIcon } from "@phosphor-icons/react";
+import type { Comment } from "@/types/comment";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { sortByAuthorEngagement } from "@/utils/sortComments";
+import { CommentItem } from "./CommentItem";
+import { CommentSheetSkeleton } from "./CommentSheetSkeleton";
+import { useAuthGatedAction } from "@/hooks/useAuthGatedAction";
+import { AuthGateModal } from "@/components/auth/AuthGateModal";
+
+type Props = {
+  open: boolean;
+  onClose: () => void;
+  comments: Comment[];
+  // Real "comments are being fetched" state from useComments now, not a
+  // simulated timeout — see PostCard, which wires this to its query's
+  // isLoading.
+  loading: boolean;
+  onAddComment: (
+    text: string,
+    parentId?: string,
+    replyToUserId?: string,
+  ) => void;
+  onDeleteComment: (commentId: string, topLevelId?: string) => void;
+  onToggleCommentLike: (commentId: string) => void;
+  postAuthorId: string;
+};
+
+// Plain controlled open/onClose — no history logic in here. That lives
+// in PostCard now, since PostCard is what actually owns `commentsOpen`
+// and knows the post's id, and it needs to handle a case this component
+// can't: reopening the sheet after a REAL navigation away and back (e.g.
+// tapping a commenter's avatar to view their profile, then hitting back).
+export function CommentSheet({
+  open,
+  onClose,
+  comments,
+  loading,
+  onAddComment,
+  onDeleteComment,
+  onToggleCommentLike,
+  postAuthorId,
+}: Props) {
+  const { user } = useCurrentUser();
+  const [draft, setDraft] = useState("");
+  // authorId drives the "is this a self-reply" check (stays correct even
+  // if either person renames later); username is kept only for what's
+  // actually displayed — the reply-target bar and the @mention prefix.
+  const [replyingTo, setReplyingTo] = useState<{
+    topLevelId: string;
+    authorId: string;
+    username: string;
+  } | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const { gateOpen, gateMessage, closeGate, guard } = useAuthGatedAction();
+
+  // Author's own comments lead, then threads they've replied to, then
+  // untouched comments — see sortByAuthorEngagement for the tier logic.
+  const sortedComments = useMemo(
+    () => sortByAuthorEngagement(comments, postAuthorId),
+    [comments, postAuthorId],
+  );
+
+  if (!open) return null;
+
+  function handleReplyPress(
+    topLevelId: string,
+    authorId: string,
+    username: string,
+  ) {
+    setReplyingTo({ topLevelId, authorId, username });
+    setDraft("");
+    inputRef.current?.focus();
+  }
+
+  function cancelReply() {
+    setReplyingTo(null);
+    setDraft("");
+  }
+
+  function handleSubmit() {
+    const trimmed = draft.trim();
+    if (!trimmed) return;
+    // The @mention is stitched on here, never in the editable field itself —
+    // that's what makes it impossible for the user to backspace out.
+    // Skipped entirely when replying to your own comment — mentioning
+    // yourself is just noise.
+    const isReplyingToSelf = Boolean(user) && replyingTo?.authorId === user?.id;
+    const finalText =
+      replyingTo && !isReplyingToSelf
+        ? `@${replyingTo.username} ${trimmed}`
+        : trimmed;
+    onAddComment(finalText, replyingTo?.topLevelId, replyingTo?.authorId);
+    setDraft("");
+    setReplyingTo(null);
+  }
+
+  return (
+    <div className="fixed inset-0 z-60 flex items-end">
+      <div
+        className="absolute inset-0 bg-black/40"
+        onClick={onClose}
+        aria-hidden
+      />
+
+      <div className="relative mx-auto flex h-[80dvh] w-full max-w-lg flex-col rounded-t-2xl bg-background">
+        <div className="relative flex items-center justify-center border-b border-foreground/10 py-3">
+          <span className="text-sm font-medium">Comments</span>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close comments"
+            className="absolute right-3 top-1/2 -translate-y-1/2"
+          >
+            <XIcon size={20} className="text-foreground" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto py-1">
+          {loading ? (
+            <CommentSheetSkeleton />
+          ) : sortedComments.length === 0 ? (
+            <p className="px-3 py-8 text-center text-sm text-foreground/50">
+              No comments yet. Say something nice.
+            </p>
+          ) : (
+            sortedComments.map((c) => (
+              <CommentItem
+                key={c.id}
+                comment={c}
+                postAuthorId={postAuthorId}
+                onReplyPress={handleReplyPress}
+                onDeleteComment={onDeleteComment}
+                onToggleLike={onToggleCommentLike}
+                guard={guard}
+              />
+            ))
+          )}
+        </div>
+
+        {replyingTo && (
+          <div className="flex items-center justify-between border-t border-foreground/10 px-3 py-1.5 text-xs text-foreground/50">
+            <span>
+              {user && replyingTo.authorId === user.id ? (
+                "Replying to your comment"
+              ) : (
+                <>
+                  Replying to{" "}
+                  <span className="font-medium">@{replyingTo.username}</span>
+                </>
+              )}
+            </span>
+            <button
+              type="button"
+              onClick={cancelReply}
+              aria-label="Cancel reply"
+            >
+              <XIcon size={14} />
+            </button>
+          </div>
+        )}
+
+        <div className="flex items-center gap-2 border-t border-foreground/10 px-3 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
+          <input
+            ref={inputRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && guard(handleSubmit)()}
+            placeholder={
+              replyingTo
+                ? user && replyingTo.authorId === user.id
+                  ? "Add to your comment…"
+                  : `Reply to @${replyingTo.username}…`
+                : "Add a comment…"
+            }
+            className="flex-1 rounded-full border border-foreground/15 bg-transparent px-3 py-2 text-sm outline-none"
+          />
+          <button
+            type="button"
+            onClick={guard(handleSubmit)}
+            disabled={!draft.trim()}
+            aria-label="Post comment"
+            className="flex size-9 items-center justify-center text-foreground disabled:opacity-30"
+          >
+            <PaperPlaneRightIcon size={20} weight="fill" />
+          </button>
+        </div>
+      </div>
+
+      <AuthGateModal
+        open={gateOpen}
+        onClose={closeGate}
+        message={gateMessage}
+      />
+    </div>
+  );
+}
+</file>
+
+<file path="components/feed/HomeFeed.tsx">
+"use client";
+
+import { usePosts } from "@/hooks/usePosts";
+import { useFollowingList } from "@/hooks/useFollowingList";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { PostCard } from "./PostCard";
+import { HomeFeedSkeleton } from "./HomeFeedSkeleton";
+import { EmptyHomeFeed } from "./EmptyHomeFeed";
+
+// Real following list now (see hooks/useFollowingList.ts), not
+// context/FollowProvider's mock Set — this is the query key
+// useUserProfile's toggleFollow already optimistically patches when
+// following someone from a post card, so a fresh follow from inside the
+// feed itself shows up here without a manual refetch.
+export function HomeFeed() {
+  const { posts, isLoading: postsLoading } = usePosts();
+  const { user } = useCurrentUser();
+  const { users: following, isLoading: followingLoading } = useFollowingList(
+    user?.username,
+  );
+
+  // Both requests are independent (different endpoints, no shared
+  // loading state), so the skeleton waits on whichever finishes last
+  // rather than assuming one always resolves before the other.
+  if (postsLoading || followingLoading) {
+    return <HomeFeedSkeleton />;
+  }
+
+  const followingUsernames = new Set(following.map((u) => u.username));
+
+  // Your own posts always show here too, same as before — Home isn't
+  // "everyone I follow, minus me."
+  const followingFeed = posts.filter(
+    (post) =>
+      post.author.id === user?.id ||
+      followingUsernames.has(post.author.username),
+  );
+
+  if (followingFeed.length === 0) {
+    return <EmptyHomeFeed />;
+  }
+
+  return (
+    <div className="flex flex-col">
+      {followingFeed.map((post) => (
+        <PostCard key={post.id} post={post} />
+      ))}
+    </div>
+  );
+}
+</file>
+
+<file path="utils/paths.ts">
+export const PATHS = {
+  HOME: "/",
+  EXPLORE: "/explore",
+  SAVED: "/saved",
+  NOTIFICATIONS: "/notifications",
+  PROFILE: "/profile",
+  PROFILE_EDIT: "/profile/edit",
+  FOLLOWERS: "/profile/followers",
+  FOLLOWING: "/profile/following",
+  CREATE_POST: "/create",
+  POST: (postId: string) => `/p/${postId}`,
+  USER_PROFILE: (username: string) => `/u/${username}`,
+  USER_FOLLOWERS: (username: string) => `/u/${username}/followers`,
+  USER_FOLLOWING: (username: string) => `/u/${username}/following`,
+  SAVED_COLLECTION: (collectionId: string) => `/saved/${collectionId}`,
+  AUTH: "/auth",
+  AUTH_VERIFY: (token: string) => `/auth/verify/${token}`,
+  ONBOARDING: "/onboarding",
+};
+</file>
+
 <file path="components/create/CreatePostForm.tsx">
 "use client";
 
@@ -12985,636 +13577,6 @@ export function CreatePostForm() {
 }
 </file>
 
-<file path="components/feed/CommentSheet.tsx">
-"use client";
-
-import { useMemo, useRef, useState } from "react";
-import { XIcon, PaperPlaneRightIcon } from "@phosphor-icons/react";
-import type { Comment } from "@/types/comment";
-import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { sortByAuthorEngagement } from "@/utils/sortComments";
-import { CommentItem } from "./CommentItem";
-import { CommentSheetSkeleton } from "./CommentSheetSkeleton";
-import { useAuthGatedAction } from "@/hooks/useAuthGatedAction";
-import { AuthGateModal } from "@/components/auth/AuthGateModal";
-
-type Props = {
-  open: boolean;
-  onClose: () => void;
-  comments: Comment[];
-  // Real "comments are being fetched" state from useComments now, not a
-  // simulated timeout — see PostCard, which wires this to its query's
-  // isLoading.
-  loading: boolean;
-  onAddComment: (text: string, parentId?: string) => void;
-  onDeleteComment: (commentId: string, topLevelId?: string) => void;
-  onToggleCommentLike: (commentId: string) => void;
-  postAuthorId: string;
-};
-
-// Plain controlled open/onClose — no history logic in here. That lives
-// in PostCard now, since PostCard is what actually owns `commentsOpen`
-// and knows the post's id, and it needs to handle a case this component
-// can't: reopening the sheet after a REAL navigation away and back (e.g.
-// tapping a commenter's avatar to view their profile, then hitting back).
-export function CommentSheet({
-  open,
-  onClose,
-  comments,
-  loading,
-  onAddComment,
-  onDeleteComment,
-  onToggleCommentLike,
-  postAuthorId,
-}: Props) {
-  const { user } = useCurrentUser();
-  const [draft, setDraft] = useState("");
-  // authorId drives the "is this a self-reply" check (stays correct even
-  // if either person renames later); username is kept only for what's
-  // actually displayed — the reply-target bar and the @mention prefix.
-  const [replyingTo, setReplyingTo] = useState<{
-    topLevelId: string;
-    authorId: string;
-    username: string;
-  } | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const { gateOpen, gateMessage, closeGate, guard } = useAuthGatedAction();
-
-  // Author's own comments lead, then threads they've replied to, then
-  // untouched comments — see sortByAuthorEngagement for the tier logic.
-  const sortedComments = useMemo(
-    () => sortByAuthorEngagement(comments, postAuthorId),
-    [comments, postAuthorId],
-  );
-
-  if (!open) return null;
-
-  function handleReplyPress(
-    topLevelId: string,
-    authorId: string,
-    username: string,
-  ) {
-    setReplyingTo({ topLevelId, authorId, username });
-    setDraft("");
-    inputRef.current?.focus();
-  }
-
-  function cancelReply() {
-    setReplyingTo(null);
-    setDraft("");
-  }
-
-  function handleSubmit() {
-    const trimmed = draft.trim();
-    if (!trimmed) return;
-    // The @mention is stitched on here, never in the editable field itself —
-    // that's what makes it impossible for the user to backspace out.
-    // Skipped entirely when replying to your own comment — mentioning
-    // yourself is just noise.
-    const isReplyingToSelf = Boolean(user) && replyingTo?.authorId === user?.id;
-    const finalText =
-      replyingTo && !isReplyingToSelf
-        ? `@${replyingTo.username} ${trimmed}`
-        : trimmed;
-    onAddComment(finalText, replyingTo?.topLevelId);
-    setDraft("");
-    setReplyingTo(null);
-  }
-
-  return (
-    <div className="fixed inset-0 z-60 flex items-end">
-      <div
-        className="absolute inset-0 bg-black/40"
-        onClick={onClose}
-        aria-hidden
-      />
-
-      <div className="relative mx-auto flex h-[80dvh] w-full max-w-lg flex-col rounded-t-2xl bg-background">
-        <div className="relative flex items-center justify-center border-b border-foreground/10 py-3">
-          <span className="text-sm font-medium">Comments</span>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close comments"
-            className="absolute right-3 top-1/2 -translate-y-1/2"
-          >
-            <XIcon size={20} className="text-foreground" />
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto py-1">
-          {loading ? (
-            <CommentSheetSkeleton />
-          ) : sortedComments.length === 0 ? (
-            <p className="px-3 py-8 text-center text-sm text-foreground/50">
-              No comments yet. Say something nice.
-            </p>
-          ) : (
-            sortedComments.map((c) => (
-              <CommentItem
-                key={c.id}
-                comment={c}
-                postAuthorId={postAuthorId}
-                onReplyPress={handleReplyPress}
-                onDeleteComment={onDeleteComment}
-                onToggleLike={onToggleCommentLike}
-                guard={guard}
-              />
-            ))
-          )}
-        </div>
-
-        {replyingTo && (
-          <div className="flex items-center justify-between border-t border-foreground/10 px-3 py-1.5 text-xs text-foreground/50">
-            <span>
-              {user && replyingTo.authorId === user.id ? (
-                "Replying to your comment"
-              ) : (
-                <>
-                  Replying to{" "}
-                  <span className="font-medium">@{replyingTo.username}</span>
-                </>
-              )}
-            </span>
-            <button
-              type="button"
-              onClick={cancelReply}
-              aria-label="Cancel reply"
-            >
-              <XIcon size={14} />
-            </button>
-          </div>
-        )}
-
-        <div className="flex items-center gap-2 border-t border-foreground/10 px-3 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
-          <input
-            ref={inputRef}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && guard(handleSubmit)()}
-            placeholder={
-              replyingTo
-                ? user && replyingTo.authorId === user.id
-                  ? "Add to your comment…"
-                  : `Reply to @${replyingTo.username}…`
-                : "Add a comment…"
-            }
-            className="flex-1 rounded-full border border-foreground/15 bg-transparent px-3 py-2 text-sm outline-none"
-          />
-          <button
-            type="button"
-            onClick={guard(handleSubmit)}
-            disabled={!draft.trim()}
-            aria-label="Post comment"
-            className="flex size-9 items-center justify-center text-foreground disabled:opacity-30"
-          >
-            <PaperPlaneRightIcon size={20} weight="fill" />
-          </button>
-        </div>
-      </div>
-
-      <AuthGateModal
-        open={gateOpen}
-        onClose={closeGate}
-        message={gateMessage}
-      />
-    </div>
-  );
-}
-</file>
-
-<file path="components/feed/HomeFeed.tsx">
-"use client";
-
-import { usePosts } from "@/hooks/usePosts";
-import { useFollowingList } from "@/hooks/useFollowingList";
-import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { PostCard } from "./PostCard";
-import { HomeFeedSkeleton } from "./HomeFeedSkeleton";
-import { EmptyHomeFeed } from "./EmptyHomeFeed";
-
-// Real following list now (see hooks/useFollowingList.ts), not
-// context/FollowProvider's mock Set — this is the query key
-// useUserProfile's toggleFollow already optimistically patches when
-// following someone from a post card, so a fresh follow from inside the
-// feed itself shows up here without a manual refetch.
-export function HomeFeed() {
-  const { posts, isLoading: postsLoading } = usePosts();
-  const { user } = useCurrentUser();
-  const { users: following, isLoading: followingLoading } = useFollowingList(
-    user?.username,
-  );
-
-  // Both requests are independent (different endpoints, no shared
-  // loading state), so the skeleton waits on whichever finishes last
-  // rather than assuming one always resolves before the other.
-  if (postsLoading || followingLoading) {
-    return <HomeFeedSkeleton />;
-  }
-
-  const followingUsernames = new Set(following.map((u) => u.username));
-
-  // Your own posts always show here too, same as before — Home isn't
-  // "everyone I follow, minus me."
-  const followingFeed = posts.filter(
-    (post) =>
-      post.author.id === user?.id ||
-      followingUsernames.has(post.author.username),
-  );
-
-  if (followingFeed.length === 0) {
-    return <EmptyHomeFeed />;
-  }
-
-  return (
-    <div className="flex flex-col">
-      {followingFeed.map((post) => (
-        <PostCard key={post.id} post={post} />
-      ))}
-    </div>
-  );
-}
-</file>
-
-<file path="utils/paths.ts">
-export const PATHS = {
-  HOME: "/",
-  EXPLORE: "/explore",
-  SAVED: "/saved",
-  NOTIFICATIONS: "/notifications",
-  PROFILE: "/profile",
-  PROFILE_EDIT: "/profile/edit",
-  FOLLOWERS: "/profile/followers",
-  FOLLOWING: "/profile/following",
-  CREATE_POST: "/create",
-  POST: (postId: string) => `/p/${postId}`,
-  USER_PROFILE: (username: string) => `/u/${username}`,
-  USER_FOLLOWERS: (username: string) => `/u/${username}/followers`,
-  USER_FOLLOWING: (username: string) => `/u/${username}/following`,
-  SAVED_COLLECTION: (collectionId: string) => `/saved/${collectionId}`,
-  AUTH: "/auth",
-  AUTH_VERIFY: (token: string) => `/auth/verify/${token}`,
-  ONBOARDING: "/onboarding",
-};
-</file>
-
-<file path="components/profile/EditProfileForm.tsx">
-"use client";
-
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
-import { useRouter } from "next/navigation";
-import Image from "next/image";
-import { XIcon } from "@phosphor-icons/react";
-import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { useUpdateProfile } from "@/hooks/useUpdateProfile";
-import { useLogout } from "@/hooks/useLogout";
-import { useUploadMedia } from "@/hooks/useUploadMedia";
-import { useUsernameAvailability } from "@/hooks/useUsernameAvailability";
-import { ProductTagEditor } from "@/components/shared/ProductTagEditor";
-import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
-import { validateUsername } from "@/utils/username";
-import { PATHS } from "@/utils/paths";
-import type { ProductTag } from "@/types/post";
-
-export function EditProfileForm() {
-  const router = useRouter();
-  const { user } = useCurrentUser();
-  const { mutateAsync: saveProfile, isPending: saving } = useUpdateProfile();
-  const { mutateAsync: uploadAvatar, isPending: avatarUploading } =
-    useUploadMedia();
-  const { mutateAsync: logOut, isPending: loggingOut } = useLogout();
-
-  // Single source of truth every field reads, same convention as
-  // CreatePostForm — nothing should be tamperable while a save is in
-  // flight, whether that's the avatar upload leg, the profile PATCH, or
-  // now logging out.
-  const isBusy = saving || avatarUploading || loggingOut;
-
-  const [username, setUsername] = useState(user?.username ?? "");
-  const [usernameError, setUsernameError] = useState<string | null>(null);
-  // Doubles as both the preview URL AND the "is this real yet" signal,
-  // same convention as onboarding's PhotoStep: a blob: URL means a local
-  // pick that hasn't been uploaded yet; anything else is already a real
-  // hosted URL, safe to submit as-is.
-  const [avatarSrc, setAvatarSrc] = useState(user?.avatarSrc ?? "");
-  // The raw File from the most recent pick, held onto until Save — we
-  // upload once, right before submitting, instead of on every pick.
-  const [avatarFile, setAvatarFile] = useState<File | null>(null);
-  const [avatarError, setAvatarError] = useState<string | null>(null);
-  const [bio, setBio] = useState(user?.bio ?? "");
-  const [toneTag, setToneTag] = useState(user?.toneTag ?? "");
-  const [pinnedRoutine, setPinnedRoutine] = useState<ProductTag[]>(
-    user?.pinnedRoutine ?? [],
-  );
-  const [confirmingDiscard, setConfirmingDiscard] = useState(false);
-  const [confirmingLogout, setConfirmingLogout] = useState(false);
-  const [logoutError, setLogoutError] = useState<string | null>(null);
-  const [submitError, setSubmitError] = useState<string | null>(null);
-
-  const avatarInputRef = useRef<HTMLInputElement>(null);
-
-  // RequireAuth (wrapping the page this form lives on) already blocks
-  // rendering until useCurrentUser resolves, so `user` is expected
-  // non-null by the time this mounts. This effect just backfills local
-  // state in case the query result arrives a tick after first render,
-  // the same defensive pattern OnboardingFlow uses for avatarSrc.
-  useEffect(() => {
-    if (!user) return;
-    setUsername(user.username);
-    setAvatarSrc(user.avatarSrc);
-    setBio(user.bio);
-    setToneTag(user.toneTag);
-    setPinnedRoutine(user.pinnedRoutine);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
-
-  const { status: usernameCheckStatus } = useUsernameAvailability(
-    username,
-    user?.username,
-  );
-
-  function handleAvatarSelected(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setAvatarError(null);
-    // Swapping to a new pick — drop the previous local preview URL so
-    // repeated swaps don't leak blob: URLs, then swap in the new one.
-    if (avatarSrc.startsWith("blob:")) URL.revokeObjectURL(avatarSrc);
-    setAvatarSrc(URL.createObjectURL(file));
-    setAvatarFile(file);
-  }
-
-  async function handleSave() {
-    if (!user) return;
-
-    const error = validateUsername(username);
-    if (error) {
-      setUsernameError(error);
-      return;
-    }
-    if (usernameCheckStatus === "taken") {
-      setUsernameError("That username is already taken.");
-      return;
-    }
-    if (usernameCheckStatus === "checking") {
-      return;
-    }
-
-    setSubmitError(null);
-
-    // Only the LAST photo picked ever actually gets uploaded, and only
-    // once, right here. An avatar left untouched (still the real,
-    // already-hosted URL) is submitted as-is.
-    let realAvatarSrc = avatarSrc.startsWith("blob:") ? undefined : avatarSrc;
-
-    if (avatarFile) {
-      const result = await uploadAvatar({
-        file: avatarFile,
-        context: "avatar",
-      });
-
-      if (result.success) {
-        realAvatarSrc = result.url;
-      } else {
-        setAvatarError(result.error);
-        return;
-      }
-    }
-
-    const result = await saveProfile({
-      username: username.trim().toLowerCase(),
-      avatarSrc: realAvatarSrc,
-      bio,
-      toneTag,
-      pinnedRoutine,
-    });
-
-    if (!result?.success) {
-      if (result?.error?.toLowerCase().includes("taken")) {
-        setUsernameError(result.error);
-      } else {
-        setSubmitError(
-          result?.error || "Something went wrong. Please try again.",
-        );
-      }
-      return;
-    }
-
-    // useUpdateProfile's invalidateQueries covers every already-mounted
-    // client component (PostCard's author snapshot, the header, etc.),
-    // but app/profile/page.tsx also computes a `username` server-side
-    // and hands it down as a prop to PostGridSection — that value is
-    // baked into this route's RSC payload and, per next.config.ts,
-    // reused for up to staleTimes.dynamic (30s), or indefinitely across
-    // a client-side back-navigation like the one below. Without a
-    // refresh, PostGridClient keeps building USER_POSTS_QUERY_KEY off
-    // the OLD username after a rename, which no longer matches any
-    // user server-side. refresh() forces that server prop to
-    // recompute before router.back() lands on it.
-    if (username.trim().toLowerCase() !== user.username) {
-      router.refresh();
-    }
-    router.back();
-  }
-
-  // Only warn if something actually changed from what's already saved —
-  // canceling without touching anything shouldn't need confirmation.
-  function hasUnsavedChanges() {
-    if (!user) return false;
-    return (
-      username !== user.username ||
-      avatarSrc !== user.avatarSrc ||
-      bio !== user.bio ||
-      toneTag !== user.toneTag ||
-      JSON.stringify(pinnedRoutine) !== JSON.stringify(user.pinnedRoutine)
-    );
-  }
-
-  function handleCancelPress() {
-    if (isBusy) return;
-    if (hasUnsavedChanges()) {
-      setConfirmingDiscard(true);
-    } else {
-      router.back();
-    }
-  }
-
-  async function handleLogoutConfirm() {
-    setLogoutError(null);
-    const result = await logOut();
-    if (!result?.success) {
-      setLogoutError(
-        result?.error || "Something went wrong. Please try again.",
-      );
-      setConfirmingLogout(false);
-      return;
-    }
-    window.location.href = PATHS.AUTH;
-  }
-
-  const saveDisabled =
-    isBusy || usernameCheckStatus === "checking" || !hasUnsavedChanges();
-
-  return (
-    <div className="fixed left-1/2 top-0 bottom-0 z-80 w-full max-w-lg -translate-x-1/2 flex flex-col bg-background">
-      <header className="flex items-center justify-between border-b border-foreground/10 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))]">
-        <button
-          type="button"
-          onClick={handleCancelPress}
-          disabled={isBusy}
-          aria-label="Cancel"
-          className="disabled:opacity-30"
-        >
-          <XIcon size={22} className="text-foreground" />
-        </button>
-        <span className="text-sm font-medium">Edit profile</span>
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saveDisabled}
-          className="text-sm font-medium text-foreground disabled:opacity-50"
-        >
-          {isBusy ? "Saving…" : "Save"}
-        </button>
-      </header>
-
-      <div className="flex-1 overflow-y-auto px-4 py-5 pb-[calc(1rem+env(safe-area-inset-bottom))]">
-        <div className="mb-6 flex flex-col items-center gap-2">
-          <button
-            type="button"
-            onClick={() => avatarInputRef.current?.click()}
-            disabled={isBusy}
-            aria-label="Change profile photo"
-            className="relative size-24 overflow-hidden rounded-full disabled:opacity-50"
-          >
-            <Image
-              src={avatarSrc}
-              alt=""
-              fill
-              unoptimized
-              className="object-cover"
-            />
-          </button>
-          <button
-            type="button"
-            onClick={() => avatarInputRef.current?.click()}
-            disabled={isBusy}
-            className="text-sm font-medium text-foreground disabled:opacity-50"
-          >
-            Change photo
-          </button>
-          <input
-            ref={avatarInputRef}
-            type="file"
-            accept="image/*"
-            onChange={handleAvatarSelected}
-            disabled={isBusy}
-            className="hidden"
-          />
-          {avatarError && <p className="text-xs text-red-500">{avatarError}</p>}
-        </div>
-
-        <div className="mb-5">
-          <label className="mb-1.5 block text-xs text-foreground/50">
-            Username
-          </label>
-          <div className="flex items-center rounded-lg border border-foreground/15 px-3 py-2">
-            <span className="text-sm text-foreground/40">@</span>
-            <input
-              value={username}
-              onChange={(e) => {
-                setUsername(e.target.value);
-                setUsernameError(null);
-              }}
-              autoCapitalize="none"
-              autoCorrect="off"
-              disabled={isBusy}
-              className="flex-1 bg-transparent pl-1 text-sm outline-none disabled:opacity-50"
-            />
-          </div>
-          {usernameError && (
-            <p className="mt-1.5 text-xs text-red-500">{usernameError}</p>
-          )}
-        </div>
-
-        <div className="mb-5">
-          <label className="mb-1.5 block text-xs text-foreground/50">
-            Tone tag
-          </label>
-          <input
-            value={toneTag}
-            onChange={(e) => setToneTag(e.target.value)}
-            placeholder="e.g. Combination skin"
-            disabled={isBusy}
-            className="w-full rounded-lg border border-foreground/15 bg-transparent px-3 py-2 text-sm outline-none disabled:opacity-50"
-          />
-        </div>
-
-        <div className="mb-6">
-          <label className="mb-1.5 block text-xs text-foreground/50">Bio</label>
-          <textarea
-            value={bio}
-            onChange={(e) => setBio(e.target.value)}
-            rows={3}
-            placeholder="Tell people about yourself…"
-            disabled={isBusy}
-            className="w-full resize-none rounded-lg border border-foreground/15 bg-transparent p-3 text-sm outline-none disabled:opacity-50"
-          />
-        </div>
-
-        <ProductTagEditor
-          label="Pinned routine"
-          placeholder="e.g. Cleanser: CeraVe Foaming"
-          products={pinnedRoutine}
-          onChange={setPinnedRoutine}
-          disabled={isBusy}
-        />
-
-        <div className="mt-8 border-t border-foreground/10 pt-5">
-          <button
-            type="button"
-            onClick={() => setConfirmingLogout(true)}
-            disabled={isBusy}
-            className="w-full text-center text-sm font-medium text-red-500 disabled:opacity-50"
-          >
-            {loggingOut ? "Logging out…" : "Log out"}
-          </button>
-          {logoutError && (
-            <p className="mt-2 text-center text-xs text-red-500">
-              {logoutError}
-            </p>
-          )}
-        </div>
-
-        {submitError && (
-          <p className="mt-4 text-center text-xs text-red-500">{submitError}</p>
-        )}
-      </div>
-
-      <ConfirmDialog
-        open={confirmingDiscard}
-        title="Discard changes?"
-        description="Your edits won't be saved."
-        confirmLabel="Discard"
-        destructive
-        onConfirm={() => router.back()}
-        onCancel={() => setConfirmingDiscard(false)}
-      />
-
-      <ConfirmDialog
-        open={confirmingLogout}
-        title="Log out?"
-        description="You'll need to sign in again to continue."
-        confirmLabel={loggingOut ? "Logging out…" : "Log out"}
-        destructive
-        onConfirm={handleLogoutConfirm}
-        onCancel={() => setConfirmingLogout(false)}
-      />
-    </div>
-  );
-}
-</file>
-
 <file path="components/profile/UserListRow.tsx">
 "use client";
 
@@ -13910,6 +13872,385 @@ export default async function UserProfilePage({ params }: Props) {
 }
 </file>
 
+<file path="components/profile/EditProfileForm.tsx">
+"use client";
+
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useRouter } from "next/navigation";
+import Image from "next/image";
+import { XIcon } from "@phosphor-icons/react";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { useUpdateProfile } from "@/hooks/useUpdateProfile";
+import { useLogout } from "@/hooks/useLogout";
+import { useUploadMedia } from "@/hooks/useUploadMedia";
+import { useUsernameAvailability } from "@/hooks/useUsernameAvailability";
+import { ProductTagEditor } from "@/components/shared/ProductTagEditor";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { validateUsername } from "@/utils/username";
+import { PATHS } from "@/utils/paths";
+import type { ProductTag } from "@/types/post";
+
+export function EditProfileForm() {
+  const router = useRouter();
+  const { user } = useCurrentUser();
+  const { mutateAsync: saveProfile } = useUpdateProfile();
+  const { mutateAsync: uploadAvatar } = useUploadMedia();
+  const { mutateAsync: logOut } = useLogout();
+
+  // Own flags instead of deriving isBusy from the mutations' isPending —
+  // same convention as CreatePostForm's isPosting, and for the same
+  // reason. saving/avatarUploading/loggingOut go false the instant their
+  // mutateAsync settles, but a save here is really two legs back to back
+  // (upload, then the profile PATCH) plus a router.back()/refresh() or a
+  // window.location redirect after that — every one of those handoffs is
+  // a beat where isPending would already read false and the form would
+  // flash back to interactive mid-flow. isSaving and isLoggingOut are
+  // each set true once, at the top of their handler, and only ever reset
+  // to false in the failure branch: on success they deliberately stay
+  // true through the navigation, since there's nothing to reset them FOR
+  // — the component is about to unmount or the page is about to redirect.
+  const [isSaving, setIsSaving] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const isBusy = isSaving || isLoggingOut;
+
+  const [username, setUsername] = useState(user?.username ?? "");
+  const [usernameError, setUsernameError] = useState<string | null>(null);
+  // Doubles as both the preview URL AND the "is this real yet" signal,
+  // same convention as onboarding's PhotoStep: a blob: URL means a local
+  // pick that hasn't been uploaded yet; anything else is already a real
+  // hosted URL, safe to submit as-is.
+  const [avatarSrc, setAvatarSrc] = useState(user?.avatarSrc ?? "");
+  // The raw File from the most recent pick, held onto until Save — we
+  // upload once, right before submitting, instead of on every pick.
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
+  const [bio, setBio] = useState(user?.bio ?? "");
+  const [toneTag, setToneTag] = useState(user?.toneTag ?? "");
+  const [pinnedRoutine, setPinnedRoutine] = useState<ProductTag[]>(
+    user?.pinnedRoutine ?? [],
+  );
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false);
+  const [confirmingLogout, setConfirmingLogout] = useState(false);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+
+  // RequireAuth (wrapping the page this form lives on) already blocks
+  // rendering until useCurrentUser resolves, so `user` is expected
+  // non-null by the time this mounts. This effect just backfills local
+  // state in case the query result arrives a tick after first render,
+  // the same defensive pattern OnboardingFlow uses for avatarSrc.
+  useEffect(() => {
+    if (!user) return;
+    setUsername(user.username);
+    setAvatarSrc(user.avatarSrc);
+    setBio(user.bio);
+    setToneTag(user.toneTag);
+    setPinnedRoutine(user.pinnedRoutine);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
+  const { status: usernameCheckStatus } = useUsernameAvailability(
+    username,
+    user?.username,
+  );
+
+  function handleAvatarSelected(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAvatarError(null);
+    // Swapping to a new pick — drop the previous local preview URL so
+    // repeated swaps don't leak blob: URLs, then swap in the new one.
+    if (avatarSrc.startsWith("blob:")) URL.revokeObjectURL(avatarSrc);
+    setAvatarSrc(URL.createObjectURL(file));
+    setAvatarFile(file);
+  }
+
+  async function handleSave() {
+    if (!user || isBusy) return;
+
+    const error = validateUsername(username);
+    if (error) {
+      setUsernameError(error);
+      return;
+    }
+    if (usernameCheckStatus === "taken") {
+      setUsernameError("That username is already taken.");
+      return;
+    }
+    if (usernameCheckStatus === "checking") {
+      return;
+    }
+
+    setSubmitError(null);
+    setIsSaving(true);
+
+    // Only the LAST photo picked ever actually gets uploaded, and only
+    // once, right here. An avatar left untouched (still the real,
+    // already-hosted URL) is submitted as-is.
+    let realAvatarSrc = avatarSrc.startsWith("blob:") ? undefined : avatarSrc;
+
+    if (avatarFile) {
+      const result = await uploadAvatar({
+        file: avatarFile,
+        context: "avatar",
+      });
+
+      if (result.success) {
+        realAvatarSrc = result.url;
+      } else {
+        setAvatarError(result.error);
+        setIsSaving(false);
+        return;
+      }
+    }
+
+    const result = await saveProfile({
+      username: username.trim().toLowerCase(),
+      avatarSrc: realAvatarSrc,
+      bio,
+      toneTag,
+      pinnedRoutine,
+    });
+
+    if (!result?.success) {
+      if (result?.error?.toLowerCase().includes("taken")) {
+        setUsernameError(result.error);
+      } else {
+        setSubmitError(
+          result?.error || "Something went wrong. Please try again.",
+        );
+      }
+      setIsSaving(false);
+      return;
+    }
+
+    // useUpdateProfile's invalidateQueries covers every already-mounted
+    // client component (PostCard's author snapshot, the header, etc.),
+    // but app/profile/page.tsx also computes a `username` server-side
+    // and hands it down as a prop to PostGridSection — that value is
+    // baked into this route's RSC payload and, per next.config.ts,
+    // reused for up to staleTimes.dynamic (30s), or indefinitely across
+    // a client-side back-navigation like the one below. Without a
+    // refresh, PostGridClient keeps building USER_POSTS_QUERY_KEY off
+    // the OLD username after a rename, which no longer matches any
+    // user server-side. refresh() forces that server prop to
+    // recompute before router.back() lands on it.
+    if (username.trim().toLowerCase() !== user.username) {
+      router.refresh();
+    }
+    router.back();
+    // No setIsSaving(false) here on purpose — see the comment on isSaving
+    // above. Resetting it here is exactly what would let the form flash
+    // back to interactive before router.back() actually lands.
+  }
+
+  // Only warn if something actually changed from what's already saved —
+  // canceling without touching anything shouldn't need confirmation.
+  function hasUnsavedChanges() {
+    if (!user) return false;
+    return (
+      username !== user.username ||
+      avatarSrc !== user.avatarSrc ||
+      bio !== user.bio ||
+      toneTag !== user.toneTag ||
+      JSON.stringify(pinnedRoutine) !== JSON.stringify(user.pinnedRoutine)
+    );
+  }
+
+  function handleCancelPress() {
+    if (isBusy) return;
+    if (hasUnsavedChanges()) {
+      setConfirmingDiscard(true);
+    } else {
+      router.back();
+    }
+  }
+
+  async function handleLogoutConfirm() {
+    if (isBusy) return;
+    setLogoutError(null);
+    setIsLoggingOut(true);
+    const result = await logOut();
+    if (!result?.success) {
+      setLogoutError(
+        result?.error || "Something went wrong. Please try again.",
+      );
+      setConfirmingLogout(false);
+      setIsLoggingOut(false);
+      return;
+    }
+    window.location.href = PATHS.AUTH;
+    // No setIsLoggingOut(false) here on purpose — same reasoning as
+    // isSaving above. This is a full-page redirect, but the component can
+    // still be mounted for a beat before it lands, and there's nothing to
+    // reset the flag FOR once we're on our way out.
+  }
+
+  const saveDisabled =
+    isBusy || usernameCheckStatus === "checking" || !hasUnsavedChanges();
+
+  return (
+    <div className="fixed left-1/2 top-0 bottom-0 z-80 w-full max-w-lg -translate-x-1/2 flex flex-col bg-background">
+      <header className="flex items-center justify-between border-b border-foreground/10 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))]">
+        <button
+          type="button"
+          onClick={handleCancelPress}
+          disabled={isBusy}
+          aria-label="Cancel"
+          className="disabled:opacity-30"
+        >
+          <XIcon size={22} className="text-foreground" />
+        </button>
+        <span className="text-sm font-medium">Edit profile</span>
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saveDisabled}
+          className="text-sm font-medium text-foreground disabled:opacity-50"
+        >
+          {isBusy ? "Saving…" : "Save"}
+        </button>
+      </header>
+
+      <div className="flex-1 overflow-y-auto px-4 py-5 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+        <div className="mb-6 flex flex-col items-center gap-2">
+          <button
+            type="button"
+            onClick={() => avatarInputRef.current?.click()}
+            disabled={isBusy}
+            aria-label="Change profile photo"
+            className="relative size-24 overflow-hidden rounded-full disabled:opacity-50"
+          >
+            <Image
+              src={avatarSrc}
+              alt=""
+              fill
+              unoptimized
+              className="object-cover"
+            />
+          </button>
+          <button
+            type="button"
+            onClick={() => avatarInputRef.current?.click()}
+            disabled={isBusy}
+            className="text-sm font-medium text-foreground disabled:opacity-50"
+          >
+            Change photo
+          </button>
+          <input
+            ref={avatarInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleAvatarSelected}
+            disabled={isBusy}
+            className="hidden"
+          />
+          {avatarError && <p className="text-xs text-red-500">{avatarError}</p>}
+        </div>
+
+        <div className="mb-5">
+          <label className="mb-1.5 block text-xs text-foreground/50">
+            Username
+          </label>
+          <div className="flex items-center rounded-lg border border-foreground/15 px-3 py-2">
+            <span className="text-sm text-foreground/40">@</span>
+            <input
+              value={username}
+              onChange={(e) => {
+                setUsername(e.target.value);
+                setUsernameError(null);
+              }}
+              autoCapitalize="none"
+              autoCorrect="off"
+              disabled={isBusy}
+              className="flex-1 bg-transparent pl-1 text-sm outline-none disabled:opacity-50"
+            />
+          </div>
+          {usernameError && (
+            <p className="mt-1.5 text-xs text-red-500">{usernameError}</p>
+          )}
+        </div>
+
+        <div className="mb-5">
+          <label className="mb-1.5 block text-xs text-foreground/50">
+            Tone tag
+          </label>
+          <input
+            value={toneTag}
+            onChange={(e) => setToneTag(e.target.value)}
+            placeholder="e.g. Combination skin"
+            disabled={isBusy}
+            className="w-full rounded-lg border border-foreground/15 bg-transparent px-3 py-2 text-sm outline-none disabled:opacity-50"
+          />
+        </div>
+
+        <div className="mb-6">
+          <label className="mb-1.5 block text-xs text-foreground/50">Bio</label>
+          <textarea
+            value={bio}
+            onChange={(e) => setBio(e.target.value)}
+            rows={3}
+            placeholder="Tell people about yourself…"
+            disabled={isBusy}
+            className="w-full resize-none rounded-lg border border-foreground/15 bg-transparent p-3 text-sm outline-none disabled:opacity-50"
+          />
+        </div>
+
+        <ProductTagEditor
+          label="Pinned routine"
+          placeholder="e.g. Cleanser: CeraVe Foaming"
+          products={pinnedRoutine}
+          onChange={setPinnedRoutine}
+          disabled={isBusy}
+        />
+
+        <div className="mt-8 border-t border-foreground/10 pt-5">
+          <button
+            type="button"
+            onClick={() => setConfirmingLogout(true)}
+            disabled={isBusy}
+            className="w-full text-center text-sm font-medium text-red-500 disabled:opacity-50"
+          >
+            {isLoggingOut ? "Logging out…" : "Log out"}
+          </button>
+          {logoutError && (
+            <p className="mt-2 text-center text-xs text-red-500">
+              {logoutError}
+            </p>
+          )}
+        </div>
+
+        {submitError && (
+          <p className="mt-4 text-center text-xs text-red-500">{submitError}</p>
+        )}
+      </div>
+
+      <ConfirmDialog
+        open={confirmingDiscard}
+        title="Discard changes?"
+        description="Your edits won't be saved."
+        confirmLabel="Discard"
+        destructive
+        onConfirm={() => router.back()}
+        onCancel={() => setConfirmingDiscard(false)}
+      />
+
+      <ConfirmDialog
+        open={confirmingLogout}
+        title="Log out?"
+        description="You'll need to sign in again to continue."
+        confirmLabel={isLoggingOut ? "Logging out…" : "Log out"}
+        destructive
+        onConfirm={handleLogoutConfirm}
+        onCancel={() => setConfirmingLogout(false)}
+      />
+    </div>
+  );
+}
+</file>
+
 <file path="lib/serverQueries.ts">
 import { cache } from "react";
 import {
@@ -14166,6 +14507,7 @@ export async function proxy(req: NextRequest) {
     "/api/posts",
     "/api/saved",
     "/api/explore",
+    "/api/notifications",
   ].some((route) => pathname.startsWith(route));
 
   const isPublicGet =
@@ -14371,6 +14713,14 @@ export const API_ROUTES = {
       `/api/posts/${postId}/comments/${commentId}`,
     TOGGLE_LIKE: (postId: string, commentId: string) =>
       `/api/posts/${postId}/comments/${commentId}/like`,
+  },
+
+  NOTIFICATIONS: {
+    // GET returns the current user's notification bundle (max 50);
+    // PATCH marks all of them read. There's deliberately no
+    // per-notification read endpoint — see app/notifications/page.tsx.
+    LIST: "/api/notifications",
+    READ_ALL: "/api/notifications/read-all",
   },
 
   SAVED: {
@@ -14643,9 +14993,13 @@ export function PostCard({ post }: { post: Post }) {
   // the hook itself. commentCount is bumped/dropped here to match, and
   // resyncs to the real Post.commentCount once that mutation settles
   // (see the useEffect above).
-  function handleAddComment(text: string, parentId?: string) {
+  function handleAddComment(
+    text: string,
+    parentId?: string,
+    replyToUserId?: string,
+  ) {
     if (!user) return;
-    addComment(text, parentId);
+    addComment(text, parentId, replyToUserId);
     setCommentCount((c) => c + 1);
   }
 
@@ -14865,7 +15219,7 @@ import {
   UserIcon,
 } from "@phosphor-icons/react";
 import { PATHS } from "@/utils/paths";
-import { useNotifications } from "@/context/NotificationsProvider";
+import { useNotifications } from "@/hooks/useNotifications";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 
 const tabs = [
@@ -14995,7 +15349,6 @@ import "./globals.css";
 import { BottomNav } from "@/components/shared/BottomNav";
 import { TopNav } from "@/components/shared/TopNav";
 import { FollowProvider } from "@/context/FollowProvider";
-import { NotificationsProvider } from "@/context/NotificationsProvider";
 import { Providers } from "./providers";
 import { getServerUserId } from "@/lib/session";
 import { fetchCurrentUserForSSR } from "@/lib/serverQueries";
@@ -15073,13 +15426,11 @@ export default async function RootLayout({
         <Providers>
           <HydrationBoundary state={dehydrate(queryClient)}>
             <FollowProvider>
-              <NotificationsProvider>
-                <TopNav />
-                <main className="mx-auto w-full max-w-lg flex-1 pt-[calc(3.5rem+env(safe-area-inset-top))] pb-[calc(3.5rem+env(safe-area-inset-bottom))]">
-                  {children}
-                </main>
-                <BottomNav initialUser={navUser} />
-              </NotificationsProvider>
+              <TopNav />
+              <main className="mx-auto w-full max-w-lg flex-1 pt-[calc(3.5rem+env(safe-area-inset-top))] pb-[calc(3.5rem+env(safe-area-inset-bottom))]">
+                {children}
+              </main>
+              <BottomNav initialUser={navUser} />
             </FollowProvider>
           </HydrationBoundary>
         </Providers>

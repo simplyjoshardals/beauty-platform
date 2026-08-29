@@ -18,7 +18,11 @@ type Props = {
   // simulated timeout — see PostCard, which wires this to its query's
   // isLoading.
   loading: boolean;
-  onAddComment: (text: string, parentId?: string) => void;
+  onAddComment: (
+    text: string,
+    parentId?: string,
+    replyToUserId?: string,
+  ) => void;
   onDeleteComment: (commentId: string, topLevelId?: string) => void;
   onToggleCommentLike: (commentId: string) => void;
   postAuthorId: string;
@@ -88,7 +92,7 @@ export function CommentSheet({
       replyingTo && !isReplyingToSelf
         ? `@${replyingTo.username} ${trimmed}`
         : trimmed;
-    onAddComment(finalText, replyingTo?.topLevelId);
+    onAddComment(finalText, replyingTo?.topLevelId, replyingTo?.authorId);
     setDraft("");
     setReplyingTo(null);
   }

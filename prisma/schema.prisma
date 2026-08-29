@@ -189,6 +189,10 @@ model Comment {
   replies  Comment[] @relation("CommentReplies")
 
   likes CommentLike[]
+  // "so-and-so replied to your comment" / "so-and-so liked your comment"
+  // notifications that point at this specific comment — see
+  // Notification.commentId in the NOTIFICATIONS section below.
+  notifications Notification[]
 
   createdAt DateTime @default(now())
 
@@ -264,6 +268,7 @@ enum NotificationType {
   COMMENT
   FOLLOW
   REPLY
+  COMMENT_LIKE
 }
 
 model Notification {
@@ -276,6 +281,16 @@ model Notification {
 
   postId String?
   post   Post?   @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  // Used by both COMMENT_LIKE and REPLY — points at the specific
+  // comment/reply the notification is about, not just the post it lives
+  // on. Nullable since LIKE/FOLLOW (and top-level COMMENT, which already
+  // has its own commentText snapshot below) have no single comment to
+  // point at. Cascades with the comment itself, same reasoning as
+  // postId above: if the underlying comment is hard-deleted, there's
+  // nothing left for the notification to link to.
+  commentId String?
+  comment   Comment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
 
   commentText String? @db.Text
 

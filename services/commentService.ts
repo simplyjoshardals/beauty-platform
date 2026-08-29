@@ -20,10 +20,17 @@ export async function addComment(
   postId: string,
   text: string,
   parentId?: string,
+  // Who was actually being replied to (replyingTo.authorId in
+  // CommentSheet) — distinct from parentId, which stays flattened to
+  // the top-level comment for threading. Purely notification metadata:
+  // the API route validates it and silently falls back to the
+  // top-level comment's author if it's missing or invalid, rather than
+  // rejecting the comment over it.
+  replyToUserId?: string,
 ): Promise<AddCommentResult> {
   return apiFetch(API_ROUTES.COMMENTS.CREATE(postId), {
     method: "POST",
-    body: JSON.stringify({ text, parentId }),
+    body: JSON.stringify({ text, parentId, replyToUserId }),
   });
 }
 

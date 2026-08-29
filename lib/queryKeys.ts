@@ -6,6 +6,11 @@ export const POSTS_QUERY_KEY = ["posts"] as const;
 export const LIKES_QUERY_KEY = ["likes"] as const;
 export const SAVED_QUERY_KEY = ["saved"] as const;
 
+// Shared by the notification page and BottomNav's badge (see
+// hooks/useNotifications.ts) — same cache, so they can't ever disagree
+// about read state.
+export const NOTIFICATIONS_QUERY_KEY = ["notifications"] as const;
+
 // Its own key, deliberately not sharing POSTS_QUERY_KEY — Explore is a
 // different query (getExploreFeedPosts, ranked, excludes self + who you
 // follow) with a different cache lifetime than Home's feed, even though

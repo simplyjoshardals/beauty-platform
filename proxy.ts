@@ -111,6 +111,7 @@ export async function proxy(req: NextRequest) {
     "/api/posts",
     "/api/saved",
     "/api/explore",
+    "/api/notifications",
   ].some((route) => pathname.startsWith(route));
 
   const isPublicGet =

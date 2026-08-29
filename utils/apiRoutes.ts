@@ -86,6 +86,14 @@ export const API_ROUTES = {
       `/api/posts/${postId}/comments/${commentId}/like`,
   },
 
+  NOTIFICATIONS: {
+    // GET returns the current user's notification bundle (max 50);
+    // PATCH marks all of them read. There's deliberately no
+    // per-notification read endpoint — see app/notifications/page.tsx.
+    LIST: "/api/notifications",
+    READ_ALL: "/api/notifications/read-all",
+  },
+
   SAVED: {
     // GET returns the whole bundle (saved post ids + every collection
     // with its post ids); POST toggles a post's overall saved state.

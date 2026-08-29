@@ -11,7 +11,7 @@ import {
   UserIcon,
 } from "@phosphor-icons/react";
 import { PATHS } from "@/utils/paths";
-import { useNotifications } from "@/context/NotificationsProvider";
+import { useNotifications } from "@/hooks/useNotifications";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 
 const tabs = [
@@ -54,8 +54,14 @@ export function BottomNav({
   initialUser: { avatarSrc: string } | null;
 }) {
   const pathname = usePathname();
-  const { unreadCount } = useNotifications();
   const { user, isAuthenticated, isLoading } = useCurrentUser();
+  // Only fetch/poll notifications once we actually know someone's
+  // logged in — while the initial useCurrentUser() check is still in
+  // flight, `initialUser` (from server-rendered cookies) tells us
+  // whether it's worth asking at all.
+  const { unreadCount } = useNotifications(
+    isAuthenticated || (isLoading && Boolean(initialUser)),
+  );
 
   // Server already told us who this is (via cookies, on the initial
   // request) — trust that for first paint while the client-side
