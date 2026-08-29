@@ -6,7 +6,7 @@ import Link from "next/link";
 import { PlusIcon, SunIcon, MoonIcon } from "@phosphor-icons/react";
 import { PATHS } from "@/utils/paths";
 
-export  function TopNav() {
+export function TopNav() {
   const [isDark, setIsDark] = useState(false);
   const [hidden, setHidden] = useState(false);
 
@@ -58,11 +58,12 @@ export  function TopNav() {
     setIsDark(dark);
     document.documentElement.classList.remove("dark", "light");
     document.documentElement.classList.add(dark ? "dark" : "light");
-
-    const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) {
-      meta.setAttribute("content", dark ? "#000000" : "#ffffff");
-    }
+    // meta[name="theme-color"] (iOS status bar/browser chrome) is
+    // deliberately NOT touched here anymore — it stays fixed at the
+    // static "#ffffff" set in app/layout.tsx's viewport export
+    // regardless of light/dark mode. Switching it to black in dark
+    // mode made it look like the OS itself changed appearance rather
+    // than just the app content re-theming.
   }
 
   function toggleTheme() {

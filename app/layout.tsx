@@ -29,12 +29,22 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
-  // Static fallback for first paint — the actual light/dark value is set
-  // dynamically below and in TopNav's applyTheme, since prefers-color-scheme
-  // media queries can't react to the manually-toggled .dark/.light class.
+  // Deliberately fixed, not theme-dependent: iOS reads this (and the
+  // meta tag it renders as) to color the status bar/browser chrome, and
+  // toggling it to black in dark mode looked like the OS switching
+  // color schemes out from under you rather than just the app's own
+  // content re-theming. Stays white in both light and dark mode now —
+  // see TopNav's applyTheme, which no longer touches this tag either.
   themeColor: "#ffffff",
 };
 
+// Runs synchronously in <head>, before first paint — a plain <script>
+// (not <template>, which is inert and never executes its content) is
+// what makes that possible. This is what actually prevents a flash of
+// the wrong theme for someone who's explicitly overridden it in-app
+// (localStorage) against their OS preference; @media (prefers-color-
+// scheme) in globals.css already covers the "never touched the toggle"
+// case via pure CSS, with no JS involved at all.
 const themeInitScript = `
 (function () {
   try {
@@ -42,11 +52,6 @@ const themeInitScript = `
     var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
     var dark = stored ? stored === "dark" : prefersDark;
     document.documentElement.classList.add(dark ? "dark" : "light");
-
-    var meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) {
-      meta.setAttribute("content", dark ? "#000000" : "#ffffff");
-    }
   } catch (e) {}
 })();
 `;
@@ -79,7 +84,7 @@ export default async function RootLayout({
       className={`${inter.variable} h-full antialiased`}
     >
       <head>
-        <template dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body className="min-h-full flex flex-col">
         <Providers>
