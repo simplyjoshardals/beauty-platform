@@ -8,7 +8,7 @@ import { PATHS } from "@/utils/paths";
 import { followLabel } from "@/utils/followLabel";
 import { useAuthGatedAction } from "@/hooks/useAuthGatedAction";
 import { AuthGateModal } from "@/components/auth/AuthGateModal";
-import type { MockUser } from "@/data/mockUsers";
+import type { User } from "@/types/user";
 
 // Same real backend PostCard's follow button now uses (see
 // hooks/useUserProfile.ts) — isFollowing/followsMe come off the Follow
@@ -25,7 +25,7 @@ import type { MockUser } from "@/data/mockUsers";
 // yet, so their rows briefly default to "Follow"/false until their own
 // useUserProfile call resolves.
 type Props = {
-  user: MockUser;
+  user: User;
   // Known up front from whatever list produced this row (e.g. Explore's
   // search, which now computes isFollowing/followsMe server-side — see
   // lib/users.ts's searchUsers) so the row can render the correct label

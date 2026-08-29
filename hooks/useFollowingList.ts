@@ -2,14 +2,14 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { getFollowing } from "@/services/userService";
-import type { MockUser } from "@/data/mockUsers";
+import type { User } from "@/types/user";
 import { followingQueryKey } from "@/lib/queryKeys";
 
 // Same shape UserListWithSearch/UserListRow already render (MockUser),
 // plus the real id the backend returns — kept for parity with other
 // real-data hooks (useUserProfile's PublicUserProfile, useCurrentUser's
 // CurrentUser) even though the list UI itself doesn't use it yet.
-export type FollowingUser = MockUser & {
+export type FollowingUser = User & {
   id: string;
   // The viewer's relationship to THIS row, computed batched server-side
   // (see lib/users.ts's getFollowingList / attachViewerRelationship) —
