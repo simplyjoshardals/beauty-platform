@@ -1,12 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { HeartIcon } from "@phosphor-icons/react";
 import type { Comment } from "@/types/comment";
 import { getRelativeTime } from "@/utils/time";
-import { sortAuthorFirst } from "@/utils/sortComments";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { PATHS } from "@/utils/paths";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
@@ -69,11 +68,13 @@ export function CommentItem({
     Boolean(user) &&
     (comment.author.id === user?.id || postAuthorId === user?.id);
 
-  const sortedReplies = useMemo(
-    () =>
-      comment.replies ? sortAuthorFirst(comment.replies, postAuthorId) : [],
-    [comment.replies, postAuthorId],
-  );
+  // Rendered in plain chronological order — the order comment.replies
+  // already arrives in (see app/api/posts/[postId]/comments/route.ts's
+  // orderBy: createdAt asc, and useComments' optimistic add appending
+  // to the end) — rather than reordered, so a reply always sits right
+  // after whatever it was actually responding to. See sortComments.ts
+  // for why an author-first reorder here would break that.
+  const sortedReplies = comment.replies ?? [];
 
   function toggleLike() {
     onToggleLike(comment.id);

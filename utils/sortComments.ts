@@ -28,14 +28,14 @@ export function sortByAuthorEngagement(
   );
 }
 
-// For a single reply thread (one level deep — replies don't have their own
-// sub-replies, so there's no "already engaged" tier here) — just the
-// author's own reply first, if present.
-export function sortAuthorFirst(
-  comments: Comment[],
-  authorId: string,
-): Comment[] {
-  const authorItems = comments.filter((c) => c.author.id === authorId);
-  const otherItems = comments.filter((c) => c.author.id !== authorId);
-  return [...authorItems, ...otherItems];
-}
+// Replies within a single thread (one level deep — replies don't have
+// their own sub-replies) are deliberately NOT reordered here — they're
+// rendered in the plain chronological order comment.replies already
+// arrives in (see app/api/posts/[postId]/comments/route.ts's
+// orderBy: createdAt asc, and useComments' optimistic add appending to
+// the end). This used to bunch the author's replies to the front of
+// the thread, but a reply is a response to whatever came right before
+// it — moving it away from that context (which happened the moment the
+// author replied more than once in the same thread) made a
+// back-and-forth harder to follow, not easier. CommentItem's "Author"
+// label marks authorship instead, in place.
