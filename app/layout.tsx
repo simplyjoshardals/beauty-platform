@@ -20,10 +20,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: {
-    default: "Vanity",
-    template: "%s | Vanity",
-  },
+  title: "Vanity",
 
   description:
     "A beauty-focused social platform to share looks, tag products, pin your routine, and follow the creators you love.",
