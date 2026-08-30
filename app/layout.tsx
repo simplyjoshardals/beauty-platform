@@ -20,7 +20,45 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Vanity",
+  title: {
+    default: "Vanity",
+    template: "%s | Vanity",
+  },
+
+  description:
+    "A beauty-focused social platform to share looks, tag products, pin your routine, and follow the creators you love.",
+
+  applicationName: "Vanity",
+
+  keywords: [
+    "Vanity",
+    "beauty social platform",
+    "beauty app",
+    "skincare routine",
+    "makeup routine",
+    "before and after",
+    "product tagging",
+    "Next.js",
+    "social media app",
+  ],
+
+  openGraph: {
+    title: "Vanity",
+    description:
+      "A beauty-focused social platform to share looks, tag products, pin your routine, and follow the creators you love.",
+    url: "https://beauty-platform-ivory.vercel.app",
+    siteName: "Vanity",
+    images: [
+      {
+        url: "/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "Vanity",
+      },
+    ],
+    locale: "en_US",
+    type: "website",
+  },
 };
 
 export const viewport: Viewport = {
