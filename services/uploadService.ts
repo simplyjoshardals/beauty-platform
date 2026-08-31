@@ -1,5 +1,6 @@
 import { apiFetch } from "@/utils/apiClient";
 import { API_ROUTES } from "@/utils/apiRoutes";
+import { withAutoOptimization } from "@/utils/cloudinaryOptimize";
 
 export type UploadContext = "avatar" | "post-image" | "post-video";
 
@@ -30,7 +31,7 @@ export type UploadResult =
 //    uploads later, not just small avatar images.
 export async function uploadMedia(
   file: File,
-  context: UploadContext
+  context: UploadContext,
 ): Promise<UploadResult> {
   const sigResult = (await apiFetch(API_ROUTES.UPLOAD.SIGNATURE, {
     method: "POST",
@@ -58,7 +59,7 @@ export async function uploadMedia(
   try {
     const uploadRes = await fetch(
       `https://api.cloudinary.com/v1_1/${sigResult.cloudName}/${sigResult.resourceType}/upload`,
-      { method: "POST", body: formData }
+      { method: "POST", body: formData },
     );
     const uploadData = await uploadRes.json();
 
@@ -69,7 +70,10 @@ export async function uploadMedia(
       };
     }
 
-    return { success: true, url: uploadData.secure_url as string };
+    return {
+      success: true,
+      url: withAutoOptimization(uploadData.secure_url as string),
+    };
   } catch {
     return { success: false, error: "Network error during upload." };
   }
